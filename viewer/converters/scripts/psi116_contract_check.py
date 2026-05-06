@@ -3,7 +3,7 @@
 
 This is intentionally a pipeline gate, not a replacement converter.
 It checks both:
-1. XSD shape that matters to the repo's PSI116.xsd.
+1. XSD/benchmark shape that matters to the repo PSI116 XML files.
 2. The exact downstream predicates used by xml_to_cii.py for bends, SIF/tees,
    reducers, and restraints.
 
@@ -22,8 +22,16 @@ from collections import Counter
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-PSI116_NS = "http://aveva.com/pipestress116.xsd"
-SPECIAL_TYPES = {"ELBO", "TEE", "OLET", "REDU", "ATTA"}
+# Benchmarked AVEVA output in B7410250-BM uses pipeStress116.xsd.
+# Some XSD copies in the repo use pipestress116.xsd. Accept both for the gate;
+# upstream generation should prefer the benchmark spelling so file diffs are not
+# polluted by namespace casing.
+PREFERRED_PSI116_NS = "http://aveva.com/pipeStress116.xsd"
+ACCEPTED_PSI116_NS = {
+    "http://aveva.com/pipeStress116.xsd",
+    "http://aveva.com/pipestress116.xsd",
+}
+SPECIAL_TYPES = {"ELBO", "TEE", "OLET", "REDU", "ATTA", "ANCI"}
 NODE_ORDER = [
     "NodeNumber", "NodeName", "Endpoint", "Rigid", "ComponentType", "Weight",
     "ComponentRefNo", "ConnectionType", "OutsideDiameter", "WallThickness",
@@ -37,7 +45,6 @@ TYPE_RULES = (
     (re.compile(r"\bREDU(CER)?\b", re.I), "REDU"),
     (re.compile(r"\b(ATTA|ANCI|SUPP|SUPPORT|REST|GUIDE|LINE\s*STOP|LINESTOP|LIMIT|ANCHOR|FIXED|SHOE|BP|BASE\s*PLATE)\b", re.I), "ATTA"),
 )
-SUPPORT_TEXT_RX = re.compile(r"\b(GUIDE|LINE\s*STOP|LINESTOP|LIMIT\s*STOP|LIMIT|RESTING|REST|SHOE|BP|BASE\s*PLATE|ANCHOR|FIXED|STOPPER|STOP)\b", re.I)
 KEY_VALUE_RX = re.compile(r"^\s*:?(?P<key>[A-Za-z][A-Za-z0-9_\-]*)\s*(?::=|=|:)\s*(?P<value>.*?)\s*$")
 
 
@@ -157,8 +164,8 @@ def check_xml(path: Path) -> dict:
     ns = _namespace(root.tag)
     if _local(root.tag) != "PipeStressExport":
         failures.append(f"root is {_local(root.tag)}, expected PipeStressExport")
-    if ns != PSI116_NS:
-        failures.append(f"namespace is {ns!r}, expected {PSI116_NS!r}")
+    if ns not in ACCEPTED_PSI116_NS:
+        failures.append(f"namespace is {ns!r}, expected one of {sorted(ACCEPTED_PSI116_NS)!r}")
 
     component_counts: Counter[str] = Counter()
     positive_nodes = 0
@@ -207,7 +214,8 @@ def check_xml(path: Path) -> dict:
     reducer_candidates = [edge for edge in edges if edge[1]["alpha"] is not None and abs(edge[1]["alpha"] or 0.0) > 1e-9]
     return {
         "xsdShape": {
-            "namespaceOk": ns == PSI116_NS,
+            "namespaceOk": ns in ACCEPTED_PSI116_NS,
+            "preferredNamespaceOk": ns == PREFERRED_PSI116_NS,
             "nodeOrderOk": node_order_ok,
             "positionTripletsOk": position_triplets_ok,
             "sifIntegerOk": sif_integer_ok,
@@ -241,8 +249,8 @@ def main() -> int:
 
     failures = list(report.get("failures") or [])
     xsd = report["xsdShape"]
-    for key, ok in xsd.items():
-        if not ok:
+    for key in ("namespaceOk", "nodeOrderOk", "positionTripletsOk", "sifIntegerOk"):
+        if not xsd.get(key):
             failures.append(f"XSD shape check failed: {key}")
 
     detectable = report["ciiDetectable"]
@@ -253,7 +261,7 @@ def main() -> int:
             failures.append("Source contains TEE/OLET but XML has zero xml_to_cii-detectable SIF/tee candidates.")
         if src_counts.get("REDU", 0) > 0 and detectable["reducerCandidates"] == 0:
             failures.append("Source contains REDU but XML has zero xml_to_cii-detectable reducer candidates.")
-        if src_counts.get("ATTA", 0) > 0 and detectable["restraintCandidates"] == 0:
+        if (src_counts.get("ATTA", 0) + src_counts.get("ANCI", 0)) > 0 and detectable["restraintCandidates"] == 0:
             failures.append("Source contains supports but XML has zero restraint candidates.")
         if sum(src_counts.get(t, 0) for t in SPECIAL_TYPES) > 0:
             special_sum = detectable["bendCandidates"] + detectable["sifTeeCandidates"] + detectable["reducerCandidates"] + detectable["restraintCandidates"]
