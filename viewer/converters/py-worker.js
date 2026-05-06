@@ -13,6 +13,7 @@ const SCRIPT_FILE_NAMES = Object.freeze([
   'rev_to_xml.py',
   'json_to_xml.py',
   'stagedjson_to_xml.py',
+  'psi116_upstream_common.py',
   'psi116_contract_check.py',
   'rev_to_stp.py',
   'xml_to_cii.py',
