@@ -13,6 +13,7 @@ const SCRIPT_FILE_NAMES = Object.freeze([
   'rev_to_xml.py',
   'json_to_xml.py',
   'stagedjson_to_xml.py',
+  'psi116_contract_check.py',
   'rev_to_stp.py',
   'xml_to_cii.py',
   'inputxml_to_cii.py',
@@ -23,6 +24,11 @@ const SCRIPT_FILE_NAMES = Object.freeze([
   'rvm_attribute_to_xml.py',
   'rvm_attribute_to_xml_to_cii.py',
 ]);
+
+const XML_CONTRACT_GATED_CONVERTERS = Object.freeze(new Set([
+  'stagedjson_to_xml',
+  'rvmattr_to_xml',
+]));
 
 const RUN_SNIPPET = `
 import runpy
@@ -72,7 +78,7 @@ function _decodeLogBatches(values) {
 
 function _extractFailureDetail(stderrLines) {
   if (!stderrLines.length) return '';
-  const priorityPatterns = [/^usage:/i, /^error:/i, /^RuntimeError:/i, /^ValueError:/i, /^Exception:/i];
+  const priorityPatterns = [/^usage:/i, /^error:/i, /^RuntimeError:/i, /^ValueError:/i, /^Exception:/i, /contract check failed/i];
   for (let i = stderrLines.length - 1; i >= 0; i -= 1) {
     const line = String(stderrLines[i] || '').trim();
     if (!line) continue;
@@ -113,6 +119,43 @@ function _writeInputFile(pyodide, jobDir, fileSpec) {
   return path;
 }
 
+async function _runPythonScript(pyodide, scriptPath, argv, stdout, stderr) {
+  pyodide.globals.set('job_script_path', scriptPath);
+  pyodide.globals.set('job_argv', argv);
+  const exitCode = await pyodide.runPythonAsync(RUN_SNIPPET);
+  if (Number(exitCode) !== 0) {
+    const stdoutLines = _decodeLogBatches(stdout);
+    const stderrLines = _decodeLogBatches(stderr);
+    const detail = _extractFailureDetail(stderrLines);
+    throw new Error(detail ? `Converter exited with code ${exitCode}: ${detail}` : `Converter exited with code ${exitCode}. Logs: ${stdoutLines.slice(-5).join(' | ')}`);
+  }
+}
+
+function _contractSourceKind(converterId) {
+  if (converterId === 'stagedjson_to_xml') return 'stagedjson';
+  if (converterId === 'rvmattr_to_xml') return 'attribute';
+  return 'auto';
+}
+
+async function _runContractGate(pyodide, converterId, sourcePath, outputPath, jobDir, stdout, stderr) {
+  if (!XML_CONTRACT_GATED_CONVERTERS.has(converterId)) return null;
+  const reportPath = `${jobDir}/${_sanitizeFileName(converterId)}_psi116_contract_report.json`;
+  const argv = [
+    '/scripts/psi116_contract_check.py',
+    '--xml', outputPath,
+    '--source-input', sourcePath,
+    '--source-kind', _contractSourceKind(converterId),
+    '--report', reportPath,
+    '--strict',
+  ];
+  await _runPythonScript(pyodide, '/scripts/psi116_contract_check.py', argv, stdout, stderr);
+  try {
+    return pyodide.FS.readFile(reportPath, { encoding: 'utf8' });
+  } catch {
+    return null;
+  }
+}
+
 async function _runJob(message) {
   const converterId = _toString(message?.converterId);
   if (!converterId) throw new Error('Missing converterId.');
@@ -137,19 +180,32 @@ async function _runJob(message) {
   const secondaryPath = secondary ? _writeInputFile(pyodide, jobDir, secondary) : null;
   const invocation = buildInvocation(converterId, primaryPath, primary.name, secondaryPath, options, jobDir);
 
-  pyodide.globals.set('job_script_path', invocation.scriptPath);
-  pyodide.globals.set('job_argv', invocation.argv);
-  const exitCode = await pyodide.runPythonAsync(RUN_SNIPPET);
+  await _runPythonScript(pyodide, invocation.scriptPath, invocation.argv, stdout, stderr);
+  const contractReportText = await _runContractGate(
+    pyodide,
+    converterId,
+    invocation.argv[invocation.argv.indexOf('--input') + 1] || primaryPath,
+    invocation.outputPath,
+    jobDir,
+    stdout,
+    stderr,
+  );
+
   const stdoutLines = _decodeLogBatches(stdout);
   const stderrLines = _decodeLogBatches(stderr);
-  if (Number(exitCode) !== 0) {
-    const detail = _extractFailureDetail(stderrLines);
-    throw new Error(detail ? `Converter exited with code ${exitCode}: ${detail}` : `Converter exited with code ${exitCode}.`);
-  }
-
   const outputText = pyodide.FS.readFile(invocation.outputPath, { encoding: 'utf8' });
+  const outputs = [
+    { name: invocation.outputName, text: outputText, mime: 'text/plain;charset=utf-8' },
+  ];
+  if (contractReportText) {
+    outputs.push({
+      name: invocation.outputName.replace(/\.[^.]+$/, '_psi116_contract_report.json'),
+      text: contractReportText,
+      mime: 'application/json;charset=utf-8',
+    });
+  }
   return {
-    output: { name: invocation.outputName, text: outputText, mime: 'text/plain;charset=utf-8' },
+    output: outputs,
     logs: { stdout: stdoutLines, stderr: stderrLines, argv: invocation.argv.slice(1) },
   };
 }
@@ -165,7 +221,7 @@ self.addEventListener('message', async (event) => {
   }
   try {
     const result = await _runJob(message);
-    self.postMessage(buildConverterWorkerResponse(jobId, true, [result.output], result.logs, null));
+    self.postMessage(buildConverterWorkerResponse(jobId, true, result.output, result.logs, null));
   } catch (error) {
     self.postMessage(buildConverterWorkerResponse(jobId, false, null, null, _toString(error?.message || error)));
   }
