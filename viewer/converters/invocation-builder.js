@@ -39,8 +39,25 @@ function pushOptionalNumberArg(argv, flag, value) {
   argv.push(flag, String(numeric));
 }
 
+function pushSupportArgs(argv, options) {
+  pushOptionalStringArg(argv, '--support-stiffness', options?.supportStiffness);
+  pushOptionalStringArg(argv, '--support-gap', options?.supportGap);
+  pushOptionalStringArg(argv, '--support-friction', options?.supportFriction);
+  pushOptionalStringArg(argv, '--guide-gap', options?.guideGap);
+  pushOptionalStringArg(argv, '--line-stop-gap', options?.lineStopGap);
+  pushOptionalStringArg(argv, '--limit-gap', options?.limitGap);
+  pushOptionalStringArg(argv, '--rest-gap', options?.restGap);
+  pushOptionalStringArg(argv, '--anchor-gap', options?.anchorGap);
+  pushOptionalStringArg(argv, '--support-pipe-axis', options?.supportPipeAxis);
+  pushOptionalStringArg(argv, '--vertical-axis', options?.verticalAxis);
+  pushOptionalStringArg(argv, '--line-stop-direction', options?.lineStopDirection);
+  pushOptionalStringArg(argv, '--limit-direction', options?.limitDirection);
+  pushOptionalStringArg(argv, '--rest-direction', options?.restDirection);
+}
+
 function converterSpec(converterId) {
   if (converterId === 'rvm_to_rev') return { script: 'rvm_to_rev.py', extension: '.rev' };
+  if (converterId === 'rvmattr_to_xml') return { script: 'rvm_attribute_to_xml.py', extension: '.xml' };
   if (converterId === 'rev_to_pcf') return { script: 'rev_to_pcf.py', extension: '.pcf' };
   if (converterId === 'rev_to_xml') return { script: 'rev_to_xml.py', extension: '.xml' };
   if (converterId === 'json_to_xml') return { script: 'json_to_xml.py', extension: '.xml' };
@@ -57,14 +74,27 @@ function converterSpec(converterId) {
 export function buildInvocation(converterId, primaryPath, primaryName, secondaryPath, options, jobDir) {
   const spec = converterSpec(converterId);
   const scriptPath = `/scripts/${spec.script}`;
-  const outputFileName = outputName(primaryName, converterId, spec.extension);
+  const effectivePrimaryPath = converterId === 'rvmattr_to_xml' && secondaryPath ? secondaryPath : primaryPath;
+  const effectivePrimaryName = converterId === 'rvmattr_to_xml' && secondaryPath ? 'ATTRIBUTE' : primaryName;
+  const outputFileName = outputName(effectivePrimaryName, converterId, spec.extension);
   const outputPath = `${jobDir}/${outputFileName}`;
   const argv = (converterId === 'pdf_to_inputxml' || converterId === 'pdf_to_inputxml_cii14')
-    ? [scriptPath, '--input-pdf', primaryPath, '--output', outputPath]
-    : [scriptPath, '--input', primaryPath, '--output', outputPath];
+    ? [scriptPath, '--input-pdf', effectivePrimaryPath, '--output', outputPath]
+    : [scriptPath, '--input', effectivePrimaryPath, '--output', outputPath];
 
   if (converterId === 'rvm_to_rev') {
     if (secondaryPath) argv.push('--attributes', secondaryPath);
+  } else if (converterId === 'rvmattr_to_xml') {
+    pushOptionalNumberArg(argv, '--node-start', options?.nodeStart);
+    pushOptionalNumberArg(argv, '--node-step', options?.nodeStep);
+    pushOptionalStringArg(argv, '--source', options?.source);
+    pushOptionalStringArg(argv, '--purpose', options?.purpose);
+    pushOptionalStringArg(argv, '--title-line', options?.titleLine);
+    pushOptionalNumberArg(argv, '--default-diameter', options?.defaultDiameter);
+    pushOptionalNumberArg(argv, '--default-wall-thickness', options?.defaultWallThickness);
+    pushOptionalNumberArg(argv, '--default-corrosion-allowance', options?.defaultCorrosionAllowance);
+    pushOptionalNumberArg(argv, '--default-insulation-thickness', options?.defaultInsulationThickness);
+    pushSupportArgs(argv, options);
   } else if (converterId === 'rev_to_pcf') {
     argv.push('--coord-factor', String(toFiniteNumber(options?.coordFactor, 1000)));
     pushOptionalStringArg(argv, '--pipeline-reference', options?.pipelineReference);
@@ -105,6 +135,7 @@ export function buildInvocation(converterId, primaryPath, primaryName, secondary
     pushOptionalNumberArg(argv, '--default-wall-thickness', options?.defaultWallThickness);
     pushOptionalNumberArg(argv, '--default-corrosion-allowance', options?.defaultCorrosionAllowance);
     pushOptionalNumberArg(argv, '--default-insulation-thickness', options?.defaultInsulationThickness);
+    pushSupportArgs(argv, options);
   } else if (converterId === 'rev_to_stp') {
     argv.push('--coord-factor', String(toFiniteNumber(options?.coordFactor, 1000)));
     pushOptionalStringArg(argv, '--support-path-contains', options?.supportPathContains);
