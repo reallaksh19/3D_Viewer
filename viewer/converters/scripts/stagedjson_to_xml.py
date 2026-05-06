@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Convert staged hierarchy JSON to PSI116 XML without dropping fittings/supports.
 
-This converter keeps the existing PSI116 XML shape:
-PipeStressExport > Pipe > Branch > Node
+Upstream-only scope:
+- Do not depend on xml_to_cii.py changes.
+- Preserve supports/fittings in XML so the existing downstream converter can consume them.
+- Keep the existing PSI116 XML shape: PipeStressExport > Pipe > Branch > Node.
 
-Support preservation rules:
-- DTXR GUIDE / LINE STOP / LIMIT / REST / ANCHOR is treated as support intent.
-- Support nodes are emitted as ComponentType=ATTA.
-- ConnectionType carries the normalized support type.
-- Restraint blocks are emitted with blank Stiffness, configurable blank Gap,
-  and configurable Friction defaulting to 0.3.
+Support rules:
+- DTXR GUIDE / LINE STOP / LIMIT / REST / BP / ANCHOR is support intent.
+- Support nodes are ComponentType=ATTA with ConnectionType=<normalized support kind>.
+- Stiffness and Gap are blank by default; Friction defaults to 0.3.
 """
 from __future__ import annotations
 
@@ -20,8 +20,17 @@ import re
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-# Do not include DTXR here blindly: DTXR may carry support descriptors such as GUIDE/REST.
 BORE_KEYS = ('HBOR', 'TBOR', 'ABORE', 'LBORE', 'BORE', 'NBORE', 'DBOR')
+SUPPORT_COORD_KEYS = (
+    'SUPPORTCOORD', 'SUPPORT_COORD', 'SCOORD', 'SUPPORT_POS', 'SUPPORTPOS',
+    'COORDS', 'CO_ORDS', 'CO_ORD', 'POS', 'POSITION', 'BPOS', 'BP', 'APOS', 'LPOS'
+)
+SUPPORT_TAG_RX = re.compile(r'\bPS[-_\s]?[A-Z0-9][A-Z0-9._/\-]*\b', re.I)
+SUPPORT_TEXT_RX = re.compile(
+    r'\b(GUIDE|LINE\s*STOP|LINESTOP|LIMIT\s*STOP|LIMIT|RESTING|REST|SHOE|BP|BASE\s*PLATE|ANCHOR|FIXED|STOPPER|STOP)\b',
+    re.I,
+)
+SIGNED_AXIS_RX = re.compile(r'([+-]?)\s*([XYZ])\b', re.I)
 TYPE_RULES = (
     (re.compile(r'WELDOLET|SOCKOLET|THREDOLET|SWEEPOLET|\bOLET\b', re.I), 'OLET'),
     (re.compile(r'\bVALV(E)?\b', re.I), 'VALV'),
@@ -30,12 +39,9 @@ TYPE_RULES = (
     (re.compile(r'\b(ELBO(W)?|BEND)\b', re.I), 'ELBO'),
     (re.compile(r'\bTEE\b', re.I), 'TEE'),
     (re.compile(r'\bREDU(CER)?\b', re.I), 'REDU'),
-    (re.compile(r'\b(ATTA|ANCI|SUPP|SUPPORT|REST|GUIDE|LINE\s*STOP|LINESTOP|LIMIT|ANCHOR|FIXED|SHOE)\b', re.I), 'ATTA'),
+    (re.compile(r'\b(ATTA|ANCI|SUPP|SUPPORT|REST|GUIDE|LINE\s*STOP|LINESTOP|LIMIT|ANCHOR|FIXED|SHOE|BP|BASE\s*PLATE)\b', re.I), 'ATTA'),
     (re.compile(r'\b(PIPE|TUBI)\b', re.I), 'PIPE'),
 )
-SUPPORT_TAG_RX = re.compile(r'\bPS[-_\s]?[A-Z0-9][A-Z0-9._/\-]*\b', re.I)
-SUPPORT_TEXT_RX = re.compile(r'\b(GUIDE|LINE\s*STOP|LINESTOP|LIMIT\s*STOP|LIMIT|RESTING|REST|SHOE|ANCHOR|FIXED|STOPPER|STOP)\b', re.I)
-SIGNED_AXIS_RX = re.compile(r'([+-]?)\s*([XYZ])\b', re.I)
 
 
 def txt(v) -> str:
@@ -71,33 +77,32 @@ def mm(v):
 def attrs(o) -> dict:
     out = {}
     if isinstance(o, dict):
-        for k in ('attributes', 'attrs', 'attr', 'rawAttributes', 'raw_attributes'):
-            if isinstance(o.get(k), dict):
-                out.update(o[k])
+        for key in ('attributes', 'attrs', 'attr', 'rawAttributes', 'raw_attributes', 'normalized'):
+            if isinstance(o.get(key), dict):
+                out.update(o[key])
+        for key, value in o.items():
+            if key not in {'children', 'items', 'branches', 'attributes', 'attrs', 'attr', 'rawAttributes', 'raw_attributes', 'normalized'}:
+                if isinstance(value, (str, int, float, bool, list, tuple, dict)):
+                    out.setdefault(key, value)
     return out
 
 
 def first(a: dict, keys) -> str:
-    for k in keys:
-        if k in a and clean(a[k]):
-            return a[k]
+    for key in keys:
+        if key in a and clean(a[key]):
+            return a[key]
     return ''
 
 
-def object_text(o, a: dict, extra_keys=()) -> str:
+def object_text(o, a: dict) -> str:
     values = []
     if isinstance(o, dict):
         values.extend([o.get('type'), o.get('kind'), o.get('name'), o.get('path'), o.get('id')])
     values.extend(a.get(k) for k in (
-        'TYPE', 'STYP', 'SPRE', 'PTYPE', 'DETAIL', 'NAME', 'TAG', 'TAGNO',
-        'ITEMCODE', 'PARTNO', 'SKEY', 'DTXR', 'DESCRIPTION', 'DESC', 'CONNECTIONTYPE'
+        'TYPE', 'STYP', 'SPRE', 'PTYPE', 'DETAIL', 'NAME', 'TAG', 'TAGNO', 'ITEMCODE',
+        'PARTNO', 'SKEY', 'DTXR', 'SUPPORT_TYPE', 'CMPSUPTYPE', 'DESCRIPTION', 'DESC', 'CONNECTIONTYPE'
     ))
-    values.extend(a.get(k) for k in extra_keys)
     return ' '.join(clean(v) for v in values if clean(v))
-
-
-def is_support_descriptor(value) -> bool:
-    return bool(SUPPORT_TEXT_RX.search(clean(value)))
 
 
 def normalize_support_kind(o, a: dict) -> str:
@@ -108,7 +113,7 @@ def normalize_support_kind(o, a: dict) -> str:
         return 'LIMIT'
     if re.search(r'\bGUIDE\b', s):
         return 'GUIDE'
-    if re.search(r'\bRESTING\b|\bREST\b|\bSHOE\b', s):
+    if re.search(r'\bRESTING\b|\bREST\b|\bSHOE\b|\bBP\b|\bBASE\s*PLATE\b', s):
         return 'REST'
     if re.search(r'\bANCHOR\b|\bFIXED\b', s):
         return 'ANCHOR'
@@ -120,14 +125,15 @@ def extract_support_tag(o, a: dict) -> str:
     if isinstance(o, dict):
         candidates.extend([o.get('name'), o.get('path'), o.get('id')])
     candidates.extend(a.get(k) for k in (
-        'NAME', 'TAG', 'TAGNO', 'ITEMCODE', 'PARTNO', 'REF', 'REFNO',
-        'DBREF', 'COMPONENTREFNO', 'CA97', 'CA98', 'SKEY', 'SPRE', 'DESCRIPTION', 'DESC'
+        'SUPPORT_TAG', 'CMPSUPREFN', 'NAME', 'TAG', 'TAGNO', 'ITEMCODE', 'PARTNO',
+        'REF', 'REFNO', 'DBREF', 'COMPONENTREFNO', 'CA97', 'CA98', 'SKEY', 'SPRE', 'DESCRIPTION', 'DESC'
     ))
     for candidate in candidates:
         m = SUPPORT_TAG_RX.search(clean(candidate))
         if m:
             return re.sub(r'\s+', '-', m.group(0).strip())
-    return ''
+    fallback = first(a, ('CMPSUPREFN', 'SUPPORT_TAG', 'NAME', 'TAG', 'TAGNO'))
+    return clean(fallback)
 
 
 def point(v):
@@ -148,8 +154,11 @@ def point(v):
 
 
 def getp(o, a: dict, keys):
-    for k in keys:
-        p = point(a.get(k) if k in a else o.get(k) if isinstance(o, dict) else None)
+    for key in keys:
+        value = a.get(key)
+        if value is None and isinstance(o, dict):
+            value = o.get(key)
+        p = point(value)
         if p:
             return p
     return None
@@ -163,6 +172,7 @@ def points(o) -> dict:
         'pos': getp(o, a, ('POS', 'POSITION', 'COORDS', 'CO_ORDS', 'CO_ORD', 'POSS')),
         'cpos': getp(o, a, ('CPOS', 'CP', 'CENTER', 'CENTRE', 'CENTER_POINT', 'CENTRE_POINT')),
         'bpos': getp(o, a, ('BPOS', 'BP', 'BRANCH_POINT', 'BPOS1', 'TEE_POINT')),
+        'support': getp(o, a, SUPPORT_COORD_KEYS),
     }
 
 
@@ -171,19 +181,19 @@ def ctype(o) -> str:
     if normalize_support_kind(o, a):
         return 'ATTA'
     source = object_text(o, a)
-    for rx, t in TYPE_RULES:
+    for rx, typ in TYPE_RULES:
         if rx.search(source):
-            return t
+            return typ
     return 'UNKNOWN'
 
 
 def bore(a: dict, default: float) -> float:
-    for k in BORE_KEYS:
-        v = mm(a.get(k))
+    for key in BORE_KEYS:
+        v = mm(a.get(key))
         if v and v > 0:
             return v
     dtxr = a.get('DTXR')
-    if dtxr is not None and not is_support_descriptor(dtxr):
+    if dtxr is not None and not SUPPORT_TEXT_RX.search(clean(dtxr)):
         v = mm(dtxr)
         if v and v > 0:
             return v
@@ -199,8 +209,8 @@ def bend_radius(o, ps: dict) -> float:
     v = mm(first(a, ('BENDRADIUS', 'BEND_RADIUS', 'BRAD', 'RADI', 'RADIUS')))
     if v and v > 0:
         return v
-    c = ps.get('cpos') or ps.get('pos')
-    return min(dist(c, ps.get('apos')), dist(c, ps.get('lpos'))) if c and ps.get('apos') and ps.get('lpos') else 0.0
+    center = ps.get('cpos') or ps.get('pos')
+    return min(dist(center, ps.get('apos')), dist(center, ps.get('lpos'))) if center and ps.get('apos') and ps.get('lpos') else 0.0
 
 
 def reducer_angle(o) -> float:
@@ -209,20 +219,23 @@ def reducer_angle(o) -> float:
     return v if v is not None else 1.0
 
 
-def branch_list(data):
+def iter_children(root):
+    if not isinstance(root, dict):
+        return
+    for key in ('children', 'items', 'branches'):
+        children = root.get(key)
+        if isinstance(children, list):
+            for child in children:
+                yield child
+                yield from iter_children(child)
+
+
+def branch_roots(data):
     roots = data if isinstance(data, list) else [data]
     out = []
-    for e in roots:
-        if not isinstance(e, dict):
-            continue
-        if isinstance(e.get('children'), list):
-            out.append(e)
-        elif isinstance(e.get('items'), list):
-            d = dict(e)
-            d['children'] = e['items']
-            out.append(d)
-        elif isinstance(e.get('branches'), list):
-            out.extend(e['branches'])
+    for entry in roots:
+        if isinstance(entry, dict) and any(isinstance(entry.get(k), list) for k in ('children', 'items', 'branches')):
+            out.append(entry)
     return out
 
 
@@ -254,14 +267,7 @@ def dominant_axis_from_points(a, b) -> str:
         return 'X'
     if dy >= dx and dy >= dz and dy > 1e-9:
         return 'Y'
-    if dz > 1e-9:
-        return 'Z'
-    return ''
-
-
-def all_axes_except(axis: str) -> list[str]:
-    base = axis_unsigned(axis)
-    return [a for a in ('X', 'Y', 'Z') if a != base]
+    return 'Z' if dz > 1e-9 else ''
 
 
 def support_direction_from_attrs(o, a: dict) -> str:
@@ -282,9 +288,7 @@ def pipe_axis_for_support(o, a: dict, ps: dict, opt) -> str:
     if explicit:
         return axis_unsigned(explicit)
     derived = dominant_axis_from_points(ps.get('apos'), ps.get('lpos'))
-    if derived:
-        return derived
-    return axis_unsigned(opt.support_pipe_axis) or 'X'
+    return derived or axis_unsigned(opt.support_pipe_axis) or 'X'
 
 
 def restraint_entry(rtype: str, gap: str, opt) -> dict:
@@ -292,28 +296,21 @@ def restraint_entry(rtype: str, gap: str, opt) -> dict:
 
 
 def support_restraints(kind: str, o, a: dict, ps: dict, opt) -> list[dict]:
-    kind = (kind or '').upper()
     vertical = axis_unsigned(opt.vertical_axis) or 'Y'
     pipe_axis = pipe_axis_for_support(o, a, ps, opt)
-    explicit_dir = support_direction_from_attrs(o, a)
+    explicit = support_direction_from_attrs(o, a)
+    kind = (kind or '').upper()
     if kind == 'GUIDE':
-        gap = clean(opt.guide_gap) if clean(opt.guide_gap) else clean(opt.support_gap)
-        return [restraint_entry(axis, gap, opt) for axis in all_axes_except(pipe_axis)]
+        gap = clean(opt.guide_gap) or clean(opt.support_gap)
+        return [restraint_entry(axis, gap, opt) for axis in ('X', 'Y', 'Z') if axis != pipe_axis]
     if kind == 'LINESTOP':
-        direction = axis_name(opt.line_stop_direction) or axis_name(explicit_dir) or pipe_axis
-        gap = clean(opt.line_stop_gap) if clean(opt.line_stop_gap) else clean(opt.support_gap)
-        return [restraint_entry(direction, gap, opt)]
+        return [restraint_entry(axis_name(opt.line_stop_direction) or axis_name(explicit) or pipe_axis, clean(opt.line_stop_gap) or clean(opt.support_gap), opt)]
     if kind == 'LIMIT':
-        direction = axis_name(opt.limit_direction) or axis_name(explicit_dir) or pipe_axis
-        gap = clean(opt.limit_gap) if clean(opt.limit_gap) else clean(opt.support_gap)
-        return [restraint_entry(direction, gap, opt)]
+        return [restraint_entry(axis_name(opt.limit_direction) or axis_name(explicit) or pipe_axis, clean(opt.limit_gap) or clean(opt.support_gap), opt)]
     if kind == 'REST':
-        direction = axis_name(opt.rest_direction) or vertical
-        gap = clean(opt.rest_gap) if clean(opt.rest_gap) else clean(opt.support_gap)
-        return [restraint_entry(direction, gap, opt)]
+        return [restraint_entry(axis_name(opt.rest_direction) or vertical, clean(opt.rest_gap) or clean(opt.support_gap), opt)]
     if kind == 'ANCHOR':
-        gap = clean(opt.anchor_gap) if clean(opt.anchor_gap) else clean(opt.support_gap)
-        return [restraint_entry('A', gap, opt)]
+        return [restraint_entry('A', clean(opt.anchor_gap) or clean(opt.support_gap), opt)]
     return []
 
 
@@ -327,42 +324,39 @@ class Ctx:
         self.default_wall = max(0.0, finite(opt.default_wall_thickness, 0.01))
         self.default_corr = max(0.0, finite(opt.default_corrosion_allowance, 0))
         self.default_insu = max(0.0, finite(opt.default_insulation_thickness, 0))
+
     def next(self) -> int:
         n = self.node
         self.node += self.step
         return n
+
     def autoref(self) -> str:
         r = f'AUTO-{self.ref}'
         self.ref += 1
         return r
 
 
-def make_node(o, typ, ep, p, ctx: Ctx, number=-1, bend_radius=0, bend_type=None, alpha=None):
+def make_node(o, typ, ep, p, ctx: Ctx, number=-1, bend_radius_value=0, bend_type=None, alpha=None):
     a = attrs(o)
     kind = normalize_support_kind(o, a) if typ == 'ATTA' else ''
-    support_tag = extract_support_tag(o, a) if typ == 'ATTA' else ''
+    tag = extract_support_tag(o, a) if typ == 'ATTA' else ''
     ps = points(o)
-    existing_name = first(a, ('NAME', 'TAG', 'TAGNO', 'ITEMCODE', 'PARTNO'))
-    obj_name = o.get('name') if isinstance(o, dict) else ''
-    node_name = support_tag or clean(existing_name) or clean(obj_name)
-    existing_ref = first(a, ('COMPONENTREFNO', 'REFNO', 'REF', 'DBREF', 'CA97', 'CA98'))
-    obj_ref = o.get('id') if isinstance(o, dict) else ''
-    component_ref = support_tag or clean(existing_ref) or clean(obj_ref) or ctx.autoref()
-    existing_conn = first(a, ('CONNECTIONTYPE', 'CONN', 'CONNECTION', 'CREF', 'CTYP'))
-    connection_type = kind or clean(existing_conn)
+    name = tag or clean(first(a, ('NAME', 'TAG', 'TAGNO', 'ITEMCODE', 'PARTNO'))) or clean(o.get('name') if isinstance(o, dict) else '')
+    ref = tag or clean(first(a, ('COMPONENTREFNO', 'REFNO', 'REF', 'DBREF', 'CA97', 'CA98', 'CMPSUPREFN'))) or clean(o.get('id') if isinstance(o, dict) else '') or ctx.autoref()
+    conn = kind or clean(first(a, ('CONNECTIONTYPE', 'CONN', 'CONNECTION', 'CREF', 'CTYP')))
     return dict(
         number=number,
-        name=node_name,
+        name=name,
         endpoint=ep,
         ctype=typ,
-        ref=component_ref,
-        conn=connection_type,
+        ref=ref,
+        conn=conn,
         od=bore(a, ctx.default_diameter),
         wall=mm(a.get('WTHK') or a.get('WALLTHK') or a.get('WALL_THICKNESS')) or ctx.default_wall,
         corr=mm(a.get('CORA') or a.get('CORROSIONALLOWANCE')) or ctx.default_corr,
         insu=mm(a.get('INSU') or a.get('INSULATIONTHICKNESS')) or ctx.default_insu,
         pos=p,
-        br=bend_radius,
+        br=bend_radius_value,
         bt=bend_type,
         alpha=alpha,
         sif=finite(a.get('SIF'), 0),
@@ -374,82 +368,92 @@ def make_node(o, typ, ep, p, ctx: Ctx, number=-1, bend_radius=0, bend_type=None,
 def expand(o, ctx: Ctx):
     typ = ctype(o)
     ps = points(o)
-    base = ps['pos'] or ps['cpos'] or ps['apos'] or ps['lpos'] or ps['bpos']
+    base = ps.get('support') or ps.get('pos') or ps.get('cpos') or ps.get('apos') or ps.get('lpos') or ps.get('bpos')
     if typ == 'UNKNOWN' or not base:
         return []
     out = []
     if typ == 'ELBO':
         r = bend_radius(o, ps)
-        out.append(make_node(o, typ, 1, ps['apos'] or base, ctx, -1, r, 0))
-        out.append(make_node(o, typ, 0, ps['cpos'] or ps['pos'] or base, ctx, ctx.next(), r, 1))
-        out.append(make_node(o, typ, 2, ps['lpos'] or base, ctx, -1, r, 0))
+        out += [
+            make_node(o, typ, 1, ps.get('apos') or base, ctx, -1, r, 0),
+            make_node(o, typ, 0, ps.get('cpos') or ps.get('pos') or base, ctx, ctx.next(), r, 1),
+            make_node(o, typ, 2, ps.get('lpos') or base, ctx, -1, r, 0),
+        ]
     elif typ in ('OLET', 'TEE'):
-        center = ps['pos'] or ps['cpos'] or base
-        out.append(make_node(o, typ, 1, ps['apos'] or center, ctx, -1))
-        out.append(make_node(o, typ, 3, ps['bpos'] or ps['lpos'] or center, ctx, -1))
-        out.append(make_node(o, typ, 0, center, ctx, ctx.next()))
-        out.append(make_node(o, typ, 2, ps['lpos'] or center, ctx, -1))
+        center = ps.get('pos') or ps.get('cpos') or base
+        out += [
+            make_node(o, typ, 1, ps.get('apos') or center, ctx, -1),
+            make_node(o, typ, 3, ps.get('bpos') or ps.get('lpos') or center, ctx, -1),
+            make_node(o, typ, 0, center, ctx, ctx.next()),
+            make_node(o, typ, 2, ps.get('lpos') or center, ctx, -1),
+        ]
     elif typ == 'REDU':
-        out.append(make_node(o, typ, 1, ps['apos'] or base, ctx, -1))
-        out.append(make_node(o, typ, 0, ps['pos'] or base, ctx, ctx.next(), alpha=reducer_angle(o)))
-        out.append(make_node(o, typ, 2, ps['lpos'] or base, ctx, -1))
+        out += [
+            make_node(o, typ, 1, ps.get('apos') or base, ctx, -1),
+            make_node(o, typ, 0, ps.get('pos') or base, ctx, ctx.next(), alpha=reducer_angle(o)),
+            make_node(o, typ, 2, ps.get('lpos') or base, ctx, -1),
+        ]
     elif typ == 'ATTA':
         out.append(make_node(o, typ, 0, base, ctx, ctx.next()))
-    elif ps['apos'] and ps['lpos']:
-        out.append(make_node(o, typ, 1, ps['apos'], ctx, -1))
-        out.append(make_node(o, typ, 0, ps['pos'] or ps['apos'], ctx, ctx.next()))
-        out.append(make_node(o, typ, 2, ps['lpos'], ctx, -1))
+    elif ps.get('apos') and ps.get('lpos'):
+        out += [
+            make_node(o, typ, 1, ps['apos'], ctx, -1),
+            make_node(o, typ, 0, ps.get('pos') or ps['apos'], ctx, ctx.next()),
+            make_node(o, typ, 2, ps['lpos'], ctx, -1),
+        ]
     else:
         out.append(make_node(o, typ, 0, base, ctx, ctx.next()))
     return out
 
 
 def node_xml(n: dict) -> str:
-    lines = ['      <Node>']
-    lines.append(f"        <NodeNumber>{n['number']}</NodeNumber>")
-    lines.append(f"        <NodeName>{x(n['name'])}</NodeName>")
-    lines.append(f"        <Endpoint>{n['endpoint']}</Endpoint>")
-    lines.append(f"        <ComponentType>{x(n['ctype'])}</ComponentType>")
-    lines.append(f"        <Weight>{nfmt(n['weight'])}</Weight>")
-    lines.append(f"        <ComponentRefNo>{x(n['ref'])}</ComponentRefNo>")
-    lines.append(f"        <ConnectionType>{x(n['conn'])}</ConnectionType>")
-    lines.append(f"        <OutsideDiameter>{nfmt(n['od'])}</OutsideDiameter>")
-    lines.append(f"        <WallThickness>{nfmt(n['wall'])}</WallThickness>")
-    lines.append(f"        <CorrosionAllowance>{nfmt(n['corr'])}</CorrosionAllowance>")
-    lines.append(f"        <InsulationThickness>{nfmt(n['insu'])}</InsulationThickness>")
     p = n['pos']
-    lines.append(f"        <Position>{p[0]:.2f} {p[1]:.2f} {p[2]:.2f}</Position>")
-    lines.append(f"        <BendRadius>{nfmt(n['br'])}</BendRadius>")
+    lines = [
+        '      <Node>',
+        f"        <NodeNumber>{n['number']}</NodeNumber>",
+        f"        <NodeName>{x(n['name'])}</NodeName>",
+        f"        <Endpoint>{n['endpoint']}</Endpoint>",
+        f"        <ComponentType>{x(n['ctype'])}</ComponentType>",
+        f"        <Weight>{nfmt(n['weight'])}</Weight>",
+        f"        <ComponentRefNo>{x(n['ref'])}</ComponentRefNo>",
+        f"        <ConnectionType>{x(n['conn'])}</ConnectionType>",
+        f"        <OutsideDiameter>{nfmt(n['od'])}</OutsideDiameter>",
+        f"        <WallThickness>{nfmt(n['wall'])}</WallThickness>",
+        f"        <CorrosionAllowance>{nfmt(n['corr'])}</CorrosionAllowance>",
+        f"        <InsulationThickness>{nfmt(n['insu'])}</InsulationThickness>",
+        f"        <Position>{p[0]:.2f} {p[1]:.2f} {p[2]:.2f}</Position>",
+        f"        <BendRadius>{nfmt(n['br'])}</BendRadius>",
+    ]
     if n['bt'] is not None:
         lines.append(f"        <BendType>{n['bt']}</BendType>")
     if n['alpha'] is not None:
         lines.append(f"        <AlphaAngle>{nfmt(n['alpha'])}</AlphaAngle>")
     lines.append(f"        <SIF>{n['sif']}</SIF>")
-    for restraint in n.get('restraints') or []:
-        lines.append('        <Restraint>')
-        lines.append(f"          <Type>{x(restraint.get('type', ''))}</Type>")
-        lines.append(f"          <Stiffness>{x(restraint.get('stiffness', ''))}</Stiffness>")
-        lines.append(f"          <Gap>{x(restraint.get('gap', ''))}</Gap>")
-        lines.append(f"          <Friction>{x(restraint.get('friction', ''))}</Friction>")
-        lines.append('        </Restraint>')
+    for r in n.get('restraints') or []:
+        lines += [
+            '        <Restraint>',
+            f"          <Type>{x(r.get('type', ''))}</Type>",
+            f"          <Stiffness>{x(r.get('stiffness', ''))}</Stiffness>",
+            f"          <Gap>{x(r.get('gap', ''))}</Gap>",
+            f"          <Friction>{x(r.get('friction', ''))}</Friction>",
+            '        </Restraint>',
+        ]
     lines.append('      </Node>')
     return '\n'.join(lines)
 
 
 def convert(input_path: Path, output_path: Path, opt):
     data = json.loads(input_path.read_text(encoding='utf-8-sig'))
-    branches = branch_list(data)
+    branches = branch_roots(data)
     if not branches:
         raise SystemExit('Staged JSON has no branch children.')
     ctx = Ctx(opt)
     project = input_path.stem
-    count = 0
-    skipped = 0
-    restraints = 0
+    count = skipped = restraints = 0
     bytype = {}
     lines = ['<?xml version="1.0" encoding="utf-8"?>', '<PipeStressExport xmlns="http://aveva.com/pipeStress116.xsd">']
     lines += [
-        f'  <DateTime></DateTime>',
+        '  <DateTime></DateTime>',
         f'  <Source>{x(opt.source)}</Source>',
         '  <Version>0.0.0.0</Version>',
         '  <UserName>browser-runtime</UserName>',
@@ -466,11 +470,12 @@ def convert(input_path: Path, output_path: Path, opt):
     ]
     for br in branches:
         ba = attrs(br)
-        lines += ['    <Branch>', f"      <Branchname>{x(br.get('name') or br.get('path') or ba.get('NAME') or 'B1')}</Branchname>"]
+        branch_name = br.get('name') or br.get('path') or ba.get('NAME') or 'B1'
+        lines += ['    <Branch>', f'      <Branchname>{x(branch_name)}</Branchname>']
         lines.append('      <Temperature>' + ''.join(f'<Temperature{i}>-100000</Temperature{i}>' for i in range(1, 10)) + '</Temperature>')
         lines.append('      <Pressure>' + ''.join(f'<Pressure{i}>0</Pressure{i}>' for i in range(1, 10)) + '</Pressure>')
         lines += ['      <MaterialNumber>0</MaterialNumber>', '      <InsulationDensity>0</InsulationDensity>', '      <FluidDensity>0</FluidDensity>']
-        for ch in br.get('children', []):
+        for ch in iter_children(br):
             nodes = expand(ch, ctx)
             if not nodes:
                 skipped += 1
@@ -483,7 +488,7 @@ def convert(input_path: Path, output_path: Path, opt):
         lines.append('    </Branch>')
     lines += [
         '  </Pipe>',
-        f'  <!-- StagedJSON fitting/support-preserving converter generated {count} Node records; support restraints {restraints}; skipped {skipped}. Counts: {bytype} -->',
+        f'  <!-- StagedJSON upstream XML generated {count} Node records; support restraints {restraints}; skipped {skipped}. Counts: {bytype} -->',
         '</PipeStressExport>',
     ]
     output_path.write_text('\n'.join(lines), encoding='utf-8')
@@ -503,19 +508,19 @@ def main():
     p.add_argument('--default-wall-thickness', type=float, default=0.01)
     p.add_argument('--default-insulation-thickness', type=float, default=0.0)
     p.add_argument('--default-corrosion-allowance', type=float, default=0.0)
-    p.add_argument('--support-stiffness', default='', help='Blank by default; written to Restraint/Stiffness.')
-    p.add_argument('--support-gap', default='', help='Blank by default; fallback gap for support restraints.')
-    p.add_argument('--support-friction', default='0.3', help='Default support friction; blank allowed.')
-    p.add_argument('--guide-gap', default='', help='Override gap for GUIDE restraints.')
-    p.add_argument('--line-stop-gap', default='', help='Override gap for LINESTOP restraints.')
-    p.add_argument('--limit-gap', default='', help='Override gap for LIMIT restraints.')
-    p.add_argument('--rest-gap', default='', help='Override gap for REST restraints.')
-    p.add_argument('--anchor-gap', default='', help='Override gap for ANCHOR restraints.')
-    p.add_argument('--support-pipe-axis', default='X', choices=['X', 'Y', 'Z', '+X', '-X', '+Y', '-Y', '+Z', '-Z'])
-    p.add_argument('--vertical-axis', default='Y', choices=['X', 'Y', 'Z', '+X', '-X', '+Y', '-Y', '+Z', '-Z'])
-    p.add_argument('--line-stop-direction', default='', help='Optional signed/global line stop direction, e.g. X, +X, -Z.')
-    p.add_argument('--limit-direction', default='', help='Optional signed/global limit direction, e.g. X, +X, -Z.')
-    p.add_argument('--rest-direction', default='', help='Optional signed/global rest direction; defaults to vertical axis.')
+    p.add_argument('--support-stiffness', default='')
+    p.add_argument('--support-gap', default='')
+    p.add_argument('--support-friction', default='0.3')
+    p.add_argument('--guide-gap', default='')
+    p.add_argument('--line-stop-gap', default='')
+    p.add_argument('--limit-gap', default='')
+    p.add_argument('--rest-gap', default='')
+    p.add_argument('--anchor-gap', default='')
+    p.add_argument('--support-pipe-axis', default='X')
+    p.add_argument('--vertical-axis', default='Y')
+    p.add_argument('--line-stop-direction', default='')
+    p.add_argument('--limit-direction', default='')
+    p.add_argument('--rest-direction', default='')
     args = p.parse_args()
     convert(Path(args.input), Path(args.output), args)
 
