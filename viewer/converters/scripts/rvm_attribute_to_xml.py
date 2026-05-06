@@ -1,555 +1,414 @@
 #!/usr/bin/env python3
+"""Convert AVEVA/RMSS attribute TXT directly to PSI116 XML.
+
+Upstream-only scope:
+- Do not run or modify XML->CII.
+- Preserve support/fitting semantics in XML so the existing downstream converter can consume them.
+- Keep the same PSI116 XML shape: PipeStressExport > Pipe > Branch > Node.
+
+This script is intentionally tolerant of common attribute formats:
+- NEW ... / END blocks
+- KEY := VALUE
+- KEY = VALUE
+- KEY VALUE
 """
-Managed native conversion pipeline: RVM(+ATTR) -> REV -> XML.
-
-This script keeps the existing native REV route and then enriches the generated
-PSI116 XML with support semantics found in the ATT/TXT sidecar.
-
-Support enrichment goals:
-- Preserve PS-... support names from attribute text into XML NodeName/ComponentRefNo.
-- Preserve DTXR support intent as ConnectionType, e.g. GUIDE, LINESTOP, LIMIT, REST.
-- Emit XSD-valid Restraint records with blank Stiffness, configurable blank/default Gap,
-  and configurable Friction defaulting to 0.3.
-"""
-
 from __future__ import annotations
 
 import argparse
+import json
+import math
 import re
-import shutil
-import subprocess
-import sys
-import tempfile
-from dataclasses import dataclass
-from pathlib import Path
-import xml.etree.ElementTree as ET
 import zipfile
+from pathlib import Path
+from xml.sax.saxutils import escape
 
-PS_TAG_RE = re.compile(r"\bPS[-_/A-Za-z0-9.]+\b", re.IGNORECASE)
-SUPPORT_WORD_RE = re.compile(r"GUIDE|LINE\s*STOP|LINESTOP|LIMIT|REST(?:ING)?|SHOE|ANCHOR|FIXED|STOP", re.IGNORECASE)
-KEY_VALUE_RE = re.compile(r"^\s*([A-Za-z][A-Za-z0-9_\-]*)\s*(?:=|:|\s)\s*(.*?)\s*$")
+BORE_KEYS = ('HBOR', 'TBOR', 'ABORE', 'LBORE', 'BORE', 'NBORE', 'DBOR')
+SUPPORT_COORD_KEYS = (
+    'SUPPORTCOORD', 'SUPPORT_COORD', 'SCOORD', 'SUPPORT_POS', 'SUPPORTPOS',
+    'COORDS', 'CO_ORDS', 'CO_ORD', 'POS', 'POSITION', 'BPOS', 'BP', 'APOS', 'LPOS'
+)
+KEY_VALUE_RE = re.compile(r'^\s*:?(?P<key>[A-Za-z][A-Za-z0-9_\-]*)\s*(?::=|=|:)\s*(?P<value>.*?)\s*$')
+PS_TAG_RE = re.compile(r'\bPS[-_\s]?[A-Z0-9][A-Z0-9._/\-]*\b', re.I)
+SUPPORT_TEXT_RE = re.compile(
+    r'\b(GUIDE|LINE\s*STOP|LINESTOP|LIMIT\s*STOP|LIMIT|RESTING|REST|SHOE|BP|BASE\s*PLATE|ANCHOR|FIXED|STOPPER|STOP)\b',
+    re.I,
+)
+TYPE_RULES = (
+    (re.compile(r'WELDOLET|SOCKOLET|THREDOLET|SWEEPOLET|\bOLET\b', re.I), 'OLET'),
+    (re.compile(r'\bVALV(E)?\b', re.I), 'VALV'),
+    (re.compile(r'\bFLAN(GE)?\b', re.I), 'FLAN'),
+    (re.compile(r'\bGASK(ET)?\b', re.I), 'GASK'),
+    (re.compile(r'\b(ELBO(W)?|BEND)\b', re.I), 'ELBO'),
+    (re.compile(r'\bTEE\b', re.I), 'TEE'),
+    (re.compile(r'\bREDU(CER)?\b', re.I), 'REDU'),
+    (re.compile(r'\b(ATTA|ANCI|SUPP|SUPPORT|REST|GUIDE|LINE\s*STOP|LINESTOP|LIMIT|ANCHOR|FIXED|SHOE|BP|BASE\s*PLATE)\b', re.I), 'ATTA'),
+    (re.compile(r'\b(PIPE|TUBI)\b', re.I), 'PIPE'),
+)
+SIGNED_AXIS_RE = re.compile(r'([+-]?)\s*([XYZ])\b', re.I)
 
 
-def _safe_text(value: object | None) -> str:
-    if value is None:
-        return ""
-    return str(value).strip()
+def s(value) -> str:
+    return '' if value is None else str(value).strip()
 
 
-def _normalize_newlines(text: str) -> str:
-    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-    return normalized if normalized.endswith("\n") else f"{normalized}\n"
+def x(value) -> str:
+    return escape('' if value is None else str(value), {'"': '&quot;'})
 
 
-def _looks_like_rev_text(text: str) -> bool:
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    if not lines:
-        return False
-    head = set(lines[:120])
-    return "HEAD" in head and "MODL" in head and any(line.startswith("END:") for line in lines)
-
-
-def _is_rev_like_file(path: Path) -> bool:
+def fnum(value, default=0.0) -> float:
     try:
-        decoded = path.read_bytes().decode("utf-8")
-    except (OSError, UnicodeDecodeError):
-        return False
-    return _looks_like_rev_text(decoded)
+        n = float(value)
+        return n if math.isfinite(n) else default
+    except Exception:
+        return default
 
 
-def _ensure_parent(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def mm(value):
+    match = re.search(r'-?\d+(?:\.\d+)?', str(value or '').replace('mm', ' ').replace('MM', ' '))
+    return float(match.group(0)) if match else None
 
 
-def _resolve_rvmparser_binary(explicit: Path | None) -> Path:
-    candidates: list[Path] = []
-    if explicit is not None:
-        candidates.append(explicit)
-    script_dir = Path(__file__).resolve().parent
-    repo_root = script_dir.parent.parent.parent
-    candidates.extend([
-        repo_root / "tools" / "rvmparser-windows-bin.exe",
-        Path("C:/Code3/rvmparser/rvmparser-windows-bin.exe"),
-        Path("C:/Code3/PCF_GLB_Viewer_Conv/tools/rvmparser-windows-bin.exe"),
-    ])
-    for candidate in candidates:
-        resolved = candidate.resolve()
-        if resolved.exists() and resolved.is_file():
-            return resolved
-    listed = "\n  - ".join(str(path) for path in candidates)
-    raise FileNotFoundError(
-        "Native rvmparser binary not found. Checked:\n"
-        f"  - {listed}\n"
-        "Provide --rvmparser-bin with a valid executable path."
-    )
+def nfmt(value, decimals=3) -> str:
+    txt = f'{fnum(value):.{decimals}f}'.rstrip('0').rstrip('.')
+    return txt or '0'
 
 
-def _run_process(command: list[str], working_directory: Path, stage_name: str) -> None:
-    completed = subprocess.run(
-        command,
-        cwd=str(working_directory),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
-    stdout_text = _safe_text(completed.stdout)
-    stderr_text = _safe_text(completed.stderr)
-    if stdout_text:
-        print(f"[{stage_name}] stdout:")
-        print(stdout_text)
-    if stderr_text:
-        print(f"[{stage_name}] stderr:")
-        print(stderr_text)
-    if completed.returncode != 0:
-        command_text = " ".join(f'"{part}"' if " " in part else part for part in command)
-        raise RuntimeError(
-            f"{stage_name} failed with exit code {completed.returncode}.\n"
-            f"Command: {command_text}\n"
-            f"stderr: {stderr_text}"
-        )
-
-
-def _is_sidecar_parse_error(message: str) -> bool:
-    lowered = _safe_text(message).lower()
-    return "more end-tags and than new-tags" in lowered or "failed to parse" in lowered
-
-
-def _repair_attribute_end_balance(attributes_path: Path, repaired_path: Path) -> tuple[int, int]:
-    text = attributes_path.read_text(encoding="utf-8", errors="replace")
-    repaired_lines: list[str] = []
-    depth = 0
-    dropped_end_lines = 0
-    for line in text.splitlines():
-        token = line.strip()
-        if re.match(r"^NEW(\s|$)", token):
-            depth += 1
-            repaired_lines.append(line)
-        elif re.match(r"^END(\s|$)", token):
-            if depth <= 0:
-                dropped_end_lines += 1
-            else:
-                depth -= 1
-                repaired_lines.append(line)
-        else:
-            repaired_lines.append(line)
-    appended_end_lines = 0
-    while depth > 0:
-        repaired_lines.append("END")
-        depth -= 1
-        appended_end_lines += 1
-    repaired_path.write_text("\n".join(repaired_lines) + "\n", encoding="utf-8")
-    return dropped_end_lines, appended_end_lines
-
-
-def _run_native_rvm_to_rev(
-    parser_executable: Path,
-    input_path: Path,
-    output_rev_path: Path,
-    attributes_path: Path | None,
-    working_directory: Path,
-) -> None:
-    command = [str(parser_executable), f"--output-rev={output_rev_path}", str(input_path)]
-    if attributes_path is None:
-        _run_process(command=command, working_directory=working_directory, stage_name="RVM->REV")
-        return
-    try:
-        _run_process(command=command + [str(attributes_path)], working_directory=working_directory, stage_name="RVM->REV")
-        return
-    except RuntimeError as error:
-        if not _is_sidecar_parse_error(str(error)):
-            raise
-        print("[RVM->REV] Sidecar parse error detected. Attempting sanitized attribute retry.")
-    repaired_path = working_directory / f"{attributes_path.stem}_repaired{attributes_path.suffix}"
-    dropped, appended = _repair_attribute_end_balance(attributes_path=attributes_path, repaired_path=repaired_path)
-    print(f"[RVM->REV] Attribute repair summary: dropped_unmatched_end={dropped}, appended_missing_end={appended}.")
-    try:
-        _run_process(command=command + [str(repaired_path)], working_directory=working_directory, stage_name="RVM->REV(repaired-attr)")
-        return
-    except RuntimeError as error:
-        if not _is_sidecar_parse_error(str(error)):
-            raise
-        print("[RVM->REV] Repaired sidecar still failed. Retrying without sidecar attributes.")
-    _run_process(command=command, working_directory=working_directory, stage_name="RVM->REV(no-attr-fallback)")
-
-
-def _resolve_attribute_sidecar(attributes_path: Path, extraction_directory: Path) -> Path:
-    if attributes_path.suffix.lower() != ".zip":
-        return attributes_path
-    with zipfile.ZipFile(attributes_path, "r") as archive:
-        members = archive.infolist()
-        if not members:
-            raise ValueError(f"Attribute archive is empty: {attributes_path}")
-        att_candidates = [m for m in members if m.filename.lower().endswith(".att")]
-        txt_candidates = [m for m in members if m.filename.lower().endswith(".txt")]
-        selected = sorted(att_candidates or txt_candidates, key=lambda m: m.filename.lower())[0] if (att_candidates or txt_candidates) else None
-        if selected is None:
-            raise ValueError(f"Attribute ZIP does not contain .att or .txt sidecar: {attributes_path}")
-        target_path = extraction_directory / Path(selected.filename).name
-        with archive.open(selected, "r") as source_stream:
-            target_path.write_bytes(source_stream.read())
-        print(f"[RVM->REV] Extracted attribute sidecar from ZIP: {selected.filename}")
-        return target_path
-
-
-def _run_rev_to_xml(
-    python_executable: Path,
-    rev_to_xml_script: Path,
-    input_rev_path: Path,
-    output_xml_path: Path,
-    args: argparse.Namespace,
-    working_directory: Path,
-) -> None:
-    command = [
-        str(python_executable), str(rev_to_xml_script),
-        "--input", str(input_rev_path),
-        "--output", str(output_xml_path),
-        "--coord-factor", str(args.coord_factor),
-        "--node-start", str(args.node_start),
-        "--node-step", str(args.node_step),
-        "--node-merge-tolerance", str(args.node_merge_tolerance),
-    ]
-    if _safe_text(args.source):
-        command.extend(["--source", args.source])
-    if _safe_text(args.purpose):
-        command.extend(["--purpose", args.purpose])
-    if _safe_text(args.title_line):
-        command.extend(["--title-line", args.title_line])
-    if args.enable_psi_rigid_logic:
-        command.append("--enable-psi-rigid-logic")
-    _run_process(command=command, working_directory=working_directory, stage_name="REV->XML")
-
-
-@dataclass(frozen=True)
-class SupportInfo:
-    tag: str
-    support_type: str
-    source_text: str
-
-
-def _local_name(tag: str) -> str:
-    if tag.startswith("{"):
-        return tag.split("}", 1)[1]
-    return tag
-
-
-def _namespace(tag: str) -> str:
-    if tag.startswith("{"):
-        return tag[1:].split("}", 1)[0]
-    return ""
-
-
-def _q(namespace: str, name: str) -> str:
-    return f"{{{namespace}}}{name}" if namespace else name
-
-
-def _child(parent: ET.Element, namespace: str, name: str) -> ET.Element | None:
-    return parent.find(_q(namespace, name))
-
-
-def _child_text(parent: ET.Element, namespace: str, name: str) -> str:
-    element = _child(parent, namespace, name)
-    return _safe_text(element.text if element is not None else "")
-
-
-def _set_child_text(parent: ET.Element, namespace: str, name: str, value: str) -> None:
-    element = _child(parent, namespace, name)
-    if element is None:
-        element = ET.SubElement(parent, _q(namespace, name))
-    element.text = value
-
-
-def _parse_attribute_blocks(attribute_text: str) -> list[dict[str, str]]:
-    blocks: list[dict[str, str]] = []
-    current: dict[str, str] | None = None
-    whole_file: dict[str, str] = {}
-
-    def add_line(target: dict[str, str], line: str) -> None:
-        match = KEY_VALUE_RE.match(line)
-        if not match:
-            return
-        key = match.group(1).upper().replace("-", "_")
-        value = match.group(2).strip()
-        if key in {"NEW", "END"}:
-            return
-        if value:
-            target[key] = value
-
-    for line in attribute_text.splitlines():
-        token = line.strip()
-        if not token:
+def parse_coord(value):
+    if value is None or value == '':
+        return None
+    if isinstance(value, (list, tuple)) and len(value) >= 3:
+        p = tuple(fnum(value[i], float('nan')) for i in range(3))
+        return p if all(math.isfinite(c) for c in p) else None
+    if isinstance(value, dict):
+        p = (fnum(value.get('x', value.get('X')), float('nan')), fnum(value.get('y', value.get('Y')), float('nan')), fnum(value.get('z', value.get('Z')), float('nan')))
+        return p if all(math.isfinite(c) for c in p) else None
+    text = str(value).strip()
+    tokens = text.split()
+    out = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+    directional = False
+    for i in range(0, max(len(tokens) - 1, 0), 2):
+        axis = tokens[i].upper()
+        val = mm(tokens[i + 1])
+        if val is None:
             continue
-        if re.match(r"^NEW(\s|$)", token, re.IGNORECASE):
+        if axis == 'E': out['x'] = val; directional = True
+        elif axis == 'W': out['x'] = -val; directional = True
+        elif axis == 'N': out['y'] = val; directional = True
+        elif axis == 'S': out['y'] = -val; directional = True
+        elif axis == 'U': out['z'] = val; directional = True
+        elif axis == 'D': out['z'] = -val; directional = True
+    if directional:
+        return (out['x'], out['y'], out['z'])
+    vals = [float(v) for v in re.findall(r'-?\d+(?:\.\d+)?', text)]
+    return tuple(vals[:3]) if len(vals) >= 3 else None
+
+
+def parse_blocks(text: str) -> list[dict[str, str]]:
+    blocks = []
+    current = None
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if re.match(r'^NEW(\s|$)', line, re.I):
             if current:
                 blocks.append(current)
-            current = {"__RAW__": line}
-            add_line(current, token[3:].strip())
+            current = {'__RAW__': raw_line, '__NEW__': line[3:].strip()}
             continue
-        if re.match(r"^END(\s|$)", token, re.IGNORECASE):
+        if re.match(r'^END(\s|$)', line, re.I):
             if current:
                 blocks.append(current)
                 current = None
             continue
-        if current is not None:
-            current["__RAW__"] = f"{current.get('__RAW__', '')}\n{line}"
-            add_line(current, line)
-        add_line(whole_file, line)
+        if current is None:
+            current = {'__RAW__': ''}
+        current['__RAW__'] = f"{current.get('__RAW__', '')}\n{raw_line}".strip()
+        m = KEY_VALUE_RE.match(line)
+        if m:
+            key = m.group('key').upper().replace('-', '_')
+            val = m.group('value').strip().strip('"')
+            current[key] = val
     if current:
         blocks.append(current)
-    if not blocks and whole_file:
-        whole_file["__RAW__"] = attribute_text
-        blocks.append(whole_file)
     return blocks
 
 
-def _extract_ps_tag(block: dict[str, str]) -> str:
-    for key in ("NAME", "TAG", "TAGNO", "TAG_NO", "REF", "REFNO", "DBREF", "SUPPORT", "SUPPORT_REF"):
-        value = _safe_text(block.get(key))
-        if not value:
-            continue
-        match = PS_TAG_RE.search(value)
+def read_attribute_text(path: Path) -> str:
+    if path.suffix.lower() != '.zip':
+        return path.read_text(encoding='utf-8', errors='replace')
+    with zipfile.ZipFile(path, 'r') as zf:
+        members = sorted([m for m in zf.namelist() if m.lower().endswith(('.att', '.txt'))])
+        if not members:
+            raise SystemExit(f'Attribute ZIP contains no .att/.txt file: {path}')
+        with zf.open(members[0], 'r') as f:
+            return f.read().decode('utf-8', errors='replace')
+
+
+def combined_text(block: dict) -> str:
+    return ' '.join(str(block.get(k, '')) for k in ('__NEW__', '__RAW__', 'TYPE', 'STYP', 'NAME', 'TAG', 'TAGNO', 'SKEY', 'SPRE', 'DTXR', 'CMPSUPTYPE', 'DESCRIPTION', 'DESC'))
+
+
+def support_kind(block: dict) -> str:
+    text = combined_text(block).upper()
+    if re.search(r'\bLINE\s*STOP\b|\bLINESTOP\b|\bSTOPPER\b|\bSTOP\b', text):
+        return 'LINESTOP'
+    if re.search(r'\bLIMIT\s*STOP\b|\bLIMIT\b', text):
+        return 'LIMIT'
+    if re.search(r'\bGUIDE\b', text):
+        return 'GUIDE'
+    if re.search(r'\bRESTING\b|\bREST\b|\bSHOE\b|\bBP\b|\bBASE\s*PLATE\b', text):
+        return 'REST'
+    if re.search(r'\bANCHOR\b|\bFIXED\b', text):
+        return 'ANCHOR'
+    return ''
+
+
+def component_type(block: dict) -> str:
+    kind = support_kind(block)
+    if kind:
+        return 'ATTA'
+    text = combined_text(block)
+    for rx, typ in TYPE_RULES:
+        if rx.search(text):
+            return typ
+    return 'UNKNOWN'
+
+
+def support_tag(block: dict) -> str:
+    for key in ('CMPSUPREFN', 'SUPPORT_TAG', 'NAME', 'TAG', 'TAGNO', 'ITEMCODE', 'PARTNO', 'REF', 'REFNO', 'DBREF', 'COMPONENTREFNO', 'CA97', 'CA98', 'SKEY', 'SPRE', '__NEW__', '__RAW__'):
+        match = PS_TAG_RE.search(str(block.get(key, '')))
         if match:
-            return match.group(0).replace("_", "-").upper()
-        if value.upper().startswith("PS"):
-            return value.replace("_", "-").upper()
-    match = PS_TAG_RE.search(block.get("__RAW__", ""))
-    return match.group(0).replace("_", "-").upper() if match else ""
+            return re.sub(r'\s+', '-', match.group(0).strip())
+    return s(block.get('CMPSUPREFN') or block.get('NAME') or block.get('__NEW__') or 'SUPPORT')
 
 
-def _normalize_support_type(value: str) -> str:
-    text = _safe_text(value).upper().replace("_", " ").replace("-", " ")
-    text = re.sub(r"\s+", " ", text)
-    if not text:
-        return ""
-    if "ANCHOR" in text or "FIXED" in text:
-        return "ANCHOR"
-    if "LINE STOP" in text or "LINESTOP" in text:
-        return "LINESTOP"
-    if "LIMIT" in text:
-        return "LIMIT"
-    if "GUIDE" in text:
-        return "GUIDE"
-    if "REST" in text or "SHOE" in text:
-        return "REST"
-    if re.search(r"\bSTOP\b", text):
-        return "LINESTOP"
-    return ""
+def point_from_block(block: dict, keys) -> tuple[float, float, float] | None:
+    for key in keys:
+        p = parse_coord(block.get(key))
+        if p:
+            return p
+    return None
 
 
-def _extract_support_type(block: dict[str, str]) -> str:
-    for key in ("DTXR", "STYP", "TYPE", "SKEY", "DESC", "DESCRIPTION", "LSTU"):
-        support_type = _normalize_support_type(block.get(key, ""))
-        if support_type:
-            return support_type
-    return _normalize_support_type(block.get("__RAW__", ""))
+def points(block: dict) -> dict:
+    return {
+        'apos': point_from_block(block, ('APOS', 'A_POS', 'EP1', 'END1', 'START', 'START_POINT', 'POS_START')),
+        'lpos': point_from_block(block, ('LPOS', 'L_POS', 'EP2', 'END2', 'END', 'END_POINT', 'POS_END')),
+        'pos': point_from_block(block, ('POS', 'POSITION', 'COORDS', 'CO_ORDS', 'CO_ORD')),
+        'cpos': point_from_block(block, ('CPOS', 'CP', 'CENTER', 'CENTRE', 'CENTER_POINT')),
+        'bpos': point_from_block(block, ('BPOS', 'BP', 'BRANCH_POINT', 'BPOS1')),
+        'support': point_from_block(block, SUPPORT_COORD_KEYS),
+    }
 
 
-def _parse_support_infos(attribute_path: Path) -> list[SupportInfo]:
-    text = attribute_path.read_text(encoding="utf-8", errors="replace")
-    infos: list[SupportInfo] = []
-    seen: set[tuple[str, str]] = set()
-    for block in _parse_attribute_blocks(text):
-        raw = block.get("__RAW__", "")
-        if not (PS_TAG_RE.search(raw) or SUPPORT_WORD_RE.search(raw)):
-            continue
-        support_type = _extract_support_type(block)
-        if not support_type:
-            continue
-        tag = _extract_ps_tag(block)
-        if not tag:
-            tag = f"SUPPORT-{len(infos) + 1}"
-        key = (tag, support_type)
-        if key in seen:
-            continue
-        seen.add(key)
-        infos.append(SupportInfo(tag=tag, support_type=support_type, source_text=raw))
-    return infos
+def bore(block: dict, default: float) -> float:
+    for key in BORE_KEYS:
+        val = mm(block.get(key))
+        if val and val > 0:
+            return val
+    if block.get('DTXR') and not SUPPORT_TEXT_RE.search(s(block.get('DTXR'))):
+        val = mm(block.get('DTXR'))
+        if val and val > 0:
+            return val
+    return default
 
 
-def _split_types(value: str) -> list[str]:
-    return [part.strip().upper() for part in re.split(r"[,/ ]+", _safe_text(value)) if part.strip()]
+def axis_name(value: str) -> str:
+    text = s(value).upper()
+    if text in ('+X', '-X', 'X', '+Y', '-Y', 'Y', '+Z', '-Z', 'Z'):
+        return text
+    m = SIGNED_AXIS_RE.search(text)
+    if m:
+        return f"{m.group(1)}{m.group(2).upper()}" if m.group(1) else m.group(2).upper()
+    return ''
 
 
-def _restraint_types_for_support(support_type: str, args: argparse.Namespace) -> list[str]:
-    if support_type == "GUIDE":
-        return _split_types(args.support_guide_types) or ["Y", "Z"]
-    if support_type == "LINESTOP":
-        return _split_types(args.support_linestop_types) or ["X"]
-    if support_type == "LIMIT":
-        return _split_types(args.support_limit_types) or ["X"]
-    if support_type == "REST":
-        return _split_types(args.support_rest_types) or ["Z"]
-    if support_type == "ANCHOR":
-        return ["A"]
+def unsigned(axis: str) -> str:
+    return axis_name(axis).replace('+', '').replace('-', '')
+
+
+def dominant_axis(a, b) -> str:
+    if not a or not b:
+        return ''
+    d = [abs(b[i] - a[i]) for i in range(3)]
+    return ('X', 'Y', 'Z')[d.index(max(d))] if max(d) > 1e-9 else ''
+
+
+def pipe_axis(block: dict, ps: dict, opt) -> str:
+    for key in ('RESTRAINT_DIRECTION', 'RESTRAINTDIR', 'DIRECTION', 'DIR', 'AXIS', 'PIPE_AXIS', 'ROUTE_AXIS'):
+        val = axis_name(block.get(key, ''))
+        if val:
+            return unsigned(val)
+    return dominant_axis(ps.get('apos'), ps.get('lpos')) or unsigned(opt.support_pipe_axis) or 'X'
+
+
+def restraint_entry(rtype: str, gap: str, opt) -> dict:
+    return {'type': rtype, 'stiffness': s(opt.support_stiffness), 'gap': s(gap), 'friction': s(opt.support_friction)}
+
+
+def restraints(block: dict, ps: dict, opt) -> list[dict]:
+    kind = support_kind(block)
+    if not kind:
+        return []
+    vertical = unsigned(opt.vertical_axis) or 'Y'
+    axial = pipe_axis(block, ps, opt)
+    if kind == 'GUIDE':
+        gap = s(opt.guide_gap) or s(opt.support_gap)
+        return [restraint_entry(a, gap, opt) for a in ('X', 'Y', 'Z') if a != axial]
+    if kind == 'LINESTOP':
+        return [restraint_entry(axis_name(opt.line_stop_direction) or axial, s(opt.line_stop_gap) or s(opt.support_gap), opt)]
+    if kind == 'LIMIT':
+        return [restraint_entry(axis_name(opt.limit_direction) or axial, s(opt.limit_gap) or s(opt.support_gap), opt)]
+    if kind == 'REST':
+        return [restraint_entry(axis_name(opt.rest_direction) or vertical, s(opt.rest_gap) or s(opt.support_gap), opt)]
+    if kind == 'ANCHOR':
+        return [restraint_entry('A', s(opt.anchor_gap) or s(opt.support_gap), opt)]
     return []
 
 
-def _gap_for_support(support_type: str, args: argparse.Namespace) -> str:
-    specific = {
-        "GUIDE": args.support_guide_gap,
-        "LINESTOP": args.support_linestop_gap,
-        "LIMIT": args.support_limit_gap,
-        "REST": args.support_rest_gap,
-        "ANCHOR": args.support_anchor_gap,
-    }.get(support_type, "")
-    return _safe_text(specific) if _safe_text(specific) else _safe_text(args.support_gap)
+class Ctx:
+    def __init__(self, opt):
+        self.opt = opt
+        self.node = max(1, int(fnum(opt.node_start, 10)))
+        self.step = max(1, int(fnum(opt.node_step, 10)))
+        self.default_diameter = max(0.001, fnum(opt.default_diameter, 100))
+        self.default_wall = max(0.0, fnum(opt.default_wall_thickness, 0.01))
+        self.default_corr = max(0.0, fnum(opt.default_corrosion_allowance, 0))
+        self.default_insu = max(0.0, fnum(opt.default_insulation_thickness, 0))
+        self.auto_ref = 1
+    def next(self):
+        n = self.node; self.node += self.step; return n
+    def ref(self):
+        r = f'AUTO-{self.auto_ref}'; self.auto_ref += 1; return r
 
 
-def _replace_restraints(node: ET.Element, namespace: str, support_type: str, args: argparse.Namespace) -> int:
-    for restraint in list(node.findall(_q(namespace, "Restraint"))):
-        node.remove(restraint)
-    created = 0
-    for restraint_type in _restraint_types_for_support(support_type, args):
-        restraint = ET.SubElement(node, _q(namespace, "Restraint"))
-        _set_child_text(restraint, namespace, "Type", restraint_type)
-        _set_child_text(restraint, namespace, "Stiffness", _safe_text(args.support_stiffness))
-        _set_child_text(restraint, namespace, "Gap", _gap_for_support(support_type, args))
-        _set_child_text(restraint, namespace, "Friction", _safe_text(args.support_friction))
-        created += 1
-    return created
+def dist(a, b):
+    return math.sqrt(sum((a[i] - b[i]) ** 2 for i in range(3))) if a and b else 0.0
 
 
-def _is_support_node(node: ET.Element, namespace: str) -> bool:
-    component_type = _child_text(node, namespace, "ComponentType").upper()
-    connection_type = _child_text(node, namespace, "ConnectionType").upper()
-    node_name = _child_text(node, namespace, "NodeName")
-    component_ref = _child_text(node, namespace, "ComponentRefNo")
-    return (
-        component_type in {"ATTA", "SUPPORT", "ANCI"}
-        or _normalize_support_type(connection_type) != ""
-        or PS_TAG_RE.search(node_name) is not None
-        or PS_TAG_RE.search(component_ref) is not None
-    )
+def bend_radius(block, ps):
+    val = mm(block.get('BENDRADIUS') or block.get('BEND_RADIUS') or block.get('BRAD') or block.get('RADIUS'))
+    if val and val > 0:
+        return val
+    c = ps.get('cpos') or ps.get('pos')
+    return min(dist(c, ps.get('apos')), dist(c, ps.get('lpos'))) if c and ps.get('apos') and ps.get('lpos') else 0.0
 
 
-def _enrich_supports_in_xml(xml_path: Path, attribute_path: Path | None, args: argparse.Namespace) -> tuple[int, int, int]:
-    tree = ET.parse(xml_path)
-    root = tree.getroot()
-    namespace = _namespace(root.tag)
-    if namespace:
-        ET.register_namespace("", namespace)
-    support_nodes = [node for node in root.iter() if _local_name(node.tag) == "Node" and _is_support_node(node, namespace)]
-    support_infos = _parse_support_infos(attribute_path) if attribute_path is not None and attribute_path.exists() else []
-    enriched = 0
-    restraints = 0
-    named = 0
-
-    for index, node in enumerate(support_nodes):
-        info = support_infos[index] if index < len(support_infos) else None
-        support_type = info.support_type if info else _normalize_support_type(_child_text(node, namespace, "ConnectionType")) or "REST"
-        if info and info.tag:
-            _set_child_text(node, namespace, "NodeName", info.tag)
-            _set_child_text(node, namespace, "ComponentRefNo", info.tag)
-            named += 1
-        _set_child_text(node, namespace, "ComponentType", "ATTA")
-        _set_child_text(node, namespace, "ConnectionType", support_type)
-        restraints += _replace_restraints(node, namespace, support_type, args)
-        enriched += 1
-
-    if enriched:
-        if hasattr(ET, "indent"):
-            ET.indent(tree, space="  ")
-        tree.write(xml_path, encoding="utf-8", xml_declaration=True)
-    return enriched, named, restraints
+def make_node(block, typ, ep, pos, ctx: Ctx, number=-1, bend_radius_value=0, bend_type=None, alpha=None):
+    kind = support_kind(block) if typ == 'ATTA' else ''
+    tag = support_tag(block) if typ == 'ATTA' else ''
+    name = tag or s(block.get('NAME') or block.get('TAG') or block.get('__NEW__'))
+    ref = tag or s(block.get('COMPONENTREFNO') or block.get('REFNO') or block.get('REF') or block.get('DBREF')) or ctx.ref()
+    conn = kind or s(block.get('CONNECTIONTYPE') or block.get('CONN') or block.get('CONNECTION') or block.get('CREF') or block.get('CTYP'))
+    ps = points(block)
+    return {
+        'number': number, 'name': name, 'endpoint': ep, 'ctype': typ, 'ref': ref, 'conn': conn,
+        'od': bore(block, ctx.default_diameter),
+        'wall': mm(block.get('WTHK') or block.get('WALLTHK') or block.get('WALL_THICKNESS')) or ctx.default_wall,
+        'corr': mm(block.get('CORA') or block.get('CORROSIONALLOWANCE')) or ctx.default_corr,
+        'insu': mm(block.get('INSU') or block.get('INSULATIONTHICKNESS')) or ctx.default_insu,
+        'pos': pos, 'br': bend_radius_value, 'bt': bend_type, 'alpha': alpha,
+        'sif': fnum(block.get('SIF'), 0), 'weight': fnum(block.get('WEIG') or block.get('WEIGHT'), 0),
+        'restraints': restraints(block, ps, ctx.opt) if typ == 'ATTA' else [],
+    }
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Managed pipeline for RVM(+ATTR) -> REV -> XML.")
-    parser.add_argument("--input", required=True, type=Path, help="Input RVM or REV path.")
-    parser.add_argument("--output", required=True, type=Path, help="Output XML path.")
-    parser.add_argument("--attributes", required=False, type=Path, default=None, help="Optional ATT/TXT sidecar file path for native RVM parsing.")
-    parser.add_argument("--output-rev", required=False, type=Path, default=None, help="Optional destination to persist intermediate REV output.")
-    parser.add_argument("--rvmparser-bin", required=False, type=Path, default=None, help="Optional explicit path to rvmparser-windows-bin.exe.")
-    parser.add_argument("--python-exe", required=False, type=Path, default=Path(sys.executable), help="Python executable used for REV->XML stage.")
-    parser.add_argument("--coord-factor", required=False, type=float, default=1000.0, help="REV->XML coord factor.")
-    parser.add_argument("--node-start", required=False, type=int, default=10, help="REV->XML node start.")
-    parser.add_argument("--node-step", required=False, type=int, default=10, help="REV->XML node step.")
-    parser.add_argument("--node-merge-tolerance", required=False, type=float, default=0.5, help="REV->XML shared-node merge tolerance.")
-    parser.add_argument("--source", required=False, type=str, default="AVEVA PSI", help="REV->XML source field.")
-    parser.add_argument("--purpose", required=False, type=str, default="Preliminary stress run", help="REV->XML purpose field.")
-    parser.add_argument("--title-line", required=False, type=str, default="PSI stress Output", help="REV->XML title line.")
-    parser.add_argument("--enable-psi-rigid-logic", action="store_true", help="Enable PSI rigid-tagging heuristics in REV->XML stage.")
-
-    parser.add_argument("--support-stiffness", required=False, type=str, default="", help="Support Restraint/Stiffness text; default blank.")
-    parser.add_argument("--support-gap", required=False, type=str, default="", help="Fallback support Restraint/Gap text; default blank.")
-    parser.add_argument("--support-guide-gap", required=False, type=str, default="", help="GUIDE restraint gap override.")
-    parser.add_argument("--support-linestop-gap", required=False, type=str, default="", help="LINESTOP restraint gap override.")
-    parser.add_argument("--support-limit-gap", required=False, type=str, default="", help="LIMIT restraint gap override.")
-    parser.add_argument("--support-rest-gap", required=False, type=str, default="", help="REST restraint gap override.")
-    parser.add_argument("--support-anchor-gap", required=False, type=str, default="", help="ANCHOR restraint gap override.")
-    parser.add_argument("--support-friction", required=False, type=str, default="0.3", help="Support Restraint/Friction text; default 0.3.")
-    parser.add_argument("--support-guide-types", required=False, type=str, default="Y,Z", help="GUIDE restraint types, comma separated.")
-    parser.add_argument("--support-linestop-types", required=False, type=str, default="X", help="LINESTOP restraint types, comma separated.")
-    parser.add_argument("--support-limit-types", required=False, type=str, default="X", help="LIMIT restraint types, comma separated.")
-    parser.add_argument("--support-rest-types", required=False, type=str, default="Z", help="REST restraint types, comma separated.")
-    return parser
+def expand(block, ctx: Ctx):
+    typ = component_type(block)
+    ps = points(block)
+    base = ps.get('support') or ps.get('pos') or ps.get('cpos') or ps.get('apos') or ps.get('lpos') or ps.get('bpos')
+    if typ == 'UNKNOWN' or not base:
+        return []
+    if typ == 'ELBO':
+        r = bend_radius(block, ps)
+        return [make_node(block, typ, 1, ps.get('apos') or base, ctx, -1, r, 0), make_node(block, typ, 0, ps.get('cpos') or ps.get('pos') or base, ctx, ctx.next(), r, 1), make_node(block, typ, 2, ps.get('lpos') or base, ctx, -1, r, 0)]
+    if typ in ('TEE', 'OLET'):
+        center = ps.get('pos') or ps.get('cpos') or base
+        return [make_node(block, typ, 1, ps.get('apos') or center, ctx), make_node(block, typ, 3, ps.get('bpos') or ps.get('lpos') or center, ctx), make_node(block, typ, 0, center, ctx, ctx.next()), make_node(block, typ, 2, ps.get('lpos') or center, ctx)]
+    if typ == 'REDU':
+        alpha = mm(block.get('ALPHAANGLE') or block.get('ALPHA_ANGLE') or block.get('ANGLE')) or 1.0
+        return [make_node(block, typ, 1, ps.get('apos') or base, ctx), make_node(block, typ, 0, ps.get('pos') or base, ctx, ctx.next(), alpha=alpha), make_node(block, typ, 2, ps.get('lpos') or base, ctx)]
+    if typ == 'ATTA':
+        return [make_node(block, typ, 0, base, ctx, ctx.next())]
+    if ps.get('apos') and ps.get('lpos'):
+        return [make_node(block, typ, 1, ps['apos'], ctx), make_node(block, typ, 0, ps.get('pos') or ps['apos'], ctx, ctx.next()), make_node(block, typ, 2, ps['lpos'], ctx)]
+    return [make_node(block, typ, 0, base, ctx, ctx.next())]
 
 
-def main() -> int:
-    args = _build_parser().parse_args()
-    input_path = args.input.resolve()
-    output_xml_path = args.output.resolve()
-    output_rev_path = args.output_rev.resolve() if args.output_rev is not None else None
-    original_attributes_path = args.attributes.resolve() if args.attributes is not None else None
-    parser_executable = _resolve_rvmparser_binary(args.rvmparser_bin.resolve() if args.rvmparser_bin is not None else None)
-    python_executable = args.python_exe.resolve()
-    scripts_dir = Path(__file__).resolve().parent
-    rev_to_xml_script = scripts_dir / "rev_to_xml.py"
-    if not rev_to_xml_script.exists():
-        raise FileNotFoundError(f"Missing script: {rev_to_xml_script}")
-
-    _ensure_parent(output_xml_path)
-    if output_rev_path is not None:
-        _ensure_parent(output_rev_path)
-    stem = output_xml_path.stem or "managed"
-
-    with tempfile.TemporaryDirectory(prefix="rvm-managed-xml-") as temp_dir_text:
-        temp_dir = Path(temp_dir_text)
-        temp_rev = temp_dir / f"{stem}_managed.rev"
-        temp_xml = temp_dir / f"{stem}_managed.xml"
-        enrichment_attributes_path: Path | None = None
-
-        if original_attributes_path is not None:
-            enrichment_attributes_path = _resolve_attribute_sidecar(original_attributes_path, temp_dir)
-
-        if _is_rev_like_file(input_path):
-            temp_rev.write_text(_normalize_newlines(input_path.read_text(encoding="utf-8", errors="strict")), encoding="utf-8")
-            print(f"[RVM->REV] Input already REV-like; native parser stage skipped: {input_path}")
-        else:
-            _run_native_rvm_to_rev(
-                parser_executable=parser_executable,
-                input_path=input_path,
-                output_rev_path=temp_rev,
-                attributes_path=enrichment_attributes_path,
-                working_directory=temp_dir,
-            )
-
-        _run_rev_to_xml(
-            python_executable=python_executable,
-            rev_to_xml_script=rev_to_xml_script,
-            input_rev_path=temp_rev,
-            output_xml_path=temp_xml,
-            args=args,
-            working_directory=temp_dir,
-        )
-
-        enriched, named, restraints = _enrich_supports_in_xml(
-            xml_path=temp_xml,
-            attribute_path=enrichment_attributes_path,
-            args=args,
-        )
-        print(f"[ATTR->XML] Support enrichment: support_nodes={enriched}, ps_names_applied={named}, restraints_written={restraints}.")
-
-        shutil.copy2(temp_xml, output_xml_path)
-        if output_rev_path is not None:
-            shutil.copy2(temp_rev, output_rev_path)
-
-    print(f"Wrote XML output: {output_xml_path}")
-    if output_rev_path is not None:
-        print(f"Wrote intermediate REV: {output_rev_path}")
-    return 0
+def node_xml(n: dict) -> str:
+    p = n['pos']
+    lines = [
+        '      <Node>', f"        <NodeNumber>{n['number']}</NodeNumber>", f"        <NodeName>{x(n['name'])}</NodeName>", f"        <Endpoint>{n['endpoint']}</Endpoint>",
+        f"        <ComponentType>{x(n['ctype'])}</ComponentType>", f"        <Weight>{nfmt(n['weight'])}</Weight>", f"        <ComponentRefNo>{x(n['ref'])}</ComponentRefNo>",
+        f"        <ConnectionType>{x(n['conn'])}</ConnectionType>", f"        <OutsideDiameter>{nfmt(n['od'])}</OutsideDiameter>", f"        <WallThickness>{nfmt(n['wall'])}</WallThickness>",
+        f"        <CorrosionAllowance>{nfmt(n['corr'])}</CorrosionAllowance>", f"        <InsulationThickness>{nfmt(n['insu'])}</InsulationThickness>",
+        f"        <Position>{p[0]:.2f} {p[1]:.2f} {p[2]:.2f}</Position>", f"        <BendRadius>{nfmt(n['br'])}</BendRadius>",
+    ]
+    if n['bt'] is not None: lines.append(f"        <BendType>{n['bt']}</BendType>")
+    if n['alpha'] is not None: lines.append(f"        <AlphaAngle>{nfmt(n['alpha'])}</AlphaAngle>")
+    lines.append(f"        <SIF>{n['sif']}</SIF>")
+    for r in n.get('restraints') or []:
+        lines += ['        <Restraint>', f"          <Type>{x(r['type'])}</Type>", f"          <Stiffness>{x(r['stiffness'])}</Stiffness>", f"          <Gap>{x(r['gap'])}</Gap>", f"          <Friction>{x(r['friction'])}</Friction>", '        </Restraint>']
+    lines.append('      </Node>')
+    return '\n'.join(lines)
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def convert(input_path: Path, output_path: Path, opt):
+    text = read_attribute_text(input_path)
+    blocks = parse_blocks(text)
+    ctx = Ctx(opt)
+    project = input_path.stem
+    count = skipped = restraint_count = 0
+    bytype = {}
+    lines = ['<?xml version="1.0" encoding="utf-8"?>', '<PipeStressExport xmlns="http://aveva.com/pipeStress116.xsd">']
+    lines += ['  <DateTime></DateTime>', f'  <Source>{x(opt.source)}</Source>', '  <Version>0.0.0.0</Version>', '  <UserName>browser-runtime</UserName>', f'  <Purpose>{x(opt.purpose)}</Purpose>', f'  <ProjectName>{x(project)}</ProjectName>', f'  <MDBName>/{x(project)}</MDBName>', f'  <TitleLine>{x(opt.title_line)}</TitleLine>', '  <!-- Configuration information -->', '  <RestrainOpenEnds>No</RestrainOpenEnds>', '  <AmbientTemperature>0</AmbientTemperature>', '  <Pipe>', f'    <FullName>/{x(project)}</FullName>', '    <Ref></Ref>', '    <Branch>', f'      <Branchname>{x(project)}</Branchname>']
+    lines.append('      <Temperature>' + ''.join(f'<Temperature{i}>-100000</Temperature{i}>' for i in range(1, 10)) + '</Temperature>')
+    lines.append('      <Pressure>' + ''.join(f'<Pressure{i}>0</Pressure{i}>' for i in range(1, 10)) + '</Pressure>')
+    lines += ['      <MaterialNumber>0</MaterialNumber>', '      <InsulationDensity>0</InsulationDensity>', '      <FluidDensity>0</FluidDensity>']
+    for block in blocks:
+        nodes = expand(block, ctx)
+        if not nodes:
+            skipped += 1
+            continue
+        for node in nodes:
+            lines.append(node_xml(node))
+            count += 1
+            restraint_count += len(node.get('restraints') or [])
+            bytype[node['ctype']] = bytype.get(node['ctype'], 0) + 1
+    lines += ['    </Branch>', '  </Pipe>', f'  <!-- Attribute TXT upstream XML generated {count} Node records; support restraints {restraint_count}; skipped {skipped}. Counts: {bytype} -->', '</PipeStressExport>']
+    output_path.write_text('\n'.join(lines), encoding='utf-8')
+    print(f"Wrote {output_path} with {count} XML nodes; support restraints {restraint_count}; preserved counts: {bytype}; skipped {skipped}.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Convert AVEVA/RMSS attribute TXT to PSI116 XML.')
+    parser.add_argument('--input', required=True, type=Path)
+    parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--node-start', type=int, default=10)
+    parser.add_argument('--node-step', type=int, default=10)
+    parser.add_argument('--source', default='AVEVA PSI')
+    parser.add_argument('--purpose', default='RMSS attribute TXT conversion')
+    parser.add_argument('--title-line', default='RMSS Attribute TXT Output')
+    parser.add_argument('--default-diameter', type=float, default=100.0)
+    parser.add_argument('--default-wall-thickness', type=float, default=0.01)
+    parser.add_argument('--default-insulation-thickness', type=float, default=0.0)
+    parser.add_argument('--default-corrosion-allowance', type=float, default=0.0)
+    parser.add_argument('--support-stiffness', default='')
+    parser.add_argument('--support-gap', default='')
+    parser.add_argument('--support-friction', default='0.3')
+    parser.add_argument('--guide-gap', default='')
+    parser.add_argument('--line-stop-gap', default='')
+    parser.add_argument('--limit-gap', default='')
+    parser.add_argument('--rest-gap', default='')
+    parser.add_argument('--anchor-gap', default='')
+    parser.add_argument('--support-pipe-axis', default='X')
+    parser.add_argument('--vertical-axis', default='Y')
+    parser.add_argument('--line-stop-direction', default='')
+    parser.add_argument('--limit-direction', default='')
+    parser.add_argument('--rest-direction', default='')
+    args = parser.parse_args()
+    convert(args.input, args.output, args)
+
+
+if __name__ == '__main__':
+    main()
