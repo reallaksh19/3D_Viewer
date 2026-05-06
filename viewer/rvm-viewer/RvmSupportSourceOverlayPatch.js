@@ -106,11 +106,6 @@ function arrow(a, b, color, r) {
   const hd = new THREE.Mesh(new THREE.ConeGeometry(r * 3, hl, 12), mat(color)); hd.position.copy(a.clone().add(d.clone().multiplyScalar(sl + hl / 2))); orient(hd, d);
   g.add(sh, hd); return g;
 }
-function plate(c, side, axis, up, scale, color) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(scale * 1.15, scale * 0.14, scale * 0.65), mat(color));
-  m.position.copy(c); m.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(axis.clone().normalize(), up.clone().normalize(), side.clone().normalize()));
-  return m;
-}
 function supportObject(item, viewer, scale) {
   const up = new THREE.Vector3(0, 1, 0); const axis = pipeAxis(item.attrs, viewer); let side = new THREE.Vector3().crossVectors(axis, up);
   if (side.lengthSq() <= 1e-9) side = new THREE.Vector3(0, 0, 1); else side.normalize();
@@ -121,7 +116,7 @@ function supportObject(item, viewer, scale) {
   const color = item.kind === 'GUIDE' ? 0x30c48d : item.kind === 'LIMIT' ? 0xffb020 : item.kind === 'LINESTOP' ? 0xff6b35 : item.kind === 'ANCHOR' ? 0xd94cff : 0x2f80ed;
   const g = new THREE.Group(); g.name = `SUPPORT_SYMBOL_${item.tag}_${item.kind}`;
   g.userData = { supportSymbol: true, supportKind: item.kind, supportTag: item.tag, attributes: { ...item.attrs }, supportCoordinate: supportWorld.clone(), boreDiameter: item.bore };
-  const r = Math.max(scale * 0.025, 0.35); g.add(plate(base, side, axis, up, scale, color));
+  const r = Math.max(scale * 0.025, 0.35);
   if (item.kind === 'REST') g.add(arrow(base.clone().add(up.clone().multiplyScalar(-scale * 0.3)), target, color, r));
   else if (item.kind === 'GUIDE') { g.add(arrow(base.clone().add(side.clone().multiplyScalar(-scale * 0.78)), base.clone().add(side.clone().multiplyScalar(-scale * 0.14)), color, r)); g.add(arrow(base.clone().add(side.clone().multiplyScalar(scale * 0.78)), base.clone().add(side.clone().multiplyScalar(scale * 0.14)), color, r)); }
   else if (item.kind === 'LINESTOP' || item.kind === 'LIMIT') { g.add(arrow(base.clone().add(axis.clone().multiplyScalar(-scale * 0.82)), base.clone().add(axis.clone().multiplyScalar(-scale * 0.14)), color, r)); g.add(arrow(base.clone().add(axis.clone().multiplyScalar(scale * 0.82)), base.clone().add(axis.clone().multiplyScalar(scale * 0.14)), color, r)); }
@@ -137,7 +132,7 @@ function overlay(viewer) {
   const root = new THREE.Group(); root.name = ROOT; const seen = new Set();
   for (const item of supports) { const key = `${item.tag}:${item.kind}:${item.local.x.toFixed(1)}:${item.local.y.toFixed(1)}:${item.local.z.toFixed(1)}`.toUpperCase(); if (seen.has(key)) continue; seen.add(key); root.add(supportObject(item, viewer, scale)); }
   if (root.children.length) viewer.scene.add(root);
-  return { created: root.children.length, sourceSupports: supports.length, placement: 'source-hierarchy-support-coordinate-bore-offset' };
+  return { created: root.children.length, sourceSupports: supports.length, placement: 'source-hierarchy-support-coordinate-bore-offset-no-plate' };
 }
 
 on(RuntimeEvents.FILE_LOADED, (payload) => { if (payload?.source === 'rvm-tab' && payload?.kind === 'aveva-json') lastAvevaHierarchy = payload.payload; });
