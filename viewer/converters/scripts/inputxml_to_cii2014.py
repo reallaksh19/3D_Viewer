@@ -908,6 +908,7 @@ def _build_cii_text(
     header_overrides: HeaderOverrides,
     infer_reducer_angle_from_geometry: bool,
     reference_overrides: ReferenceElementOverrides | None,
+    coord_reconstruction_tolerance: float,
 ) -> tuple[str, dict[str, int]]:
     elements = model.elements
     if reference_overrides is not None:
@@ -921,7 +922,7 @@ def _build_cii_text(
     coords_payload = (
         list(reference_overrides.coords_payload)
         if reference_overrides is not None
-        else _build_coords_payload(elements, tolerance=5e-3)
+        else _build_coords_payload(elements, tolerance=coord_reconstruction_tolerance)
     )
     version_payload = _build_version_payload(model, header_overrides)
     edge_to_reducer_index, reducers = _infer_reducer_indices(
@@ -1251,17 +1252,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Convert CAESARII Input XML to CII.")
     parser.add_argument("--input", required=True, type=Path, help="Input XML path (CAESARII Input XML).")
     parser.add_argument("--output", required=True, type=Path, help="Output CII path.")
-    parser.add_argument(
-        "--reference-cii",
-        required=False,
-        type=Path,
-        help=(
-            "Optional reference CII. When provided, parser accepts legacy headers with trailing "
-            "spaces, aligns control/nonam metadata, reuses legacy section payloads (NODENAME, "
-            "DISPLMNT, ALLOWBLS, FLANGES, EQUIPMNT, MISCEL_1, UNITS, COORDS), and preserves "
-            "reference ELEMENTS block style (9/12+ lines per element)."
-        ),
-    )
     parser.add_argument("--default-diameter", required=False, type=float, default=0.0, help="Fallback diameter.")
     parser.add_argument(
         "--default-wall-thickness",
@@ -1337,6 +1327,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--infer-reducer-angle-from-geometry",
         action="store_true",
         help="Infer reducer half-angle from diameter delta and element run length.",
+    )
+    parser.add_argument(
+        "--coord-reconstruction-tolerance",
+        required=False,
+        type=float,
+        default=25.0,
+        help=(
+            "Tolerance in model length units for absolute coordinate closure checks "
+            "during COORDS reconstruction (default: 25.0)."
+        ),
     )
     parser.add_argument("--header-datetime", required=False, type=str, default=None, help="Override VERSION DateTime line text.")
     parser.add_argument("--header-source", required=False, type=str, default=None, help="Override VERSION Source line text.")
@@ -1453,22 +1453,13 @@ def main() -> int:
 
     model = _parse_model(args.input, defaults)
     reference_overrides: ReferenceElementOverrides | None = None
-    reference_path = args.reference_cii
-    if reference_path is None:
-        reference_path = _jobname_profile_reference(model.job_name)
-    if reference_path is None:
-        reference_path = _auto_detect_reference_cii(args.input)
-    if reference_path is not None:
-        reference_overrides = _load_reference_element_overrides(
-            path=reference_path,
-            expected_elements=len(model.elements),
-        )
     cii_text, stats = _build_cii_text(
         model=model,
         defaults=defaults,
         header_overrides=header_overrides,
         infer_reducer_angle_from_geometry=args.infer_reducer_angle_from_geometry,
         reference_overrides=reference_overrides,
+        coord_reconstruction_tolerance=args.coord_reconstruction_tolerance,
     )
     normalized_cii_text = cii_text.replace("\r\n", "\n").replace("\r", "\n")
     with args.output.open("w", encoding="utf-8", newline="\r\n") as output_file:

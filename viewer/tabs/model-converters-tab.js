@@ -20,18 +20,61 @@ const INPUTXML_HEADER_DEFAULTS = Object.freeze({
   headerProjectName: 'ZAU',
   headerMdbName: '/ZAU1',
 });
-const INPUTXML_AUTO_REFERENCE_PROFILES = Object.freeze([
-  {
-    namePattern: /^SYS-30-B7410250 \[INPUTXML BENCHMARK\]_INPUT(?: \(\d+\))?\.XML$/i,
-    outputName: 'SYS-30-B7410250 [CII BENCHMARK].cii',
-    fileName: 'inputxml_profile_sys30_b7410250_benchmark.cii',
-  },
-  {
-    namePattern: /^BM_CII_INPUT(?: \(\d+\))?\.XML$/i,
-    outputName: 'BM_CII[Benchmark].CII',
-    fileName: 'inputxml_profile_bm_cii_2019.cii',
-  },
-]);
+
+function _defaultInputxml2019LayoutConfigJson() {
+  return JSON.stringify({
+    elements: {
+      row3: ['0.000000', '0.000000', '0.000000', '0.000000', '0.000000', '0.000000'],
+      row4: ['10.0000', '30.0000', '0.000000', '0.000000', '0.000000', '0.000000'],
+      row5: ['0.000000', '0.000000', '0.000000', '0.000000', '0.000000', '0.000000'],
+      row6: ['0.499901E-04', '0.965312E-03', '0.000000', '0.000000', '0.000000', '15.0000'],
+      row7: ['0.000000', '0.000000', '0.000000', '0.000000', '0.000000', '0.000000'],
+      row8: ['0.000000', '0.000000', '0.000000', '0.000000', '9999.99', '9999.99'],
+      row9: ['0.000000', '0.000000', '0.000000', '0.000000', '0.000000'],
+      row10: ['0'],
+      row11: ['-1', '-1'],
+      row12: ['{bend}', '{rigid}', '0', '{restraint}', '{sif}', '0'],
+      row13: ['0', '0', '0', '{sif}', '0', '0'],
+      row14: ['{reducer}', '0', '{sif}'],
+      line_label: {
+        pointer_start: 0,
+        label_index_start: 1,
+        label_prefix: 'LINENO',
+        label_width: 1,
+        default_line: '0',
+        line_labels: ['10 unassigned'],
+      },
+    },
+    nodename: {
+      nonam_count: 0,
+      from_label: 'PS-XXX',
+      to_label: 'PS-XXX',
+      from_labels: [],
+      to_labels: [],
+    },
+    control: {
+      line1: ['{elements}', '0', '3', '0', '3', '0'],
+      line2: ['{bends}', '{rigids}', '0', '{restraints}', '3', '0'],
+      line3: ['0', '0', '0', '1', '{sifs}', '0'],
+      line4: ['4'],
+    },
+    sections: {
+      include_nodename: false,
+    },
+    miscel_1: {
+      material_id_default: '0.000',
+      material_ids: [],
+    },
+    units: {
+      numeric_lines: [
+        '      0.0000      0.00000      0.00000      0.00000      0.00000      0.00000',
+        '      0.000000      0.0000      0.00000      0.00000      0.00000      0.00000',
+        '      0.00000      0.00000      0.00000      0.00000      0.00000      0.00000',
+        '      0.00000      0.0000      0.0000      0.0000',
+      ],
+    },
+  }, null, 2);
+}
 const NATIVE_RVM_ENDPOINT_CANDIDATES = Object.freeze([
   'http://localhost:3000/api/native/rvm-to-rev',
   'http://localhost:3001/api/native/rvm-to-rev',
@@ -151,6 +194,7 @@ const CONVERTER_DEFS = Object.freeze({
   json_to_xml: {
     id: 'json_to_xml',
     label: 'JSON -> XML',
+    disabled: true,
     primaryAccept: '.json,.JSON',
     primaryLabel: 'RVM JSON Input',
     secondaryLabel: '',
@@ -192,6 +236,7 @@ const CONVERTER_DEFS = Object.freeze({
   stagedjson_to_xml: {
     id: 'stagedjson_to_xml',
     label: 'StagedJSON -> XML',
+    disabled: true,
     primaryAccept: '.json,.JSON',
     primaryLabel: 'Staged JSON Input',
     secondaryLabel: '',
@@ -259,6 +304,7 @@ const CONVERTER_DEFS = Object.freeze({
   inputxml_to_cii: {
     id: 'inputxml_to_cii',
     label: 'InputXML->CII(v2014)',
+    disabled: true,
     primaryAccept: '.xml,.XML',
     primaryLabel: 'Input XML',
     secondaryLabel: '',
@@ -274,6 +320,8 @@ const CONVERTER_DEFS = Object.freeze({
       defaultTemperature2: 0,
       defaultTemperature3: 0,
       defaultReducerAngle: 0,
+      coordReconstructionTolerance: 25,
+      layoutConfigJson: _defaultInputxml2019LayoutConfigJson(),
       ...INPUTXML_HEADER_DEFAULTS,
     },
     fields: [
@@ -286,6 +334,7 @@ const CONVERTER_DEFS = Object.freeze({
       { key: 'defaultTemperature2', label: 'Default Temperature2', type: 'number', step: '0.01' },
       { key: 'defaultTemperature3', label: 'Default Temperature3', type: 'number', step: '0.01' },
       { key: 'defaultReducerAngle', label: 'Default Reducer Angle', type: 'number', step: '0.01' },
+      { key: 'coordReconstructionTolerance', label: 'Coord Reconstruction Tolerance (mm)', type: 'number', step: '0.001' },
       { key: 'headerDateTime', label: 'Header DateTime', type: 'text' },
       { key: 'headerSource', label: 'Header Source', type: 'text' },
       { key: 'headerVersion', label: 'Header Version', type: 'text' },
@@ -297,7 +346,7 @@ const CONVERTER_DEFS = Object.freeze({
   },
   inputxml14_to_cii: {
     id: 'inputxml14_to_cii',
-    label: 'InputXML(Ver14) -> CII',
+    label: 'InputXML(Ver14) -> CII [TBA]',
     primaryAccept: '.xml,.XML',
     primaryLabel: 'Input XML (Ver14)',
     secondaryLabel: '',
@@ -313,6 +362,7 @@ const CONVERTER_DEFS = Object.freeze({
       defaultTemperature2: 0,
       defaultTemperature3: 0,
       defaultReducerAngle: 0,
+      coordReconstructionTolerance: 25,
       ...INPUTXML_HEADER_DEFAULTS,
     },
     fields: [
@@ -325,6 +375,7 @@ const CONVERTER_DEFS = Object.freeze({
       { key: 'defaultTemperature2', label: 'Default Temperature2', type: 'number', step: '0.01' },
       { key: 'defaultTemperature3', label: 'Default Temperature3', type: 'number', step: '0.01' },
       { key: 'defaultReducerAngle', label: 'Default Reducer Angle', type: 'number', step: '0.01' },
+      { key: 'coordReconstructionTolerance', label: 'Coord Reconstruction Tolerance (mm)', type: 'number', step: '0.001' },
       { key: 'headerDateTime', label: 'Header DateTime', type: 'text' },
       { key: 'headerSource', label: 'Header Source', type: 'text' },
       { key: 'headerVersion', label: 'Header Version', type: 'text' },
@@ -352,6 +403,8 @@ const CONVERTER_DEFS = Object.freeze({
       defaultTemperature2: 0,
       defaultTemperature3: 0,
       defaultReducerAngle: 0,
+      coordReconstructionTolerance: 25,
+      layoutConfigJson: _defaultInputxml2019LayoutConfigJson(),
       ...INPUTXML_HEADER_DEFAULTS,
     },
     fields: [
@@ -364,6 +417,7 @@ const CONVERTER_DEFS = Object.freeze({
       { key: 'defaultTemperature2', label: 'Default Temperature2', type: 'number', step: '0.01' },
       { key: 'defaultTemperature3', label: 'Default Temperature3', type: 'number', step: '0.01' },
       { key: 'defaultReducerAngle', label: 'Default Reducer Angle', type: 'number', step: '0.01' },
+      { key: 'coordReconstructionTolerance', label: 'Coord Reconstruction Tolerance (mm)', type: 'number', step: '0.001' },
       { key: 'headerDateTime', label: 'Header DateTime', type: 'text' },
       { key: 'headerSource', label: 'Header Source', type: 'text' },
       { key: 'headerVersion', label: 'Header Version', type: 'text' },
@@ -420,7 +474,7 @@ const CONVERTER_ORDER = Object.freeze([
 const ORDERED_CONVERTER_DEFS = Object.freeze(
   CONVERTER_ORDER
     .map((converterId) => CONVERTER_DEFS[converterId])
-    .filter(Boolean),
+    .filter((def) => !!def && def.disabled !== true),
 );
 
 const RMSS_BORE_FIELDS = Object.freeze(['HBOR', 'TBOR', 'ABORE', 'LBORE', 'DTXR']);
@@ -519,6 +573,7 @@ function _loadStoredState() {
   for (const def of ORDERED_CONVERTER_DEFS) {
     defaultsByConverter[def.id] = _clone(def.defaults);
   }
+  const enabledConverterIds = new Set(ORDERED_CONVERTER_DEFS.map((def) => def.id));
 
   let selectedConverter = 'rvm_to_rev';
   try {
@@ -528,10 +583,10 @@ function _loadStoredState() {
     }
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {
-      if (CONVERTER_DEFS[parsed.selectedConverter]) selectedConverter = parsed.selectedConverter;
+      if (enabledConverterIds.has(parsed.selectedConverter)) selectedConverter = parsed.selectedConverter;
       const source = parsed.defaultsByConverter || {};
       for (const [converterId, sourceValues] of Object.entries(source)) {
-        if (!CONVERTER_DEFS[converterId] || !sourceValues || typeof sourceValues !== 'object') continue;
+        if (!enabledConverterIds.has(converterId) || !sourceValues || typeof sourceValues !== 'object') continue;
         defaultsByConverter[converterId] = {
           ...defaultsByConverter[converterId],
           ...sourceValues,
@@ -559,6 +614,408 @@ function _readOptionValue(field, input) {
   return input.value;
 }
 
+function _summarizeJsonConfig(text) {
+  const source = String(text || '').trim();
+  if (!source) return 'Empty config (default script config will apply).';
+  try {
+    const parsed = JSON.parse(source);
+    const keys = Object.keys(parsed || {});
+    return `Configured keys: ${keys.join(', ') || '(none)'}`;
+  } catch {
+    return 'Invalid JSON (converter will fail until fixed).';
+  }
+}
+
+const INPUTXML2019_POPUP_HEADER_KEYS = Object.freeze([
+  'inferReducerAngleFromGeometry',
+  'defaultDiameter',
+  'defaultWallThickness',
+  'defaultInsulationThickness',
+  'defaultCorrosionAllowance',
+  'defaultTemperature1',
+  'defaultTemperature2',
+  'defaultTemperature3',
+  'defaultReducerAngle',
+  'coordReconstructionTolerance',
+  'headerDateTime',
+  'headerSource',
+  'headerVersion',
+  'headerUserName',
+  'headerPurpose',
+  'headerProjectName',
+  'headerMdbName',
+]);
+
+function _popupFieldValueToTyped(field, input) {
+  if (field.type === 'checkbox') return !!input.checked;
+  if (field.type === 'number') {
+    const value = Number(input.value);
+    return Number.isFinite(value) ? value : 0;
+  }
+  return String(input.value ?? '');
+}
+
+function _popupFieldValueAsText(field) {
+  if (field.type === 'checkbox') return '';
+  if (field.type === 'number') return Number.isFinite(Number(field.value)) ? String(field.value) : '0';
+  return String(field.value ?? '');
+}
+
+function _flattenConfigRows(value, path, rows) {
+  if (Array.isArray(value)) {
+    if (!value.length) {
+      rows.push({ path, type: 'array', value: '[]' });
+      return;
+    }
+    for (let index = 0; index < value.length; index += 1) {
+      _flattenConfigRows(value[index], `${path}[${index}]`, rows);
+    }
+    return;
+  }
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value);
+    if (!entries.length) {
+      rows.push({ path, type: 'object', value: '{}' });
+      return;
+    }
+    for (const [key, child] of entries) {
+      _flattenConfigRows(child, path ? `${path}.${key}` : key, rows);
+    }
+    return;
+  }
+  rows.push({
+    path,
+    type: value === null ? 'null' : typeof value,
+    value: typeof value === 'string' ? value : JSON.stringify(value),
+  });
+}
+
+function _openJsonPopup({
+  title,
+  value,
+  onSave,
+  onCancel,
+  headerFields,
+  requirementLines,
+}) {
+  const popupHeaderFields = Array.isArray(headerFields) ? headerFields : [];
+  const headerFieldsHtml = popupHeaderFields.map((field) => {
+    if (field.type === 'checkbox') {
+      return `
+        <label style="display:flex;align-items:center;gap:8px;color:#d7e6ff;font-size:13px;">
+          <input type="checkbox" data-popup-header-key="${_esc(field.key)}" ${field.value ? 'checked' : ''}>
+          <span>${_esc(field.label)}</span>
+        </label>
+      `;
+    }
+    const inputType = field.type === 'number' ? 'number' : 'text';
+    const stepAttr = field.step ? `step="${_esc(field.step)}"` : '';
+    return `
+      <label style="display:flex;flex-direction:column;gap:6px;">
+        <span style="color:#9cc5ff;font-size:12px;">${_esc(field.label)}</span>
+        <input type="${inputType}" ${stepAttr} data-popup-header-key="${_esc(field.key)}"
+          value="${_esc(_popupFieldValueAsText(field))}"
+          style="background:#182334;color:#e6edf5;border:1px solid #31455f;border-radius:6px;padding:8px;">
+      </label>
+    `;
+  }).join('');
+  const requirementText = Array.isArray(requirementLines) && requirementLines.length
+    ? requirementLines.map((line) => `<div style="color:#9aa8ba;font-size:12px;">${_esc(line)}</div>`).join('')
+    : '';
+  const overlay = document.createElement('div');
+  overlay.style.position = 'fixed';
+  overlay.style.inset = '0';
+  overlay.style.background = 'rgba(0,0,0,0.55)';
+  overlay.style.zIndex = '9999';
+  overlay.style.display = 'flex';
+  overlay.style.alignItems = 'center';
+  overlay.style.justifyContent = 'center';
+  overlay.innerHTML = `
+    <div style="width:min(1000px,96vw);height:min(780px,94vh);display:flex;flex-direction:column;background:#0f1724;border:1px solid #2c3a4f;border-radius:10px;overflow:hidden;">
+      <div style="padding:10px 12px;border-bottom:1px solid #2c3a4f;color:#9cc5ff;font-weight:700;">${_esc(title)}</div>
+      <div style="display:flex;gap:6px;padding:10px 12px 0 12px;">
+        <button type="button" data-popup-tab="header" class="model-converters-download-btn">Header</button>
+        <button type="button" data-popup-tab="config" class="model-converters-download-btn">Config</button>
+        <button type="button" data-popup-tab="json" class="model-converters-run-btn">JSON</button>
+      </div>
+      <div style="padding:10px 12px;color:#9aa8ba;font-size:12px;">Element-wise fields: <code>elements.line_label.line_labels</code>, <code>nodename.from_labels</code>/<code>to_labels</code>, <code>miscel_1.material_ids</code>. Control is block-level.</div>
+      <div style="padding:0 12px 10px 12px;">${requirementText}</div>
+      <div data-popup-panel="header" style="display:none;flex:1;padding:0 12px 12px 12px;overflow:auto;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;">
+          ${headerFieldsHtml || '<div style="color:#9aa8ba;">No header fields configured for this popup.</div>'}
+        </div>
+      </div>
+      <div data-popup-panel="config" style="display:none;flex:1;padding:0 12px 12px 12px;overflow:auto;">
+        <div data-popup-config-status style="margin-bottom:8px;color:#9aa8ba;font-size:12px;"></div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:6px;border-bottom:1px solid #31455f;color:#9cc5ff;">Path</th>
+              <th style="text-align:left;padding:6px;border-bottom:1px solid #31455f;color:#9cc5ff;">Type</th>
+              <th style="text-align:left;padding:6px;border-bottom:1px solid #31455f;color:#9cc5ff;">Value</th>
+            </tr>
+          </thead>
+          <tbody data-popup-config-rows></tbody>
+        </table>
+      </div>
+      <div data-popup-panel="json" style="display:flex;flex:1;padding:0 12px 12px 12px;">
+        <textarea data-popup-json-text style="flex:1;background:#182334;color:#e6edf5;border:1px solid #31455f;border-radius:8px;padding:10px;font-family:Consolas,monospace;font-size:12px;resize:none;">${_esc(String(value || ''))}</textarea>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding:10px 12px;border-top:1px solid #2c3a4f;background:#111c2c;">
+        <button type="button" data-popup-action="cancel" class="model-converters-download-btn">Cancel</button>
+        <button type="button" data-popup-action="save" class="model-converters-run-btn">Save</button>
+      </div>
+    </div>
+  `;
+  const textarea = overlay.querySelector('[data-popup-json-text]');
+  const configRowsEl = overlay.querySelector('[data-popup-config-rows]');
+  const configStatusEl = overlay.querySelector('[data-popup-config-status]');
+  const tabButtons = Array.from(overlay.querySelectorAll('[data-popup-tab]'));
+  const panels = Array.from(overlay.querySelectorAll('[data-popup-panel]'));
+  const activateTab = (tabName) => {
+    for (const button of tabButtons) {
+      const isActive = button.getAttribute('data-popup-tab') === tabName;
+      button.className = isActive ? 'model-converters-run-btn' : 'model-converters-download-btn';
+    }
+    for (const panel of panels) {
+      const isActive = panel.getAttribute('data-popup-panel') === tabName;
+      panel.style.display = isActive ? 'flex' : 'none';
+    }
+  };
+  const renderConfigTable = () => {
+    if (!configRowsEl || !configStatusEl) return;
+    const source = String(textarea?.value ?? '').trim();
+    if (!source) {
+      configStatusEl.textContent = 'Empty JSON.';
+      configRowsEl.innerHTML = '<tr><td colspan="3" style="padding:8px;color:#9aa8ba;">No config rows.</td></tr>';
+      return;
+    }
+    try {
+      const parsed = JSON.parse(source);
+      const rows = [];
+      _flattenConfigRows(parsed, '', rows);
+      configStatusEl.textContent = `Rows: ${rows.length}`;
+      if (!rows.length) {
+        configRowsEl.innerHTML = '<tr><td colspan="3" style="padding:8px;color:#9aa8ba;">No config rows.</td></tr>';
+        return;
+      }
+      configRowsEl.innerHTML = rows.map((row) => `
+        <tr>
+          <td style="padding:6px;border-bottom:1px solid #24354a;vertical-align:top;color:#e6edf5;"><code>${_esc(row.path || '(root)')}</code></td>
+          <td style="padding:6px;border-bottom:1px solid #24354a;vertical-align:top;color:#9cc5ff;">${_esc(row.type)}</td>
+          <td style="padding:6px;border-bottom:1px solid #24354a;vertical-align:top;color:#d7e6ff;"><code>${_esc(row.value)}</code></td>
+        </tr>
+      `).join('');
+    } catch (error) {
+      configStatusEl.textContent = `Invalid JSON: ${_toText(error?.message || error)}`;
+      configRowsEl.innerHTML = '<tr><td colspan="3" style="padding:8px;color:#ffb4b4;">Fix JSON to view table.</td></tr>';
+    }
+  };
+  for (const button of tabButtons) {
+    button.addEventListener('click', () => {
+      const tabName = button.getAttribute('data-popup-tab') || 'json';
+      if (tabName === 'config') renderConfigTable();
+      activateTab(tabName);
+    });
+  }
+  textarea?.addEventListener('input', () => {
+    const active = tabButtons.find((button) => button.className === 'model-converters-run-btn');
+    if (active?.getAttribute('data-popup-tab') === 'config') renderConfigTable();
+  });
+  activateTab('header');
+  const close = () => overlay.remove();
+  overlay.querySelector('[data-popup-action="cancel"]')?.addEventListener('click', () => {
+    onCancel?.();
+    close();
+  });
+  overlay.querySelector('[data-popup-action="save"]')?.addEventListener('click', () => {
+    const headerValues = {};
+    for (const field of popupHeaderFields) {
+      const input = overlay.querySelector(`[data-popup-header-key="${field.key}"]`);
+      if (!input) continue;
+      headerValues[field.key] = _popupFieldValueToTyped(field, input);
+    }
+    onSave?.({ jsonText: textarea?.value ?? '', headerValues });
+    close();
+  });
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) {
+      onCancel?.();
+      close();
+    }
+  });
+  document.body.appendChild(overlay);
+}
+
+function _openJsonPopupAsync(options) {
+  return new Promise((resolve) => {
+    _openJsonPopup({
+      ...options,
+      onSave: (payload) => resolve({ saved: true, payload }),
+      onCancel: () => resolve({ saved: false, payload: null }),
+    });
+  });
+}
+
+function _parseInputxml2019Requirements(xmlText) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(String(xmlText || ''), 'application/xml');
+  const parserError = doc.querySelector('parsererror');
+  if (parserError) {
+    throw new Error('Input XML parse failed. Cannot derive file-specific config requirements.');
+  }
+
+  const elements = Array.from(doc.getElementsByTagName('PIPINGELEMENT'));
+  if (!elements.length) {
+    throw new Error('Input XML has no PIPINGELEMENT rows. Cannot derive file-specific config requirements.');
+  }
+
+  let bendCount = 0;
+  let rigidCount = 0;
+  let restraintCount = 0;
+  let sifCount = 0;
+  const nodeIds = new Set();
+
+  for (const element of elements) {
+    bendCount += element.getElementsByTagName('BEND').length;
+    rigidCount += element.getElementsByTagName('RIGID').length;
+    restraintCount += element.getElementsByTagName('RESTRAINT').length;
+    sifCount += element.getElementsByTagName('SIF').length;
+
+    const fromNode = Number(element.getAttribute('FROM_NODE'));
+    const toNode = Number(element.getAttribute('TO_NODE'));
+    if (Number.isFinite(fromNode)) nodeIds.add(fromNode);
+    if (Number.isFinite(toNode)) nodeIds.add(toNode);
+  }
+
+  return {
+    elementCount: elements.length,
+    bendCount,
+    rigidCount,
+    restraintCount,
+    sifCount,
+    nodeCount: nodeIds.size,
+  };
+}
+
+function _parseInputxml2019ConfigOrDefault(layoutConfigJsonText) {
+  const source = String(layoutConfigJsonText || '').trim();
+  if (!source) return { config: JSON.parse(_defaultInputxml2019LayoutConfigJson()), parseIssue: null };
+  try {
+    const parsed = JSON.parse(source);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {
+        config: JSON.parse(_defaultInputxml2019LayoutConfigJson()),
+        parseIssue: 'Existing config is not a JSON object. Replaced with default profile.',
+      };
+    }
+    return { config: parsed, parseIssue: null };
+  } catch {
+    return {
+      config: JSON.parse(_defaultInputxml2019LayoutConfigJson()),
+      parseIssue: 'Existing config is invalid JSON. Replaced with default profile.',
+    };
+  }
+}
+
+function _prepareInputxml2019ConfigForRequirements(layoutConfigJsonText, requirements) {
+  const { config, parseIssue } = _parseInputxml2019ConfigOrDefault(layoutConfigJsonText);
+  const notes = [];
+  if (parseIssue) notes.push(parseIssue);
+
+  if (!config.compatibility || typeof config.compatibility !== 'object' || Array.isArray(config.compatibility)) {
+    config.compatibility = {};
+  }
+  if (!config.compatibility.raw_override_mode) {
+    config.compatibility.raw_override_mode = 'schema_validated';
+    notes.push('Set compatibility.raw_override_mode to schema_validated for robust file-based generation.');
+  }
+
+  if (!config.elements || typeof config.elements !== 'object' || Array.isArray(config.elements)) {
+    config.elements = {};
+  }
+  if (!config.elements.line_label || typeof config.elements.line_label !== 'object' || Array.isArray(config.elements.line_label)) {
+    config.elements.line_label = {};
+  }
+  if (!Array.isArray(config.elements.line_label.line_labels)) {
+    config.elements.line_label.line_labels = [];
+  }
+  const lineLabelsCount = config.elements.line_label.line_labels.length;
+
+  if (Array.isArray(config.elements.raw_block_overrides) && config.elements.raw_block_overrides.length > 0) {
+    if (config.elements.raw_block_overrides.length !== requirements.elementCount) {
+      notes.push(
+        `Cleared elements.raw_block_overrides (${config.elements.raw_block_overrides.length}) because file has ${requirements.elementCount} elements.`,
+      );
+      delete config.elements.raw_block_overrides;
+    }
+  }
+
+  if (!config.sections || typeof config.sections !== 'object' || Array.isArray(config.sections)) {
+    config.sections = {};
+  }
+  if (config.sections.raw_payload_overrides && typeof config.sections.raw_payload_overrides === 'object' && !Array.isArray(config.sections.raw_payload_overrides)) {
+    const rawElements = config.sections.raw_payload_overrides.ELEMENTS;
+    if (Array.isArray(rawElements)) {
+      const expectedElementLines = requirements.elementCount * 15;
+      if (rawElements.length !== expectedElementLines) {
+        notes.push(
+          `Cleared sections.raw_payload_overrides because ELEMENTS payload length (${rawElements.length}) does not match required ${expectedElementLines}.`,
+        );
+        delete config.sections.raw_payload_overrides;
+      }
+    }
+  }
+
+  if (!config.miscel_1 || typeof config.miscel_1 !== 'object' || Array.isArray(config.miscel_1)) {
+    config.miscel_1 = {};
+  }
+  if (!Array.isArray(config.miscel_1.material_ids)) {
+    config.miscel_1.material_ids = [];
+  }
+  const materialIdsCount = config.miscel_1.material_ids.length;
+
+  const requirementLines = [
+    `Detected from selected XML: ${requirements.elementCount} elements, ${requirements.bendCount} bends, ${requirements.rigidCount} rigids, ${requirements.restraintCount} restraints, ${requirements.sifCount} SIF blocks, ${requirements.nodeCount} nodes.`,
+    `Element-wise configurable lengths: elements.line_label.line_labels=${requirements.elementCount}, miscel_1.material_ids=${requirements.elementCount}.`,
+    `Current config lengths: line_labels=${lineLabelsCount}, material_ids=${materialIdsCount}.`,
+  ];
+  for (const note of notes) requirementLines.push(note);
+
+  return {
+    jsonText: JSON.stringify(config, null, 2),
+    requirementLines,
+  };
+}
+
+async function _openInputxml2019PreRunPopup(def, values, primaryFileName, primaryBytes) {
+  const xmlText = _decodeTextUtf8(primaryBytes);
+  const requirements = _parseInputxml2019Requirements(xmlText);
+  const prepared = _prepareInputxml2019ConfigForRequirements(values.layoutConfigJson, requirements);
+
+  const popupHeaderFields = def.fields
+    .filter((entry) => INPUTXML2019_POPUP_HEADER_KEYS.includes(entry.key))
+    .map((entry) => ({
+      ...entry,
+      value: values[entry.key],
+    }));
+
+  const popupResult = await _openJsonPopupAsync({
+    title: `${def.label}: File-based Config Review (${_toText(primaryFileName)})`,
+    value: prepared.jsonText,
+    headerFields: popupHeaderFields,
+    requirementLines: prepared.requirementLines,
+  });
+
+  if (!popupResult.saved || !popupResult.payload) return false;
+  const { jsonText, headerValues } = popupResult.payload;
+  values.layoutConfigJson = jsonText;
+  for (const [headerKey, headerValue] of Object.entries(headerValues || {})) {
+    values[headerKey] = headerValue;
+  }
+  return true;
+}
+
 function _buildAdvancedFieldsHtml(def, values) {
   return def.fields.map((field) => {
     const key = field.key;
@@ -580,6 +1037,19 @@ function _buildAdvancedFieldsHtml(def, values) {
               <option value="${_esc(option)}" ${String(option) === String(value) ? 'selected' : ''}>${_esc(option)}</option>
             `).join('')}
           </select>
+        </label>
+      `;
+    }
+    if (field.type === 'json-popup') {
+      const summary = _summarizeJsonConfig(value);
+      return `
+        <label class="model-converters-label">
+          <span>${_esc(field.label)}</span>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button type="button" class="model-converters-download-btn" data-json-popup-key="${key}">Open Popup</button>
+            <small class="model-converters-muted">${_esc(summary)}</small>
+          </div>
+          <textarea data-option-key="${key}" style="display:none;">${_esc(String(value || ''))}</textarea>
         </label>
       `;
     }
@@ -1645,6 +2115,36 @@ export function renderModelConvertersTab(container) {
       input.addEventListener('input', updateValue);
       input.addEventListener('change', updateValue);
     }
+    for (const field of def.fields) {
+      if (field.type !== 'json-popup') continue;
+      const button = advancedFieldsEl.querySelector(`[data-json-popup-key="${field.key}"]`);
+      const input = advancedFieldsEl.querySelector(`[data-option-key="${field.key}"]`);
+      if (!button || !input) continue;
+      button.addEventListener('click', () => {
+        const popupHeaderFields = (def.id === 'inputxml_to_cii2019' && field.key === 'layoutConfigJson')
+          ? def.fields
+            .filter((entry) => INPUTXML2019_POPUP_HEADER_KEYS.includes(entry.key))
+            .map((entry) => ({
+              ...entry,
+              value: values[entry.key],
+            }))
+          : [];
+        _openJsonPopup({
+          title: `${def.label}: ${field.label}`,
+          value: input.value || '',
+          headerFields: popupHeaderFields,
+          onSave: ({ jsonText, headerValues }) => {
+            input.value = jsonText;
+            values[field.key] = jsonText;
+            for (const [headerKey, headerValue] of Object.entries(headerValues || {})) {
+              values[headerKey] = headerValue;
+            }
+            persist();
+            renderAdvanced();
+          },
+        });
+      });
+    }
   }
 
   function renderFileControls() {
@@ -1725,7 +2225,7 @@ export function renderModelConvertersTab(container) {
       return;
     }
     runBtnEl.disabled = true;
-    setStatus('Running converter...', 'running');
+    setStatus(selectedConverter === 'inputxml_to_cii2019' ? 'Preparing file-based config...' : 'Running converter...', 'running');
     setLogs([]);
     outputEl.innerHTML = '<span class="model-converters-muted">Working...</span>';
     _3DModelConv_resetPreview('Running conversion...');
@@ -1737,6 +2237,26 @@ export function renderModelConvertersTab(container) {
     try {
       const primaryBytes = primaryFile ? await primaryFile.arrayBuffer() : null;
       const secondaryBytes = (def.secondaryLabel && secondaryFile) ? await secondaryFile.arrayBuffer() : null;
+      const runValues = activeValues();
+
+      if (selectedConverter === 'inputxml_to_cii2019') {
+        if (!primaryFile || !primaryBytes) {
+          throw new Error('Primary input file is required for InputXML->CII(2019).');
+        }
+        const proceed = await _openInputxml2019PreRunPopup(def, runValues, primaryFile.name, primaryBytes);
+        if (!proceed) {
+          const message = 'Cancelled: conversion aborted in file-based config popup.';
+          setStatus(message, '');
+          outputEl.innerHTML = '<span class="model-converters-muted">No output generated.</span>';
+          setLogs([message]);
+          _3DModelConv_resetPreview('Preview not available yet.');
+          return;
+        }
+        persist();
+        renderAdvanced();
+        setStatus('Running converter...', 'running');
+      }
+
       const inputFiles = [];
       if (primaryFile && primaryBytes) {
         inputFiles.push({ role: 'primary', name: primaryFile.name, bytes: primaryBytes });
@@ -1744,20 +2264,6 @@ export function renderModelConvertersTab(container) {
       if (def.secondaryLabel && secondaryFile && secondaryBytes) {
         inputFiles.push({ role: 'secondary', name: secondaryFile.name, bytes: secondaryBytes });
       }
-      if (
-        (
-          selectedConverter === 'inputxml_to_cii'
-          || selectedConverter === 'inputxml14_to_cii'
-          || selectedConverter === 'inputxml_to_cii2019'
-        )
-        && !inputFiles.some((entry) => entry?.role === 'secondary')
-      ) {
-        const autoReference = await _loadInputXmlAutoReference(primaryFile?.name || '');
-        if (autoReference?.bytes) {
-          inputFiles.push({ role: 'secondary', name: autoReference.name, bytes: autoReference.bytes });
-        }
-      }
-
       let response = null;
       if (selectedConverter === 'rvm_to_rev') {
         if (!primaryFile || !primaryBytes) {
@@ -1776,13 +2282,13 @@ export function renderModelConvertersTab(container) {
             primaryBytes,
             secondaryFile,
             secondaryBytes,
-            activeValues(),
+            runValues,
             ensureRuntime,
           );
         } else if (secondaryFile && secondaryBytes) {
           const attText = _decodeTextUtf8(secondaryBytes);
           const hierarchy = parseRmssAttributes(attText, state.rvm?.routing);
-          const xmlFromAtt = _buildPsiXmlFromRmssHierarchy(hierarchy, secondaryFile.name, activeValues());
+          const xmlFromAtt = _buildPsiXmlFromRmssHierarchy(hierarchy, secondaryFile.name, runValues);
           response = {
             outputs: [
               {
@@ -1814,7 +2320,7 @@ export function renderModelConvertersTab(container) {
           throw new Error('Primary staged JSON input is required for StagedJSON -> XML conversion.');
         }
         const stagedJsonText = _decodeTextUtf8(primaryBytes);
-        const stagedResult = _buildXmlFromStagedJsonText(stagedJsonText, primaryFile.name, activeValues());
+        const stagedResult = _buildXmlFromStagedJsonText(stagedJsonText, primaryFile.name, runValues);
         response = {
           outputs: [
             {
@@ -1840,7 +2346,7 @@ export function renderModelConvertersTab(container) {
         response = await (await ensureRuntime()).runJob({
           converterId: selectedConverter,
           inputFiles,
-          options: activeValues(),
+          options: runValues,
         });
       }
       const outputs = Array.isArray(response.outputs) ? response.outputs : [];

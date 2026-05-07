@@ -150,7 +150,6 @@ export function buildInvocation(converterId, primaryPath, primaryName, secondary
     || converterId === 'inputxml14_to_cii'
     || converterId === 'inputxml_to_cii2019'
   ) {
-    if (secondaryPath) argv.push('--reference-cii', secondaryPath);
     if (options?.inferReducerAngleFromGeometry) argv.push('--infer-reducer-angle-from-geometry');
     pushOptionalNumberArg(argv, '--default-diameter', options?.defaultDiameter);
     pushOptionalNumberArg(argv, '--default-wall-thickness', options?.defaultWallThickness);
@@ -160,6 +159,7 @@ export function buildInvocation(converterId, primaryPath, primaryName, secondary
     pushOptionalNumberArg(argv, '--default-temperature2', options?.defaultTemperature2);
     pushOptionalNumberArg(argv, '--default-temperature3', options?.defaultTemperature3);
     pushOptionalNumberArg(argv, '--default-reducer-angle', options?.defaultReducerAngle);
+    pushOptionalNumberArg(argv, '--coord-reconstruction-tolerance', options?.coordReconstructionTolerance);
     pushOptionalStringArg(argv, '--header-datetime', options?.headerDateTime);
     pushOptionalStringArg(argv, '--header-source', options?.headerSource);
     pushOptionalStringArg(argv, '--header-version', options?.headerVersion);
@@ -167,6 +167,9 @@ export function buildInvocation(converterId, primaryPath, primaryName, secondary
     pushOptionalStringArg(argv, '--header-purpose', options?.headerPurpose);
     pushOptionalStringArg(argv, '--header-project-name', options?.headerProjectName);
     pushOptionalStringArg(argv, '--header-mdb-name', options?.headerMdbName);
+    if (converterId === 'inputxml_to_cii2019') {
+      pushOptionalStringArg(argv, '--layout-config-json', options?.layoutConfigJson);
+    }
   } else if (converterId === 'pdf_to_inputxml') {
     if (secondaryPath) argv.push('--misc-pdf', secondaryPath);
   } else if (converterId === 'pdf_to_inputxml_cii14') {
