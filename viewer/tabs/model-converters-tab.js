@@ -2034,10 +2034,7 @@ export function renderModelConvertersTab(container) {
           <small id="model-converters-secondary-name">No file selected.</small>
         </label>
 
-        <details class="model-converters-advanced">
-          <summary>Advanced options</summary>
-          <div id="model-converters-advanced-fields" class="model-converters-advanced-fields"></div>
-        </details>
+        <div id="model-converters-advanced-fields" class="model-converters-advanced-fields"></div>
 
         <button id="model-converters-run" class="model-converters-run-btn">Run Conversion</button>
       </aside>
