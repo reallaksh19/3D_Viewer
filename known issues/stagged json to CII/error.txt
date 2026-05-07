@@ -1,0 +1,1 @@
+Wrote /work/job_1778041551486_263143/RMSS_ATTRIBUTE_managed_stage (1)_stagedjson_to_xml_xml_to_cii.cii with 1017 elements, 0 restraints, 0 bends, 0 SIF/tee entries, 0 reducers.
