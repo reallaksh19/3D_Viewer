@@ -248,7 +248,7 @@ const CONVERTER_DEFS = Object.freeze({
       wallThickness: 0.01,
     },
     fields: [
-      { key: 'inputxmlBookmark', label: 'Bookmark File Path', type: 'text' },
+      { key: 'inputxmlBookmark', label: 'Defaults Bookmark JSON (overrides B7410250 benchmark)', type: 'text' },
       { key: 'nodeStart', label: 'Node Start', type: 'number', step: '1' },
       { key: 'nodeStep', label: 'Node Step', type: 'number', step: '1' },
       { key: 'jobName', label: 'Job Name', type: 'text' },
