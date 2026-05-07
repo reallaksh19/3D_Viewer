@@ -225,37 +225,36 @@ def process_branch(branch: dict, na: NodeAllocator, defaults: InputXmlDefaults,
             i += 1
             continue
 
-        # --- ELBO / BEND: split into 2 elements ---
+        # --- ELBO / BEND: arm1 (with BEND child) + arm2 (plain) ---
         if typ in ('ELBO', 'BEND'):
             apos_raw = pt(attrs.get('APOS'))
             lpos_raw = pt(attrs.get('LPOS'))
             cpos_raw = _cpos(attrs)
             if cpos_raw is None:
-                cpos_raw = apos_raw  # fallback: zero-length arm1
+                cpos_raw = apos_raw
             od = _bore_od(attrs, branch_bore) or prev_od or SENTINEL
 
-            # arm1: apos -> cpos
             arm1_delta = vsub(cpos_raw, apos_raw)
-            # arm2: cpos -> lpos
             arm2_delta = vsub(lpos_raw, cpos_raw)
+
+            # Zero-delta BEND: apos==cpos==lpos (anchor/stub marker)
+            # Emit ONE element (arm1 only) with radius=0 BEND child.
+            # Update the position map so the next element starts at the new node.
+            is_zero_delta = vlen(arm1_delta) < 1.0 and vlen(arm2_delta) < 1.0
 
             bend_radius_val = vlen(arm1_delta)
             if bend_radius_val < 0.1:
                 bend_radius_val = vlen(arm2_delta)
-            if bend_radius_val < 0.1:
+            # For zero-delta BENDs keep radius as 0.0 (not SENTINEL) so BEND child is emitted.
+            if bend_radius_val < 0.1 and not is_zero_delta:
                 bend_radius_val = SENTINEL
 
             fn1 = na.get_or_alloc(apos_raw)
-            mid = na.alloc()
-            tn1 = mid
-            fn2 = mid
-            tn2 = na.get_or_alloc(lpos_raw)
+            tn1 = na.alloc()
             bend_mid = na.alloc_mid(tn1)
 
             dx1, dy1, dz1 = encode_delta(*arm1_delta)
-            dx2, dy2, dz2 = encode_delta(*arm2_delta)
 
-            # Diameter/wall/temp for arm1
             diam1 = od if (prev_od is None or (od is not None and abs(od - prev_od) > 0.5)) else SENTINEL
             elem_idx = first_element_index + len(elements)
             temp1_val = _temp_for(elem_idx, defaults)
@@ -278,12 +277,20 @@ def process_branch(branch: dict, na: NodeAllocator, defaults: InputXmlDefaults,
             if od is not None and od != SENTINEL:
                 prev_od = od
 
-            # arm2 has no BEND child
-            diam2 = SENTINEL  # diameter carry-forward after arm1
+            if is_zero_delta:
+                # Update position map: next element at same position → gets tn1
+                na._map[tuple(round(c) for c in apos_raw)] = tn1
+                i += 1
+                continue
+
+            # arm2: plain element, no BEND child
+            fn2 = tn1
+            tn2 = na.get_or_alloc(lpos_raw)
+            dx2, dy2, dz2 = encode_delta(*arm2_delta)
             e2 = Element(
                 from_node=fn2, to_node=tn2,
                 dx=dx2, dy=dy2, dz=dz2,
-                diameter=diam2, wall=SENTINEL, temp1=SENTINEL,
+                diameter=SENTINEL, wall=SENTINEL, temp1=SENTINEL,
                 modulus=defaults.modulus, hot_mod1=defaults.modulus,
                 rigid=False,
             )
@@ -569,21 +576,29 @@ def detect_anchors(branches: list[dict], all_elements: list[Element],
     if all_elements:
         anchors.append((0, 'from'))
 
+    # Collect branch names to distinguish equipment refs from branch-to-branch refs
+    branch_names = set()
+    for b in branches:
+        name = b.get('attributes', {}).get('NAME', '')
+        if name:
+            branch_names.add(name)
+
     for bi, branch in enumerate(branches):
         start_idx = branch_start_indices[bi]
         children = branch.get('children', [])
         b_attrs = branch.get('attributes', {})
 
-        # Rule 2: terminal branch (connects to equipment via TREF)
+        # Rule 2: terminal branch connecting to equipment (not another branch, not PSI '=' ref)
         tref = b_attrs.get('TREF', '')
-        if tref and tref.strip():
-            # Find last element of this branch
-            if bi + 1 < len(branch_start_indices):
-                end_idx = branch_start_indices[bi + 1] - 1
-            else:
-                end_idx = len(all_elements) - 1
-            if 0 <= end_idx < len(all_elements) and end_idx != 0:
-                anchors.append((end_idx, 'to'))
+        if tref and tref.strip() and not tref.startswith('='):
+            if tref not in branch_names:
+                # Find last element of this branch
+                if bi + 1 < len(branch_start_indices):
+                    end_idx = branch_start_indices[bi + 1] - 1
+                else:
+                    end_idx = len(all_elements) - 1
+                if 0 <= end_idx < len(all_elements) and end_idx != 0:
+                    anchors.append((end_idx, 'to'))
 
         # Rule 3: branch starting with zero-delta BEND
         if children and children[0].get('type') == 'BEND':

@@ -62,6 +62,7 @@ function converterSpec(converterId) {
   if (converterId === 'rev_to_xml') return { script: 'rev_to_xml.py', extension: '.xml' };
   if (converterId === 'json_to_xml') return { script: 'json_to_xml.py', extension: '.xml' };
   if (converterId === 'stagedjson_to_xml') return { script: 'stagedjson_to_xml.py', extension: '.xml' };
+  if (converterId === 'stagedjson_to_inputxml') return { script: 'stagedjson_to_inputxml.py', extension: '.xml' };
   if (converterId === 'rev_to_stp') return { script: 'rev_to_stp.py', extension: '.stp' };
   if (converterId === 'xml_to_cii') return { script: 'xml_to_cii.py', extension: '.cii' };
   if (converterId === 'inputxml_to_cii') return { script: 'inputxml_to_cii.py', extension: '.cii' };
@@ -136,6 +137,15 @@ export function buildInvocation(converterId, primaryPath, primaryName, secondary
     pushOptionalNumberArg(argv, '--default-corrosion-allowance', options?.defaultCorrosionAllowance);
     pushOptionalNumberArg(argv, '--default-insulation-thickness', options?.defaultInsulationThickness);
     pushSupportArgs(argv, options);
+  } else if (converterId === 'stagedjson_to_inputxml') {
+    pushOptionalStringArg(argv, '--bookmark', options?.inputxmlBookmark);
+    pushOptionalNumberArg(argv, '--node-start', options?.nodeStart);
+    pushOptionalNumberArg(argv, '--node-step', options?.nodeStep);
+    pushOptionalNumberArg(argv, '--temperature1', options?.temperature1);
+    pushOptionalNumberArg(argv, '--wall-thickness', options?.wallThickness);
+    pushOptionalNumberArg(argv, '--modulus', options?.modulus);
+    pushOptionalStringArg(argv, '--material-name', options?.materialName);
+    pushOptionalStringArg(argv, '--job-name', options?.jobName);
   } else if (converterId === 'rev_to_stp') {
     argv.push('--coord-factor', String(toFiniteNumber(options?.coordFactor, 1000)));
     pushOptionalStringArg(argv, '--support-path-contains', options?.supportPathContains);
