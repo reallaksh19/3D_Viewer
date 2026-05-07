@@ -716,6 +716,18 @@ function _flattenConfigRows(value, path, rows) {
   });
 }
 
+function _setValueAtPath(obj, pathStr, value) {
+  const parts = pathStr.replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean);
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    if (cur == null || typeof cur !== 'object') return;
+    cur = cur[parts[i]];
+  }
+  if (cur != null && typeof cur === 'object') {
+    cur[parts[parts.length - 1]] = value;
+  }
+}
+
 function _openJsonPopup({
   title,
   value,
@@ -761,8 +773,8 @@ function _openJsonPopup({
       <div style="padding:10px 12px;border-bottom:1px solid #2c3a4f;color:#9cc5ff;font-weight:700;">${_esc(title)}</div>
       <div style="display:flex;gap:6px;padding:10px 12px 0 12px;">
         <button type="button" data-popup-tab="header" class="model-converters-download-btn">Header</button>
-        <button type="button" data-popup-tab="config" class="model-converters-download-btn">Config</button>
-        <button type="button" data-popup-tab="json" class="model-converters-run-btn">JSON</button>
+        <button type="button" data-popup-tab="config" class="model-converters-run-btn">Config</button>
+        <button type="button" data-popup-tab="json" class="model-converters-download-btn">JSON</button>
       </div>
       <div style="padding:10px 12px;color:#9aa8ba;font-size:12px;">Element-wise fields: <code>elements.line_label.line_labels</code>, <code>nodename.from_labels</code>/<code>to_labels</code>, <code>miscel_1.material_ids</code>. Control is block-level.</div>
       <div style="padding:0 12px 10px 12px;">${requirementText}</div>
@@ -816,26 +828,54 @@ function _openJsonPopup({
       configRowsEl.innerHTML = '<tr><td colspan="3" style="padding:8px;color:#9aa8ba;">No config rows.</td></tr>';
       return;
     }
+    let parsed;
     try {
-      const parsed = JSON.parse(source);
-      const rows = [];
-      _flattenConfigRows(parsed, '', rows);
-      configStatusEl.textContent = `Rows: ${rows.length}`;
-      if (!rows.length) {
-        configRowsEl.innerHTML = '<tr><td colspan="3" style="padding:8px;color:#9aa8ba;">No config rows.</td></tr>';
-        return;
-      }
-      configRowsEl.innerHTML = rows.map((row) => `
-        <tr>
-          <td style="padding:6px;border-bottom:1px solid #24354a;vertical-align:top;color:#e6edf5;"><code>${_esc(row.path || '(root)')}</code></td>
-          <td style="padding:6px;border-bottom:1px solid #24354a;vertical-align:top;color:#9cc5ff;">${_esc(row.type)}</td>
-          <td style="padding:6px;border-bottom:1px solid #24354a;vertical-align:top;color:#d7e6ff;"><code>${_esc(row.value)}</code></td>
-        </tr>
-      `).join('');
+      parsed = JSON.parse(source);
     } catch (error) {
       configStatusEl.textContent = `Invalid JSON: ${_toText(error?.message || error)}`;
       configRowsEl.innerHTML = '<tr><td colspan="3" style="padding:8px;color:#ffb4b4;">Fix JSON to view table.</td></tr>';
+      return;
     }
+    const rows = [];
+    _flattenConfigRows(parsed, '', rows);
+    configStatusEl.textContent = `Rows: ${rows.length}`;
+    if (!rows.length) {
+      configRowsEl.innerHTML = '<tr><td colspan="3" style="padding:8px;color:#9aa8ba;">No config rows.</td></tr>';
+      return;
+    }
+    const inputStyle = 'background:#182334;color:#e6edf5;border:1px solid #31455f;border-radius:4px;padding:3px 6px;font-size:12px;width:100%;box-sizing:border-box;';
+    configRowsEl.innerHTML = rows.map((row) => {
+      let cellHtml;
+      if (row.type === 'boolean') {
+        cellHtml = `<input type="checkbox" data-config-path="${_esc(row.path)}" data-config-type="boolean" ${row.value === 'true' ? 'checked' : ''}>`;
+      } else if (row.type === 'number') {
+        cellHtml = `<input type="number" data-config-path="${_esc(row.path)}" data-config-type="number" value="${_esc(row.value)}" style="${inputStyle}">`;
+      } else if (row.type === 'string') {
+        cellHtml = `<input type="text" data-config-path="${_esc(row.path)}" data-config-type="string" value="${_esc(row.value)}" style="${inputStyle}">`;
+      } else {
+        cellHtml = `<code style="color:#9aa8ba;">${_esc(row.value)}</code>`;
+      }
+      return `
+        <tr>
+          <td style="padding:6px;border-bottom:1px solid #24354a;vertical-align:middle;color:#e6edf5;"><code>${_esc(row.path || '(root)')}</code></td>
+          <td style="padding:6px;border-bottom:1px solid #24354a;vertical-align:middle;color:#9cc5ff;white-space:nowrap;">${_esc(row.type)}</td>
+          <td style="padding:6px;border-bottom:1px solid #24354a;vertical-align:middle;color:#d7e6ff;">${cellHtml}</td>
+        </tr>
+      `;
+    }).join('');
+    configRowsEl.querySelectorAll('[data-config-path]').forEach((input) => {
+      const eventName = input.type === 'checkbox' ? 'change' : 'input';
+      input.addEventListener(eventName, () => {
+        const configPath = input.getAttribute('data-config-path');
+        const configType = input.getAttribute('data-config-type');
+        let val;
+        if (configType === 'boolean') val = input.checked;
+        else if (configType === 'number') val = Number.isFinite(Number(input.value)) ? Number(input.value) : 0;
+        else val = input.value;
+        _setValueAtPath(parsed, configPath, val);
+        if (textarea) textarea.value = JSON.stringify(parsed, null, 2);
+      });
+    });
   };
   for (const button of tabButtons) {
     button.addEventListener('click', () => {
@@ -848,7 +888,8 @@ function _openJsonPopup({
     const active = tabButtons.find((button) => button.className === 'model-converters-run-btn');
     if (active?.getAttribute('data-popup-tab') === 'config') renderConfigTable();
   });
-  activateTab('header');
+  activateTab('config');
+  renderConfigTable();
   const close = () => overlay.remove();
   overlay.querySelector('[data-popup-action="cancel"]')?.addEventListener('click', () => {
     onCancel?.();
