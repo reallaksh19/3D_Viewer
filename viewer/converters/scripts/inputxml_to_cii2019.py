@@ -1060,6 +1060,15 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Infer reducer half-angle from diameter delta and element run length.",
     )
+    # Compatibility with invocation-builder.js options for InputXML->CII variants.
+    # These values are accepted even when not used by this converter profile.
+    parser.add_argument("--header-datetime", required=False, type=str, default=None)
+    parser.add_argument("--header-source", required=False, type=str, default=None)
+    parser.add_argument("--header-version", required=False, type=str, default=None)
+    parser.add_argument("--header-user-name", required=False, type=str, default=None)
+    parser.add_argument("--header-purpose", required=False, type=str, default=None)
+    parser.add_argument("--header-project-name", required=False, type=str, default=None)
+    parser.add_argument("--header-mdb-name", required=False, type=str, default=None)
     return parser
 
 
