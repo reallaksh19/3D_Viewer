@@ -6,6 +6,7 @@
 
 import { RvmPipelineRefResolver } from './RvmPipelineRefResolver.js';
 import { RvmBoreConverter }       from './RvmBoreConverter.js';
+import { RvmPipingClassMapper }   from './RvmPipingClassMapper.js';
 
 // ─── Type mapping ────────────────────────────────────────────────────────────
 
@@ -128,8 +129,9 @@ export class RvmFinal2dCsvBuilder {
     this._selected = options.selectedCanonicalIds || [];
     this._masters  = options.masters || {};
 
-    this._resolver     = new RvmPipelineRefResolver(rvmIndex, { selectedRootIds: options.selectedRootIds || [] });
-    this._boreConverter = new RvmBoreConverter();
+    this._resolver          = new RvmPipelineRefResolver(rvmIndex, { selectedRootIds: options.selectedRootIds || [] });
+    this._boreConverter      = new RvmBoreConverter();
+    this._pipingClassMapper  = new RvmPipingClassMapper(this._masters);
 
     // Build ancestor map: canonicalObjectId → ancestor chain (closest first)
     const allNodes = (rvmIndex && rvmIndex.nodes) || [];
@@ -216,7 +218,7 @@ export class RvmFinal2dCsvBuilder {
     const { pipelineRef, source: pipelineRefSource } = this._resolver.resolve(node, ancestorChain);
 
     // ── Bore ──
-    const rawBore = this._boreConverter.findRawBore(attrs);
+    const rawBore    = this._boreConverter.findRawBore(attrs);
     const boreResult = this._boreConverter.convertBore(rawBore);
 
     // ── Coordinates ──
@@ -257,6 +259,15 @@ export class RvmFinal2dCsvBuilder {
 
     const epFallback = ep1Fallback || ep2Fallback || cpFallback;
 
+    // ── Piping Class (Wave 5) ──
+    const partialRow = {
+      attributes:    attrs,
+      pipelineRef,
+      convertedBore: boreResult.convertedBore,
+      type,
+    };
+    const classResult = this._pipingClassMapper.mapRow(partialRow);
+
     return {
       rowNo:                null,
       sourceCanonicalId:    node.canonicalObjectId,
@@ -282,6 +293,8 @@ export class RvmFinal2dCsvBuilder {
       convertedBoreStatus:  boreResult.convertedBoreStatus,
       convertedBoreSource:  boreResult.convertedBoreSource,
       boreMapping:          boreResult.boreMapping,
+      // Wave 5 fields
+      ...classResult,
     };
   }
 }
