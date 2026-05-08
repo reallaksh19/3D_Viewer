@@ -42,6 +42,8 @@
   RVM_TAG_DELETED: 'rvm-tag-deleted',
   RVM_SEARCH_CHANGED: 'rvm-search-changed',
   RVM_CONFIG_CHANGED: 'rvm-config-changed',
+  RVM_EXTRACT_PCF_REQUESTED: 'rvm-extract-pcf-requested',
+  RVM_PCF_EXTRACT_STATE_CHANGED: 'rvm-pcf-extract-state-changed',
 });
 
 const _validEvents = new Set(Object.values(RuntimeEvents));

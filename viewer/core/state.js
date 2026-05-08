@@ -233,6 +233,23 @@ export const state = {
     asyncLoad: { loadId: null, status: 'idle', phase: null, progress: 0, error: null },
     routing: { ...DEFAULT_RVM_ROUTING },
   },
+
+  rvmPcfExtract: {
+    source: null,
+    sourceLabel: null,
+    scope: 'full',
+    selectedCanonicalIds: [],
+    selectedRenderObjectIds: [],
+    sourceStatus: 'idle',
+    sourceDiagnostics: [],
+    pipelineGroups: {},
+    rows: [],
+    masters: {},
+    diagnostics: [],
+    pcfTextByPipelineRef: {},
+    lastRequestedAt: null,
+    lastBuiltAt: null,
+  },
 };
 
 export function resetParsedState() {
