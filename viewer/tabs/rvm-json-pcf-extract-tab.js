@@ -2,7 +2,6 @@ import { RuntimeEvents } from '../contracts/runtime-events.js';
 import { state } from '../core/state.js';
 import { on, off } from '../core/event-bus.js';
 import { renderRvmPcfMasterTabs } from '../rvm-pcf-master-tabs/RvmPcfMasterTabs.js';
-import './rvm-json-pcf-extract-tab.css';
 
 let _offExtractRequested = null;
 let _offStateChanged = null;
