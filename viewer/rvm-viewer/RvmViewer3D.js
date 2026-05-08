@@ -616,7 +616,14 @@ export class RvmViewer3D {
 
     selectByCanonicalId(id) {
         this.selection.selectByCanonicalId(id);
-        emit(RuntimeEvents.RVM_NODE_SELECTED, { canonicalId: id || null });
+    }
+
+    selectCanonicalIds(ids, options) {
+        this.selection.selectCanonicalIds(ids, options);
+    }
+
+    toggleCanonicalId(id) {
+        this.selection.toggleCanonicalId(id);
     }
 
     getSelection() {

@@ -404,3 +404,22 @@
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* ── Tree Checkbox Multi-select ──────────────────────────────────────────── */
+
+.rvm-tree-checkbox {
+  width: 14px;
+  height: 14px;
+  margin: 0 4px 0 2px;
+  cursor: pointer;
+  accent-color: #4a9eff;
+  flex-shrink: 0;
+}
+
+.rvm-tree-node.is-checked > .rvm-tree-label .rvm-tree-checkbox {
+  accent-color: #4a9eff;
+}
+
+.rvm-tree-node.is-indeterminate > .rvm-tree-label .rvm-tree-checkbox {
+  opacity: 0.6;
+}

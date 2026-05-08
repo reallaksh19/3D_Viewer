@@ -227,7 +227,7 @@ export const state = {
     index: null,
     identityMap: null,
     tags: [],
-    selection: { canonicalObjectId: null, renderObjectIds: [] },
+    selection: { canonicalObjectId: null, canonicalObjectIds: [], renderObjectIds: [] },
     savedViews: [],
     diagnostics: [],
     asyncLoad: { loadId: null, status: 'idle', phase: null, progress: 0, error: null },
