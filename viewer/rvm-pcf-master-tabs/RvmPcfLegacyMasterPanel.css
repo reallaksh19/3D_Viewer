@@ -219,6 +219,37 @@
   max-height: 360px;
 }
 
+.rvm-master-sheet-select {
+  border: 1px solid #303642;
+  border-radius: 7px;
+  background: #161d29;
+  padding: 10px;
+  margin: 10px 0;
+}
+
+.rvm-master-sheet-select label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: 360px;
+  font-size: 12px;
+}
+
+.rvm-master-sheet-select span {
+  color: #91bfff;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.rvm-master-sheet-select select {
+  border: 1px solid #43506a;
+  background: #101722;
+  color: #f2f7ff;
+  border-radius: 5px;
+  padding: 6px;
+}
+
 @media (max-width: 1100px) {
   .rvm-master-split { grid-template-columns: 1fr; }
 }

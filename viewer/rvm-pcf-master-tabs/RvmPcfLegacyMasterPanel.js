@@ -173,8 +173,63 @@ function parseDelimited(text) {
   });
 }
 
+async function getXlsxModule() {
+  if (window.XLSX) return window.XLSX;
+
+  try {
+    return await import('xlsx');
+  } catch {
+    // Bare import may fail in static mode if no import map exists.
+  }
+
+  try {
+    return await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+  } catch (err) {
+    throw new Error(
+      'XLSX parser is not available. Add an import map for "xlsx" or allow CDN import from jsDelivr.'
+    );
+  }
+}
+
+function workbookToSheetRows(XLSX, workbook) {
+  const out = {};
+  for (const sheetName of workbook.SheetNames || []) {
+    const ws = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+    out[sheetName] = rows.map((row, index) => ({ _rowIndex: index + 1, ...row }));
+  }
+  return out;
+}
+
+async function readWorkbookFile(file) {
+  const XLSX = await getXlsxModule();
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: false, raw: false });
+  const sheets = workbookToSheetRows(XLSX, workbook);
+  const sheetNames = Object.keys(sheets);
+
+  if (!sheetNames.length) throw new Error('Workbook contains no readable sheets.');
+
+  return {
+    type: 'workbook',
+    sheetNames,
+    sheets,
+    selectedSheet: sheetNames[0],
+    rows: sheets[sheetNames[0]] || []
+  };
+}
+
+function isWorkbookFile(file) {
+  return /\.(xlsx|xlsm|xlsb|xls|ods)$/i.test(file.name || '');
+}
+
 async function readMasterFile(file) {
+  if (isWorkbookFile(file)) {
+    return readWorkbookFile(file);
+  }
+
   const text = await file.text();
+
   if (/\.json$/i.test(file.name)) {
     const parsed = JSON.parse(text);
     if (Array.isArray(parsed)) return parsed;
@@ -182,6 +237,7 @@ async function readMasterFile(file) {
     if (parsed.masters && typeof parsed.masters === 'object') return parsed.masters;
     throw new Error('JSON must be an array, { rows }, or { masters }.');
   }
+
   return parseDelimited(text);
 }
 
@@ -352,8 +408,8 @@ function renderMasterTab(masterKey, local) {
 
       <div class="rvm-master-toolbar">
         <label class="rvm-master-btn">
-          Import CSV/JSON
-          <input hidden type="file" accept=".csv,.tsv,.txt,.json,application/json,text/csv" data-import-master="${esc(masterKey)}">
+          Import CSV/XLSX/JSON
+          <input hidden type="file" accept=".csv,.tsv,.txt,.json,.xlsx,.xlsm,.xlsb,.xls,.ods,application/json,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" data-import-master="${esc(masterKey)}">
         </label>
         <button type="button" class="rvm-master-btn" data-auto-map="${esc(masterKey)}" ${rawRows.length ? '' : 'disabled'}>Auto Map Fields</button>
         <button type="button" class="rvm-master-btn" data-save-master="${esc(masterKey)}" ${rawRows.length ? '' : 'disabled'}>Save Mapped Rows</button>
@@ -365,9 +421,22 @@ function renderMasterTab(masterKey, local) {
 
       ${renderDiagnostics(rows, def, fieldMap)}
 
+      ${local.sheetNames?.length > 1 ? `
+        <div class="rvm-master-sheet-select">
+          <label>
+            <span>Workbook Sheet</span>
+            <select data-sheet-select="${esc(masterKey)}">
+              ${local.sheetNames.map(sheet => `
+                <option value="${esc(sheet)}" ${local.selectedSheet === sheet ? 'selected' : ''}>${esc(sheet)}</option>
+              `).join('')}
+            </select>
+          </label>
+        </div>
+      ` : ''}
+
       ${rawRows.length ? renderFieldMapping(masterKey, rawRows, fieldMap) : `
         <div class="rvm-master-upload-help">
-          Import a CSV/TSV/JSON file. After import, use field selection to map project-specific headers into the canonical master fields.
+          Import a CSV/TSV/XLSX/JSON file. After import, use field selection to map project-specific headers into the canonical master fields.
         </div>
       `}
 
@@ -477,9 +546,21 @@ export function mountRvmPcfLegacyMasterPanel(container) {
         const file = input.files?.[0];
         if (!file) return;
         try {
-          const rows = await readMasterFile(file);
+          const result = await readMasterFile(file);
           const local = getLocal(key);
-          local.rawRows = Array.isArray(rows) ? rows : [];
+
+          if (result && result.type === 'workbook') {
+            local.workbookSheets = result.sheets;
+            local.sheetNames = result.sheetNames;
+            local.selectedSheet = result.selectedSheet;
+            local.rawRows = result.rows;
+          } else {
+            local.workbookSheets = null;
+            local.sheetNames = [];
+            local.selectedSheet = '';
+            local.rawRows = Array.isArray(result) ? result : [];
+          }
+
           local.fieldMap = autoMapFields(headersFromRows(local.rawRows), MASTER_DEFS[key]);
           draw();
         } catch (err) {
@@ -491,6 +572,17 @@ export function mountRvmPcfLegacyMasterPanel(container) {
           }, 'master-import-failed');
           draw();
         }
+      });
+    });
+
+    container.querySelectorAll('[data-sheet-select]').forEach(select => {
+      select.addEventListener('change', () => {
+        const key = select.dataset.sheetSelect;
+        const local = getLocal(key);
+        local.selectedSheet = select.value;
+        local.rawRows = local.workbookSheets?.[select.value] || [];
+        local.fieldMap = autoMapFields(headersFromRows(local.rawRows), MASTER_DEFS[key]);
+        draw();
       });
     });
 
