@@ -7,6 +7,7 @@
 import { RvmPipelineRefResolver } from './RvmPipelineRefResolver.js';
 import { RvmBoreConverter }       from './RvmBoreConverter.js';
 import { RvmPipingClassMapper }   from './RvmPipingClassMapper.js';
+import { RvmValveWeightMapper }   from './RvmValveWeightMapper.js';
 
 // ─── Type mapping ────────────────────────────────────────────────────────────
 
@@ -129,9 +130,10 @@ export class RvmFinal2dCsvBuilder {
     this._selected = options.selectedCanonicalIds || [];
     this._masters  = options.masters || {};
 
-    this._resolver          = new RvmPipelineRefResolver(rvmIndex, { selectedRootIds: options.selectedRootIds || [] });
+    this._resolver           = new RvmPipelineRefResolver(rvmIndex, { selectedRootIds: options.selectedRootIds || [] });
     this._boreConverter      = new RvmBoreConverter();
     this._pipingClassMapper  = new RvmPipingClassMapper(this._masters);
+    this._valveWeightMapper  = new RvmValveWeightMapper(this._masters);
 
     // Build ancestor map: canonicalObjectId → ancestor chain (closest first)
     const allNodes = (rvmIndex && rvmIndex.nodes) || [];
@@ -268,6 +270,18 @@ export class RvmFinal2dCsvBuilder {
     };
     const classResult = this._pipingClassMapper.mapRow(partialRow);
 
+    // ── Valve Weight (Wave 6) ──
+    const valveRow = {
+      attributes:    attrs,
+      type,
+      convertedBore: boreResult.convertedBore,
+      rating:        classResult.pipingClassRating ?? null,
+      rowNo:         null,
+      ca:            {},
+      diagnostics:   rowDiags,
+    };
+    const valveResult = this._valveWeightMapper.mapRow(valveRow);
+
     return {
       rowNo:                null,
       sourceCanonicalId:    node.canonicalObjectId,
@@ -295,6 +309,11 @@ export class RvmFinal2dCsvBuilder {
       boreMapping:          boreResult.boreMapping,
       // Wave 5 fields
       ...classResult,
+      // Wave 6 fields
+      ca:                          valveRow.ca,
+      valveWeightSource:           valveResult.valveWeightSource,
+      valveWeightLengthMm:         valveResult.valveWeightLengthMm,
+      ambiguousValveWeightRequests: valveResult.ambiguousValveWeightRequests,
     };
   }
 }
