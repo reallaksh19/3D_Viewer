@@ -2,7 +2,6 @@ import { state, updateRvmPcfExtractState } from '../core/state.js';
 import { rvmPcfLegacyDataManager as dataManager } from '../pcf-legacy/services/rvm-pcf-legacy-data-manager.js';
 import { masterTableService } from '../pcf-legacy/services/master-table-service.js';
 import { renderMasterMatchDiagnostics } from '../pcf-legacy/ui/master-match-diagnostics-panel.js';
-import './RvmPcfMasterTabs.css';
 
 const MASTER_TABS = [
   { id: 'linelist', label: 'Line List' },
