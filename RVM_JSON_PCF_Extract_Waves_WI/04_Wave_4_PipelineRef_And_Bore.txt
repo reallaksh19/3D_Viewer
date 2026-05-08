@@ -1,0 +1,54 @@
+Wave 4 — Auto Pipeline Ref + Converted Bore
+
+Goal:
+Resolve Pipeline Ref from hierarchy and convert raw bore to Converted Bore DN/NB mm.
+
+Primary files:
+- viewer/rvm-pcf-extract/RvmPipelineRefResolver.js
+- viewer/rvm-pcf-extract/RvmBoreConverter.js
+- viewer/rvm-pcf-extract/RvmFinal2dCsvBuilder.js
+- viewer/tabs/rvm-json-pcf-extract-tab.js
+
+Pipeline Ref priority:
+1. Direct row attribute:
+   PIPELINE-REFERENCE, PIPELINE_REFERENCE, PIPELINE_REF, PIPELINE, LINE_REF, LINE_REFERENCE
+2. Direct line number:
+   LINE_NO, LINE_NUMBER, LINENO, LINE, OWNER
+3. Parent hierarchy:
+   Parent PIPE/TUBI or BRAN/BRANCH/LINE/PIPELINE/LINEGROUP/LINE_GROUP
+4. Selected root if exactly one selected root exists.
+5. Fallback: RVM-EXTRACT.
+
+Pipeline Ref diagnostics:
+- PIPELINE-REF-DIRECT
+- PIPELINE-REF-LINE-NO
+- PIPELINE-REF-PARENT-PIPE
+- PIPELINE-REF-PARENT-BRANCH
+- PIPELINE-REF-PARENT-NAME
+- PIPELINE-REF-SELECTED-ROOT
+- PIPELINE-REF-FALLBACK
+
+Bore conversion:
+Supports:
+- NPS: 4", 2", 1/2", 1-1/2"
+- DN: DN100, 100
+- OD: 114.3 -> DN100
+- Range values
+
+Bore source priority:
+HBOR, TBOR, ABORE, LBORE, DTXR, BORE, NPS, DN, OD, Size
+
+Row fields:
+- rawBore
+- bore
+- convertedBore
+- convertedBoreStatus
+- convertedBoreSource
+- boreMapping
+
+Validation gate:
+PASS: Child fitting resolves Pipeline Ref from parent pipe/branch/line.
+PASS: Fallback RVM-EXTRACT is used with warning.
+PASS: Multiple selected lines produce pipeline groups.
+PASS: 4 inch converts to DN100.
+PASS: OD 114.3 converts to DN100.

@@ -1,0 +1,69 @@
+Wave 1 — RVM Hierarchy Checkbox Multi-Select + Canvas Highlight
+
+Goal:
+Enable selection at any RVM hierarchy level using checkboxes and synchronize that selection with highlighted geometry in the 3D canvas.
+
+Primary files:
+- viewer/rvm-viewer/RvmSelectionAdapter.js
+- viewer/rvm-viewer/RvmViewer3D.js
+- viewer/rvm/RvmTreeModel.js
+- viewer/tabs/viewer3d-rvm-tab.css
+- viewer/core/state.js
+
+Behavior:
+1. Canvas click:
+   - Click mesh: single-select canonical object.
+   - Ctrl/Shift/Meta + click mesh: toggle additive selection.
+   - Empty canvas click: clear selection unless modifier is pressed.
+
+2. Hierarchy tree:
+   - Every tree node gets a checkbox.
+   - Checking a parent selects parent + descendants.
+   - Unchecking a parent removes parent + descendants.
+   - Partial child selection shows parent checkbox as indeterminate.
+
+Selection state:
+state.rvm.selection = {
+  canonicalObjectId: primaryId,
+  canonicalObjectIds: [...ids],
+  renderObjectIds: [...renderIds]
+}
+
+Event payload:
+RuntimeEvents.RVM_NODE_SELECTED = {
+  canonicalId,
+  canonicalIds,
+  renderObjectIds
+}
+
+Required APIs:
+RvmSelectionAdapter:
+- selectByCanonicalId(id, options)
+- selectCanonicalIds(ids, options)
+- toggleCanonicalId(id)
+- clearSelection(options)
+- getSelectedCanonicalId()
+- getSelectedCanonicalIds()
+- getSelectionRenderIds()
+
+RvmViewer3D:
+- selectCanonicalIds(ids, options)
+- selectByCanonicalId(id, options)
+- toggleCanonicalId(id)
+- clearSelection(options)
+- getSelection()
+
+RvmTreeModel:
+- getDescendantCanonicalIds(canonicalObjectId, includeSelf)
+- setSelectedCanonicalIds(ids, options)
+- clearSelection()
+- tree-to-viewer sync
+- viewer-to-tree sync
+
+Validation gate:
+PASS: Leaf checkbox highlights one object.
+PASS: Parent checkbox highlights all descendant geometry.
+PASS: Multiple branches can be selected together.
+PASS: Canvas multi-click selection works.
+PASS: Tree checkbox state updates after canvas selection.
+PASS: Parent checkbox becomes indeterminate for partial selection.

@@ -1,0 +1,51 @@
+Wave 3 — Final 2D CSV Builder from RVM Index / Staged Topology
+
+Goal:
+Build the first working Final 2D CSV from loaded RVM index/topology and selected hierarchy scope.
+
+Primary files:
+- viewer/rvm-pcf-extract/RvmFinal2dCsvBuilder.js
+- viewer/tabs/rvm-json-pcf-extract-tab.js
+- viewer/tabs/rvm-json-pcf-extract-tab.css
+
+Input:
+- state.rvm.index.nodes
+- state.rvm.selection.canonicalObjectIds
+- state.rvmPcfExtract.masters
+
+Scope:
+- No selected ids: extract all RVM nodes.
+- Selected ids: expand selected ids to descendants and extract selected subtree.
+
+Default type map:
+- TUBI / PIPE -> PIPE
+- ELBO / ELBOW / BEND -> BEND
+- TEE -> TEE
+- OLET / WELDOLET / SOCKOLET -> OLET
+- FLAN / FLANGE / FBLI -> FLANGE
+- VALV / VALVE -> VALVE
+- REDU / REDUCER -> REDUCER-CONCENTRIC
+- ATTA / ANCI / SUPPORT -> SUPPORT
+- GASK -> GASK, include=false
+- INST -> INST, include=false
+- WELD -> WELD, include=false
+- UNKNOWN -> UNKNOWN, include=false
+
+Coordinate keys:
+EP1: APOS, A_POS, EP1, START, END_POINT1, ABOP, POS_START, START_POINT
+EP2: LPOS, L_POS, EP2, END, END_POINT2, LBOP, POS_END, END_POINT
+CP: CPOS, CENTRE_POINT, CENTER_POINT, CENTRE-POINT, CENTER-POINT, CP
+BP: BPOS, BRANCH_POINT, BRANCH1_POINT, BRANCH-POINT, BRANCH1-POINT, BP, BPOS1
+Support: POS, CO_ORDS, COORDS, CO_ORD, SUPPORT_COOR, SUPPORT_COORD
+
+Fallbacks:
+- EP1/EP2 from bounding box major axis.
+- BEND/TEE CP from midpoint.
+- SUPPORT coordinate from supportCoor, bbox center, CP, EP1, EP2.
+
+Validation gate:
+PASS: Rebuild Final 2D CSV works.
+PASS: No selection extracts full model.
+PASS: Selection extracts selected subtree.
+PASS: GASK/INST/WELD appear but include=false.
+PASS: Row inspector shows geometry, trace, and diagnostics.
