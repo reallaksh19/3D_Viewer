@@ -1,7 +1,7 @@
 import { RuntimeEvents } from '../contracts/runtime-events.js';
 import { state } from '../core/state.js';
 import { on, off } from '../core/event-bus.js';
-import { renderRvmPcfMasterTabs } from '../rvm-pcf-master-tabs/RvmPcfMasterTabs.js';
+import { mountRvmPcfLegacyMasterPanel } from '../rvm-pcf-master-tabs/RvmPcfLegacyMasterPanel.js';
 
 let _offExtractRequested = null;
 let _offStateChanged = null;
@@ -33,7 +33,7 @@ function _showPanel(container, panelId) {
   });
 
   if (panelId === 'masters') {
-    renderRvmPcfMasterTabs(host);
+    mountRvmPcfLegacyMasterPanel(host);
     return;
   }
 
