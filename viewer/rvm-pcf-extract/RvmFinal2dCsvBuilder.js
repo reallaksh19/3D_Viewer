@@ -7,7 +7,8 @@
 import { RvmPipelineRefResolver } from './RvmPipelineRefResolver.js';
 import { RvmBoreConverter }       from './RvmBoreConverter.js';
 import { RvmPipingClassMapper }   from './RvmPipingClassMapper.js';
-import { RvmValveWeightMapper }   from './RvmValveWeightMapper.js';
+import { RvmValveWeightMapper }        from './RvmValveWeightMapper.js';
+import { RvmRemainingMastersMapper }   from './RvmRemainingMastersMapper.js';
 
 // ─── Type mapping ────────────────────────────────────────────────────────────
 
@@ -133,7 +134,8 @@ export class RvmFinal2dCsvBuilder {
     this._resolver           = new RvmPipelineRefResolver(rvmIndex, { selectedRootIds: options.selectedRootIds || [] });
     this._boreConverter      = new RvmBoreConverter();
     this._pipingClassMapper  = new RvmPipingClassMapper(this._masters);
-    this._valveWeightMapper  = new RvmValveWeightMapper(this._masters);
+    this._valveWeightMapper       = new RvmValveWeightMapper(this._masters);
+    this._remainingMastersMapper  = new RvmRemainingMastersMapper(this._masters);
 
     // Build ancestor map: canonicalObjectId → ancestor chain (closest first)
     const allNodes = (rvmIndex && rvmIndex.nodes) || [];
@@ -282,7 +284,7 @@ export class RvmFinal2dCsvBuilder {
     };
     const valveResult = this._valveWeightMapper.mapRow(valveRow);
 
-    return {
+    const row = {
       rowNo:                null,
       sourceCanonicalId:    node.canonicalObjectId,
       sourcePath:           node.path || node.name || node.canonicalObjectId,
@@ -315,5 +317,10 @@ export class RvmFinal2dCsvBuilder {
       valveWeightLengthMm:         valveResult.valveWeightLengthMm,
       ambiguousValveWeightRequests: valveResult.ambiguousValveWeightRequests,
     };
+
+    // Wave 7 – SKEY, Drop, BRLEN, CA, Support
+    this._remainingMastersMapper.mapRow(row);
+
+    return row;
   }
 }
