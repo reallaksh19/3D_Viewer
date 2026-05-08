@@ -19,6 +19,7 @@ const tests = [
   './unit/rvm/rvm-wave1-multiselect.test.js',
   './unit/rvm/rvm-wave2-tab-shell.test.js',
   './unit/rvm/rvm-wave3-csv-builder.test.js',
+  './unit/rvm/rvm-wave4-pipeline-bore.test.js',
   './unit/rvm/rvm-search.test.js',
   './unit/rvm/rvm-bundle-manifest.test.js',
   './unit/rvm/rvm-identity-map.test.js',
