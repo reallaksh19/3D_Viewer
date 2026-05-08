@@ -1,8 +1,11 @@
 /**
  * RvmFinal2dCsvBuilder.js
- * Wave 3 – builds rows for the Final 2D CSV from an RVM index.
+ * Wave 3/4 – builds rows for the Final 2D CSV from an RVM index.
  * Pure JS: no DOM, no three.js.
  */
+
+import { RvmPipelineRefResolver } from './RvmPipelineRefResolver.js';
+import { RvmBoreConverter }       from './RvmBoreConverter.js';
 
 // ─── Type mapping ────────────────────────────────────────────────────────────
 
@@ -118,12 +121,30 @@ function bboxMidpoint(parsed) {
 export class RvmFinal2dCsvBuilder {
   /**
    * @param {object} rvmIndex  – { nodes: [...] }
-   * @param {object} options   – { selectedCanonicalIds?: string[], masters?: {} }
+   * @param {object} options   – { selectedCanonicalIds?: string[], masters?: {}, selectedRootIds?: string[] }
    */
   constructor(rvmIndex, options = {}) {
     this._index   = rvmIndex;
     this._selected = options.selectedCanonicalIds || [];
     this._masters  = options.masters || {};
+
+    this._resolver     = new RvmPipelineRefResolver(rvmIndex, { selectedRootIds: options.selectedRootIds || [] });
+    this._boreConverter = new RvmBoreConverter();
+
+    // Build ancestor map: canonicalObjectId → ancestor chain (closest first)
+    const allNodes = (rvmIndex && rvmIndex.nodes) || [];
+    const nodeById = new Map(allNodes.map(n => [n.canonicalObjectId, n]));
+    this._nodeById = nodeById;
+    this._ancestorMap = new Map();
+    for (const n of allNodes) {
+      const chain = [];
+      let current = nodeById.get(n.parentCanonicalObjectId);
+      while (current) {
+        chain.push(current);
+        current = nodeById.get(current.parentCanonicalObjectId);
+      }
+      this._ancestorMap.set(n.canonicalObjectId, chain);
+    }
   }
 
   // ── Public ─────────────────────────────────────────────────────────────────
@@ -190,6 +211,14 @@ export class RvmFinal2dCsvBuilder {
     const bbox              = parseBbox(node.bbox);
     const rowDiags          = [];
 
+    // ── Pipeline Ref ──
+    const ancestorChain = this._ancestorMap.get(node.canonicalObjectId) || [];
+    const { pipelineRef, source: pipelineRefSource } = this._resolver.resolve(node, ancestorChain);
+
+    // ── Bore ──
+    const rawBore = this._boreConverter.findRawBore(attrs);
+    const boreResult = this._boreConverter.convertBore(rawBore);
+
     // ── Coordinates ──
 
     let ep1 = findCoord(attrs, EP1_KEYS);
@@ -229,21 +258,30 @@ export class RvmFinal2dCsvBuilder {
     const epFallback = ep1Fallback || ep2Fallback || cpFallback;
 
     return {
-      rowNo:             null,
-      sourceCanonicalId: node.canonicalObjectId,
-      sourcePath:        node.path || node.name || node.canonicalObjectId,
-      name:              node.name || node.canonicalObjectId,
+      rowNo:                null,
+      sourceCanonicalId:    node.canonicalObjectId,
+      sourcePath:           node.path || node.name || node.canonicalObjectId,
+      name:                 node.name || node.canonicalObjectId,
       type,
-      kind:              node.kind,
+      kind:                 node.kind,
       include,
-      ep1:               ep1 || null,
-      ep2:               ep2 || null,
-      cp:                cp  || null,
-      bp:                bp  || null,
-      supportCoor:       supportCoor || null,
-      _epFallback:       epFallback,
-      attributes:        attrs,
-      diagnostics:       rowDiags,
+      ep1:                  ep1 || null,
+      ep2:                  ep2 || null,
+      cp:                   cp  || null,
+      bp:                   bp  || null,
+      supportCoor:          supportCoor || null,
+      _epFallback:          epFallback,
+      attributes:           attrs,
+      diagnostics:          rowDiags,
+      // Wave 4 fields
+      pipelineRef,
+      pipelineRefSource,
+      rawBore,
+      bore:                 boreResult.bore,
+      convertedBore:        boreResult.convertedBore,
+      convertedBoreStatus:  boreResult.convertedBoreStatus,
+      convertedBoreSource:  boreResult.convertedBoreSource,
+      boreMapping:          boreResult.boreMapping,
     };
   }
 }
