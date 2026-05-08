@@ -1,5 +1,5 @@
 ﻿import { RuntimeEvents } from '../contracts/runtime-events.js';
-import { state, saveStickyState } from '../core/state.js';
+import { state, saveStickyState, setActiveTab } from '../core/state.js';
 import { on, off, emit } from '../core/event-bus.js';
 import { detectRvmCapabilities } from '../rvm/RvmCapabilities.js';
 import { notify } from '../diagnostics/notification-center.js';
@@ -312,6 +312,12 @@ function _buildHTML(caps) {
     <div class="rvm-ribbon-section rvm-ribbon-search">
       <input type="search" id="rvm-search-input" placeholder="Search objects..." autocomplete="off">
     </div>
+    <div class="rvm-ribbon-section">
+      <button class="rvm-btn" data-action="EXTRACT_PCF_JSON" title="Extract PCF from loaded JSON bundle">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        <span>Extract PCF (from Json)</span>
+      </button>
+    </div>
   </div>
   <div id="rvm-capability-banner" class="rvm-capability-banner"></div>
   <div class="geo-body rvm-body">
@@ -468,10 +474,22 @@ function _bindToolbarActions(container) {
         _viewer?.setSectionMode?.('PLANE_UP');
         showSectionPanel();
         break;
-      case 'SECTION_DISABLE': 
-        _viewer?.disableSection?.(); 
+      case 'SECTION_DISABLE':
+        _viewer?.disableSection?.();
         if (sectionPanel) sectionPanel.style.display = 'none';
         break;
+      case 'EXTRACT_PCF_JSON': {
+        const selectedCanonicalIds = Array.isArray(state.rvm?.selection?.canonicalObjectIds)
+          ? [...state.rvm.selection.canonicalObjectIds]
+          : [];
+        state.rvmPcfExtract.selectedCanonicalIds = selectedCanonicalIds;
+        const scope = selectedCanonicalIds.length > 0 ? 'selected' : 'full';
+        state.rvmPcfExtract.scope = scope;
+        state.rvmPcfExtract.lastRequestedAt = new Date().toISOString();
+        emit(RuntimeEvents.RVM_EXTRACT_PCF_REQUESTED, { scope, selectedCanonicalIds });
+        setActiveTab('rvm-json-pcf-extract');
+        break;
+      }
       default: break;
     }
   });

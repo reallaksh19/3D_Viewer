@@ -7,5 +7,6 @@
     "model-exchange":  1,
     "interchange-config":  1,
     "model-converters":  1,
-    "support-mapping-config":  1
+    "support-mapping-config":  1,
+    "rvm-json-pcf-extract": true
 }

@@ -9,6 +9,7 @@ import { renderInterchangeConfigTab } from '../tabs/interchange-config-tab.js';
 import { renderSupportMappingConfigTab } from '../tabs/support-mapping-config-tab.js';
 import { renderModelConvertersTab } from '../tabs/model-converters-tab.js?v=20260508-control-counts';
 import { renderAdapterMappingTab } from '../tabs/adapter-mapping-tab.js';
+import { mount as mountRvmJsonPcfExtractTab } from '../tabs/rvm-json-pcf-extract-tab.js';
 import { emit, on } from './event-bus.js';
 import { initDevDebugWindow, destroyDevDebugWindow } from '../debug/dev-debug-window.js';
 import { loadRvmSource } from '../rvm/RvmLoadPipeline.js';
@@ -34,7 +35,8 @@ const TABS = [
   ...(IS_DEV ? [
     { id: 'pcfx-converter', label: 'PCF<->PCFX<->GLB', render: renderPcfxConverterTab }
   ] : []),
-  { id: 'adapter-mapping', label: 'âš™ 3D RVM Adapter Mapping', render: renderAdapterMappingTab },
+  { id: 'adapter-mapping', label: '⚙ 3D RVM Adapter Mapping', render: renderAdapterMappingTab },
+  { id: 'rvm-json-pcf-extract', label: 'JSON → PCF Extract', render: (container, ctx) => mountRvmJsonPcfExtractTab(container, ctx) },
 ];
 
 let _activeDestroyFn = null;

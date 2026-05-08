@@ -1,0 +1,77 @@
+/* JSON → PCF Extract tab styles */
+
+.rvm-pcf-extract-tab {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--geo-bg, #1a1c21);
+  color: var(--geo-text, #d4d4d4);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.rvm-pcf-extract-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  background: var(--geo-banner-bg, #252830);
+  border-bottom: 1px solid var(--geo-border, #333);
+  font-size: 12px;
+  color: var(--geo-text-muted, #aaa);
+  flex-shrink: 0;
+}
+
+.rvm-pcf-extract-source-label,
+.rvm-pcf-extract-scope-label {
+  white-space: nowrap;
+}
+
+.rvm-pcf-extract-node-count {
+  color: #7ab3ff;
+  font-size: 11px;
+}
+
+.rvm-pcf-extract-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--geo-ribbon-bg, #20232a);
+  border-bottom: 1px solid var(--geo-border, #333);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.rvm-pcf-extract-toolbar button {
+  padding: 4px 10px;
+  background: #1a3a5c;
+  border: 1px solid #4a9eff;
+  border-radius: 5px;
+  color: #7ab3ff;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.rvm-pcf-extract-toolbar button:hover {
+  background: #1e4a7a;
+}
+
+.rvm-pcf-extract-toolbar button:active {
+  background: #0e2a4c;
+}
+
+.rvm-pcf-extract-body {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+}
+
+.rvm-pcf-extract-status {
+  color: var(--geo-text-muted, #999);
+  font-size: 12px;
+  font-style: italic;
+}

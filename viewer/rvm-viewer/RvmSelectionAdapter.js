@@ -17,6 +17,7 @@ export class RvmSelectionAdapter {
         this.identityMap = identityMap;
 
         this._selectedCanonicalId = null;
+        this._selectedCanonicalIds = []; // multi-select
         this._selectedRenderIds = [];
 
         this._originalMaterials = new Map(); // renderId -> original emissive/color
@@ -45,44 +46,44 @@ export class RvmSelectionAdapter {
 
         const intersects = this.raycaster.intersectObject(this.modelGroup, true);
 
+        const isModifier = event.ctrlKey || event.shiftKey || event.metaKey;
+
         if (intersects.length > 0) {
             // Find the first mesh intersect
             const hit = intersects.find(i => i.object.isMesh && i.object.visible);
             if (hit) {
                 const mesh = hit.object;
                 const renderId = mesh.userData?.name || mesh.name || mesh.uuid;
-                this._handlePick(renderId);
+                this._handlePick(renderId, isModifier);
                 return;
             }
         }
 
-
-        // If clicked on nothing, clear selection
-        this.clearSelection();
-        emit(RuntimeEvents.RVM_NODE_SELECTED, { canonicalId: null });
+        // If clicked on nothing, clear selection unless modifier is pressed
+        if (!isModifier) {
+            this.clearSelection();
+            emit(RuntimeEvents.RVM_NODE_SELECTED, { canonicalId: null, canonicalIds: [], renderObjectIds: [] });
+        }
     }
 
-    _handlePick(renderId) {
+    _handlePick(renderId, additive = false) {
         let canonicalId = null;
         if (this.identityMap) {
-            // Reverse lookup needed if identity map provides canonical -> renderIds
             canonicalId = this.identityMap.canonicalFromRender?.(renderId);
-            // Assuming fallback if canonical ID not found
         }
         canonicalId = canonicalId || renderId; // fallback
 
-
-        this.selectByCanonicalId(canonicalId);
-        emit(RuntimeEvents.RVM_NODE_SELECTED, { canonicalId });
+        if (additive) {
+            this.toggleCanonicalId(canonicalId);
+        } else {
+            this.selectByCanonicalId(canonicalId);
+        }
     }
 
-    selectByCanonicalId(canonicalId) {
-        if (this._selectedCanonicalId === canonicalId) return;
-
+    selectByCanonicalId(canonicalId, options = {}) {
         this.clearSelection();
-
         this._selectedCanonicalId = canonicalId;
-
+        this._selectedCanonicalIds = [canonicalId];
 
         if (this.identityMap) {
             this._selectedRenderIds = this.identityMap.renderIdsFromCanonical(canonicalId) || [canonicalId];
@@ -91,6 +92,61 @@ export class RvmSelectionAdapter {
         }
 
         this._highlight(this._selectedRenderIds, COLORS.SELECTED);
+        this._emitSelection();
+    }
+
+    selectCanonicalIds(ids, options = {}) {
+        if (!options.additive) {
+            this.clearSelection();
+        }
+        for (const id of ids) {
+            if (!this._selectedCanonicalIds.includes(id)) {
+                this._selectedCanonicalIds.push(id);
+            }
+        }
+        this._selectedCanonicalId = this._selectedCanonicalIds[0] || null;
+        this._rebuildRenderIds();
+        this._emitSelection();
+    }
+
+    toggleCanonicalId(id) {
+        const idx = this._selectedCanonicalIds.indexOf(id);
+        if (idx >= 0) {
+            this._selectedCanonicalIds.splice(idx, 1);
+            // Restore material for the removed id before rebuilding
+        } else {
+            this._selectedCanonicalIds.push(id);
+        }
+        this._selectedCanonicalId = this._selectedCanonicalIds[0] || null;
+        this._restoreMaterials();
+        this._rebuildRenderIds();
+        this._highlight(this._selectedRenderIds, COLORS.SELECTED);
+        this._emitSelection();
+    }
+
+    _rebuildRenderIds() {
+        this._selectedRenderIds = [];
+        for (const cId of this._selectedCanonicalIds) {
+            const rIds = this.identityMap?.renderIdsFromCanonical(cId) || [cId];
+            this._selectedRenderIds.push(...rIds);
+        }
+    }
+
+    _emitSelection() {
+        const primaryId = this._selectedCanonicalId;
+        emit(RuntimeEvents.RVM_NODE_SELECTED, {
+            canonicalId: primaryId,
+            canonicalIds: [...this._selectedCanonicalIds],
+            renderObjectIds: [...this._selectedRenderIds]
+        });
+    }
+
+    getSelectedCanonicalId() {
+        return this._selectedCanonicalId;
+    }
+
+    getSelectedCanonicalIds() {
+        return [...this._selectedCanonicalIds];
     }
 
     highlightSearchResults(canonicalIds) {
@@ -104,14 +160,11 @@ export class RvmSelectionAdapter {
         this._highlight(renderIds, COLORS.SEARCH_RESULT);
     }
 
-    clearSelection() {
+    clearSelection(options = {}) {
         this._restoreMaterials();
         this._selectedCanonicalId = null;
+        this._selectedCanonicalIds = [];
         this._selectedRenderIds = [];
-    }
-
-    getSelectedCanonicalId() {
-        return this._selectedCanonicalId;
     }
 
     getSelectionRenderIds() {
