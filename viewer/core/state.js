@@ -244,7 +244,56 @@ export const state = {
     sourceDiagnostics: [],
     pipelineGroups: {},
     rows: [],
-    masters: {},
+    masters: {
+      linelist: {
+        rows: [],
+        sourceName: '',
+        autoMatch: true
+      },
+      weight: {
+        autoMode: true,
+        mode: 'legacy-valve-ca8',
+        lookupKey: ['boreMm', 'ratingClass', 'lengthMm'],
+        lengthToleranceMm: 6,
+        rows: []
+      },
+      pipingClass: {
+        autoMode: true,
+        boreBasis: 'Converted Bore DN/NB mm',
+        lazyLoadByBore: true,
+        baseUrl: './Docs/Masters/piping_class/size_wise/',
+        rows: []
+      },
+      materialMap: {
+        rows: []
+      },
+      lineDump: {
+        rows: []
+      },
+      supportMapping: {
+        guidPrefix: 'UCI:',
+        fallbackName: 'CA150',
+        blocks: [
+          { id: 1, frictionMatch: ['', '0.3'], gapCondition: 'empty', name: 'CA150', desc: 'Rest / Anchor' },
+          { id: 2, frictionMatch: ['0.15'], gapCondition: 'any', name: 'CA100', desc: 'Guide' },
+          { id: 3, frictionMatch: ['0.3'], gapCondition: '>0', name: 'CA150', desc: 'Rest with Gap' }
+        ]
+      },
+      branchGeometry: {
+        rows: []
+      },
+      pcfHeader: {
+        isogenFiles: 'ISOGEN.FLS',
+        unitsBore: 'MM',
+        unitsCoords: 'MM',
+        unitsWeight: 'KGS',
+        unitsBoltDia: 'MM',
+        unitsBoltLength: 'MM',
+        projectIdentifier: 'P1',
+        area: 'A1',
+        fallbackPipelineReference: 'RVM-EXTRACT'
+      }
+    },
     diagnostics: [],
     pcfTextByPipelineRef: {},
     lastRequestedAt: null,
@@ -372,4 +421,13 @@ export function updateDiagnosticSnapshot(name, data) {
     state.editorState.diagnostics = { traces: [], metrics: {} };
   }
   state.editorState.diagnostics.metrics[name] = data;
+}
+
+export function updateRvmPcfExtractState(patch, reason = 'update') {
+  if (typeof patch === 'function') {
+    Object.assign(state.rvmPcfExtract, patch(state.rvmPcfExtract));
+  } else {
+    Object.assign(state.rvmPcfExtract, patch);
+  }
+  emit(RuntimeEvents.RVM_PCF_EXTRACT_STATE_CHANGED, { source: 'state-mutation', reason });
 }
