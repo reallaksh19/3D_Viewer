@@ -495,7 +495,7 @@ function _bindToolbarActions(container) {
         state.rvmPcfExtract.scope = scope;
         state.rvmPcfExtract.lastRequestedAt = new Date().toISOString();
         emit(RuntimeEvents.RVM_EXTRACT_PCF_REQUESTED, { scope, selectedCanonicalIds });
-        setActiveTab('rvm-json-pcf-extract');
+        window.dispatchEvent(new CustomEvent('app:switch-tab', { detail: { tabId: 'rvm-json-pcf-extract' } }));
         break;
       }
       default: break;
@@ -554,6 +554,11 @@ function _bindTabListener() {
             _viewer.searchIndex.build();
             _viewer.tagStore = new RvmTagXmlStore(payload.identityMap, payload.manifest?.bundleId || state.rvm.activeBundle);
             _viewer.tagStore.getAllTags().forEach((tag) => _viewer.addTag(tag));
+        }
+
+        // Store index in state so the PCF extract tab can access it without going through the viewer.
+        if (payload.indexJson) {
+            state.rvm.index = payload.indexJson;
         }
 
         const container = document.querySelector('.rvm-tab-root');
