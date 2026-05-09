@@ -322,7 +322,15 @@ function _buildHTML(caps) {
   <div id="rvm-capability-banner" class="rvm-capability-banner"></div>
   <div class="geo-body rvm-body">
     <div class="geo-left-panel rvm-left-panel">
-      <div class="rvm-panel-header">Hierarchy</div>
+      <div class="rvm-panel-header" style="display:flex;align-items:center;justify-content:space-between;gap:4px;">
+        <span>Hierarchy</span>
+        <span style="display:flex;gap:3px;flex-shrink:0;">
+          <button id="rvm-tree-check-all"    title="Check all"     style="font-size:10px;padding:2px 5px;cursor:pointer;background:#2a3547;border:1px solid #3d4a61;color:#b0c8f0;border-radius:3px;">✓ All</button>
+          <button id="rvm-tree-uncheck-all"  title="Uncheck all"   style="font-size:10px;padding:2px 5px;cursor:pointer;background:#2a3547;border:1px solid #3d4a61;color:#b0c8f0;border-radius:3px;">✗</button>
+          <button id="rvm-tree-expand-all"   title="Expand all"    style="font-size:10px;padding:2px 5px;cursor:pointer;background:#2a3547;border:1px solid #3d4a61;color:#b0c8f0;border-radius:3px;">⊞</button>
+          <button id="rvm-tree-collapse-all" title="Collapse all"  style="font-size:10px;padding:2px 5px;cursor:pointer;background:#2a3547;border:1px solid #3d4a61;color:#b0c8f0;border-radius:3px;">⊟</button>
+        </span>
+      </div>
       <ul id="rvm-hierarchy-tree" class="rvm-tree" role="tree" aria-label="Model hierarchy"></ul>
       <div class="rvm-panel-header">Search Results</div>
       <ul id="rvm-search-results" class="rvm-tree" role="list"></ul>
@@ -557,6 +565,16 @@ function _bindTabListener() {
                     _viewer.treeModel = new module.RvmTreeModel(payload.indexJson, { viewer: _viewer });
                     _viewer.treeModel.build();
                     _viewer.treeModel.renderTree(tree);
+
+                    // Wire hierarchy toolbar buttons (safe to re-bind; buttons persist in DOM)
+                    const checkAll    = container.querySelector('#rvm-tree-check-all');
+                    const uncheckAll  = container.querySelector('#rvm-tree-uncheck-all');
+                    const expandAll   = container.querySelector('#rvm-tree-expand-all');
+                    const collapseAll = container.querySelector('#rvm-tree-collapse-all');
+                    if (checkAll)    checkAll.onclick    = () => _viewer.treeModel?.checkAll();
+                    if (uncheckAll)  uncheckAll.onclick  = () => _viewer.treeModel?.uncheckAll();
+                    if (expandAll)   expandAll.onclick   = () => _viewer.treeModel?.expandAll();
+                    if (collapseAll) collapseAll.onclick = () => _viewer.treeModel?.collapseAll();
                 });
             }
             const searchList = container.querySelector('#rvm-search-results');

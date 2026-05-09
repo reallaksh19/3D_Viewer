@@ -1,12 +1,13 @@
 export class RvmTreeModel {
     constructor(rvmIndex, viewerContext) {
         this.rvmIndex = rvmIndex;
-        this.viewerContext = viewerContext; // needs { viewer: RvmViewer3D }
+        this.viewerContext = viewerContext;
 
         this._rootNodes = [];
-        this._treeMap = new Map(); // canonicalId -> tree node obj
-        this._checkboxMap = new Map(); // canonicalId -> checkbox element
-        this._liMap = new Map(); // canonicalId -> li element
+        this._treeMap = new Map();      // canonicalId -> tree node obj
+        this._checkboxMap = new Map();  // canonicalId -> checkbox element
+        this._liMap = new Map();        // canonicalId -> li element
+        this._parentMap = new Map();    // canonicalId -> parent canonicalId
     }
 
     build() {
@@ -14,29 +15,27 @@ export class RvmTreeModel {
         this._treeMap.clear();
         this._checkboxMap.clear();
         this._liMap.clear();
+        this._parentMap.clear();
 
         if (!this.rvmIndex || !this.rvmIndex.nodes) return;
 
-        // Pass 1: Create all tree node objects
         for (const node of this.rvmIndex.nodes) {
-            const treeNode = {
+            this._treeMap.set(node.canonicalObjectId, {
                 canonicalObjectId: node.canonicalObjectId,
                 name: node.name || node.canonicalObjectId,
                 kind: node.kind,
                 parentCanonicalObjectId: node.parentCanonicalObjectId,
                 children: []
-            };
-            this._treeMap.set(node.canonicalObjectId, treeNode);
+            });
         }
 
-        // Pass 2: Link children to parents
-        for (const [id, treeNode] of this._treeMap) {
+        for (const [, treeNode] of this._treeMap) {
             if (treeNode.parentCanonicalObjectId) {
                 const parent = this._treeMap.get(treeNode.parentCanonicalObjectId);
                 if (parent) {
                     parent.children.push(treeNode);
+                    this._parentMap.set(treeNode.canonicalObjectId, treeNode.parentCanonicalObjectId);
                 } else {
-                    // Parent not found, treat as root
                     this._rootNodes.push(treeNode);
                 }
             } else {
@@ -45,9 +44,6 @@ export class RvmTreeModel {
         }
     }
 
-    /**
-     * Returns all descendant canonical ids, optionally including self.
-     */
     getDescendantCanonicalIds(canonicalObjectId, includeSelf = false) {
         const result = [];
         const treeNode = this._treeMap.get(canonicalObjectId);
@@ -55,68 +51,135 @@ export class RvmTreeModel {
 
         const visit = (node) => {
             result.push(node.canonicalObjectId);
-            for (const child of node.children) {
-                visit(child);
-            }
+            for (const child of node.children) visit(child);
         };
 
         if (includeSelf) {
             visit(treeNode);
         } else {
-            for (const child of treeNode.children) {
-                visit(child);
-            }
+            for (const child of treeNode.children) visit(child);
         }
-
         return result;
     }
 
-    /**
-     * Update checkbox DOM states to match the given set of selected ids.
-     */
-    setSelectedCanonicalIds(ids, options = {}) {
-        const selectedSet = new Set(ids);
+    // ── Private helpers ──────────────────────────────────────────────────────
 
-        // Update each checkbox and li state
-        for (const [id, checkbox] of this._checkboxMap) {
-            const li = this._liMap.get(id);
-            const descendants = this.getDescendantCanonicalIds(id, false);
-            const isChecked = selectedSet.has(id);
+    _getAllCheckedIds() {
+        const ids = [];
+        for (const [id, cb] of this._checkboxMap) {
+            if (cb && cb.checked) ids.push(id);
+        }
+        return ids;
+    }
 
-            if (checkbox) {
-                checkbox._checked = isChecked;
-            }
-            if (li) {
-                li.classList.toggle
-                    ? li.classList.toggle('is-checked', isChecked)
-                    : null;
-
-                // Determine indeterminate state (partial child selection)
-                if (descendants.length > 0) {
-                    const checkedDescendants = descendants.filter(d => selectedSet.has(d));
-                    const isIndeterminate = !isChecked && checkedDescendants.length > 0;
-                    if (li.classList.toggle) {
-                        li.classList.toggle('is-indeterminate', isIndeterminate);
-                    }
-                    if (checkbox) {
-                        checkbox.indeterminate = isIndeterminate;
-                    }
+    _updateAncestorStates(canonicalObjectId) {
+        let id = this._parentMap.get(canonicalObjectId);
+        while (id) {
+            const parentCb = this._checkboxMap.get(id);
+            const treeNode = this._treeMap.get(id);
+            if (parentCb && treeNode) {
+                const desc = this.getDescendantCanonicalIds(id, false);
+                const total = desc.length;
+                const checked = desc.filter(d => this._checkboxMap.get(d)?.checked).length;
+                if (checked === 0) {
+                    parentCb.checked = false;
+                    parentCb.indeterminate = false;
+                } else if (checked === total) {
+                    parentCb.checked = true;
+                    parentCb.indeterminate = false;
+                } else {
+                    parentCb.checked = false;
+                    parentCb.indeterminate = true;
                 }
+            }
+            id = this._parentMap.get(id);
+        }
+    }
+
+    _syncToViewer() {
+        const allChecked = this._getAllCheckedIds();
+        const v = this.viewerContext?.viewer;
+        if (!v) return;
+        if (allChecked.length === 0) {
+            v.clearSelection?.();
+        } else {
+            v.selectCanonicalIds?.(allChecked);
+        }
+    }
+
+    // ── Public API ───────────────────────────────────────────────────────────
+
+    checkAll() {
+        for (const [, cb] of this._checkboxMap) {
+            if (cb) { cb.checked = true; cb.indeterminate = false; }
+        }
+        this._syncToViewer();
+    }
+
+    uncheckAll() {
+        for (const [, cb] of this._checkboxMap) {
+            if (cb) { cb.checked = false; cb.indeterminate = false; }
+        }
+        this._syncToViewer();
+    }
+
+    expandAll() {
+        for (const [, li] of this._liMap) {
+            if (li) li.classList.add('rvm-tree-expanded');
+        }
+        this._liMap.forEach((li, id) => {
+            if (li) {
+                const toggle = li.querySelector(':scope > .rvm-tree-label > .rvm-tree-toggle');
+                if (toggle) toggle.textContent = '▼';
+            }
+        });
+    }
+
+    collapseAll() {
+        for (const [, li] of this._liMap) {
+            if (li) li.classList.remove('rvm-tree-expanded');
+        }
+        this._liMap.forEach((li) => {
+            if (li) {
+                const toggle = li.querySelector(':scope > .rvm-tree-label > .rvm-tree-toggle');
+                if (toggle) toggle.textContent = '▶';
+            }
+        });
+    }
+
+    /** Sync checkbox visual state from an external id set (e.g. viewer selection). */
+    setSelectedCanonicalIds(ids) {
+        const selectedSet = new Set(ids);
+        for (const [id, cb] of this._checkboxMap) {
+            if (!cb) continue;
+            const isChecked = selectedSet.has(id);
+            cb.checked = isChecked;
+            cb.indeterminate = false;
+        }
+        // Recompute indeterminate for all parents
+        for (const [id] of this._treeMap) {
+            if (!this._parentMap.has(id)) {
+                // It's a root — update ancestors of all checked descendants
+            }
+        }
+        for (const [id, cb] of this._checkboxMap) {
+            if (!cb || !this._treeMap.get(id)?.children?.length) continue;
+            const desc = this.getDescendantCanonicalIds(id, false);
+            if (!desc.length) continue;
+            const checked = desc.filter(d => selectedSet.has(d)).length;
+            if (checked > 0 && checked < desc.length) {
+                cb.checked = false;
+                cb.indeterminate = true;
             }
         }
     }
 
     clearSelection() {
-        for (const [id, checkbox] of this._checkboxMap) {
-            if (checkbox) checkbox._checked = false;
-            const li = this._liMap.get(id);
-            if (li && li.classList) {
-                if (li.classList.remove) {
-                    li.classList.remove('is-checked', 'is-indeterminate');
-                } else {
-                    li.className = li.className.replace(/is-checked|is-indeterminate/g, '').trim();
-                }
+        for (const [, cb] of this._checkboxMap) {
+            if (cb) { cb.checked = false; cb.indeterminate = false; }
             }
+        for (const [, li] of this._liMap) {
+            li?.classList?.remove('is-checked', 'is-indeterminate');
         }
     }
 
@@ -132,14 +195,15 @@ export class RvmTreeModel {
         const ul = document.createElement('ul');
         ul.className = 'rvm-tree-root';
 
+        // Expand root nodes by default so the first level is visible
         for (const root of this._rootNodes) {
-            ul.appendChild(this._renderTreeNode(root));
+            ul.appendChild(this._renderTreeNode(root, 0));
         }
 
         containerEl.appendChild(ul);
     }
 
-    _renderTreeNode(treeNode) {
+    _renderTreeNode(treeNode, depth) {
         const li = document.createElement('li');
         li.className = 'rvm-tree-node';
         li.dataset.id = treeNode.canonicalObjectId;
@@ -148,11 +212,14 @@ export class RvmTreeModel {
         const labelDiv = document.createElement('div');
         labelDiv.className = 'rvm-tree-label';
 
-        // If it has children, add a toggle
         if (treeNode.children.length > 0) {
             const toggleSpan = document.createElement('span');
             toggleSpan.className = 'rvm-tree-toggle';
-            toggleSpan.textContent = '▶'; // Can be styled via CSS or toggle classes
+            // Expand root and first child level by default
+            const startExpanded = depth < 2;
+            toggleSpan.textContent = startExpanded ? '▼' : '▶';
+            if (startExpanded) li.classList.add('rvm-tree-expanded');
+
             toggleSpan.onclick = (e) => {
                 e.stopPropagation();
                 li.classList.toggle('rvm-tree-expanded');
@@ -165,19 +232,29 @@ export class RvmTreeModel {
             labelDiv.appendChild(spacerSpan);
         }
 
-        // Checkbox for multi-select
         const checkbox = document.createElement('input');
         checkbox.className = 'rvm-tree-checkbox';
         checkbox.type = 'checkbox';
-        checkbox._checked = false;
         this._checkboxMap.set(treeNode.canonicalObjectId, checkbox);
 
         checkbox.onclick = (e) => {
             e.stopPropagation();
-            const ids = this.getDescendantCanonicalIds(treeNode.canonicalObjectId, true);
-            if (this.viewerContext && this.viewerContext.viewer && this.viewerContext.viewer.selectCanonicalIds) {
-                this.viewerContext.viewer.selectCanonicalIds(ids);
+            const isChecked = checkbox.checked;
+
+            // Cascade to all descendants
+            const descendants = this.getDescendantCanonicalIds(treeNode.canonicalObjectId, false);
+            for (const id of descendants) {
+                const cb = this._checkboxMap.get(id);
+                if (cb) { cb.checked = isChecked; cb.indeterminate = false; }
             }
+
+            // Clear this node's indeterminate state
+            checkbox.indeterminate = false;
+
+            // Update ancestor indeterminate/checked states
+            this._updateAncestorStates(treeNode.canonicalObjectId);
+
+            this._syncToViewer();
         };
 
         labelDiv.appendChild(checkbox);
@@ -186,25 +263,25 @@ export class RvmTreeModel {
         textSpan.className = 'rvm-tree-text';
         const kind = String(treeNode.kind || '').trim();
         textSpan.textContent = kind && kind !== 'UNKNOWN'
-          ? `[${kind}] ${treeNode.name}`
-          : treeNode.name;
-        labelDiv.appendChild(textSpan);
+            ? `[${kind}] ${treeNode.name}`
+            : treeNode.name;
 
-        // Click on the node text selects it in the viewer (single select)
+        // Click on label text = single-select in viewer (no checkbox change)
         labelDiv.onclick = (e) => {
             e.stopPropagation();
-            if (this.viewerContext && this.viewerContext.viewer) {
-                this.viewerContext.viewer.selectByCanonicalId(treeNode.canonicalObjectId);
+            if (this.viewerContext?.viewer) {
+                this.viewerContext.viewer.selectByCanonicalId?.(treeNode.canonicalObjectId);
             }
         };
 
+        labelDiv.appendChild(textSpan);
         li.appendChild(labelDiv);
 
         if (treeNode.children.length > 0) {
             const ul = document.createElement('ul');
             ul.className = 'rvm-tree-children';
             for (const child of treeNode.children) {
-                ul.appendChild(this._renderTreeNode(child));
+                ul.appendChild(this._renderTreeNode(child, depth + 1));
             }
             li.appendChild(ul);
         }
@@ -217,6 +294,7 @@ export class RvmTreeModel {
         this._treeMap.clear();
         this._checkboxMap.clear();
         this._liMap.clear();
+        this._parentMap.clear();
         this.rvmIndex = null;
         this.viewerContext = null;
     }
