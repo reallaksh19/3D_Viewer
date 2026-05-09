@@ -556,6 +556,11 @@ function _bindTabListener() {
             _viewer.tagStore.getAllTags().forEach((tag) => _viewer.addTag(tag));
         }
 
+        // Store index in state so the PCF extract tab can access it without going through the viewer.
+        if (payload.indexJson) {
+            state.rvm.index = payload.indexJson;
+        }
+
         const container = document.querySelector('.rvm-tab-root');
         if (container && payload.indexJson && payload.indexJson.nodes) {
             const tree = container.querySelector('#rvm-hierarchy-tree');
