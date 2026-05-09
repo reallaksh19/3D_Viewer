@@ -1,42 +1,60 @@
 import { RvmCacheStore } from './rvm-cache-store.js';
 import { RvmDiagnostics } from '../rvm/RvmDiagnostics.js';
 
+// Module-level cache — probe only runs once per page session.
+let _cachedProbeResult = null;
+
 export class RvmHelperBridge {
     constructor() {
-        // Will be dynamically resolved by probe()
         this.endpoint = null;
     }
 
     async probe() {
+        // Return cached result to avoid re-probing on every tab open.
+        if (_cachedProbeResult !== null) {
+            if (_cachedProbeResult.reachable) this.endpoint = _cachedProbeResult.endpoint;
+            return { reachable: _cachedProbeResult.reachable, version: _cachedProbeResult.version };
+        }
+
         const candidates = [
             'http://localhost:3001/api/native/rvm-to-rev',
             'http://localhost:3000/api/native/rvm-to-rev',
             'http://localhost:3200/api/native/rvm-to-rev',
-            'http://127.0.0.1:3001/api/native/rvm-to-rev',
-            'http://127.0.0.1:3000/api/native/rvm-to-rev',
-            'http://127.0.0.1:3200/api/native/rvm-to-rev'
         ];
 
-        for (const url of candidates) {
+        const tryOne = async (url) => {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 1500);
             try {
                 const res = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     cache: 'no-store',
+                    signal: ctrl.signal,
                     body: JSON.stringify({ mode: 'probe' }),
                 });
-                if (res.status === 404 || res.status === 405) {
-                    continue;
-                }
-                if (res.ok || res.status === 400 || res.status === 422) {
-                    this.endpoint = url; // Lock in the discovered endpoint
-                    console.log(`[RvmHelperBridge] Found active local backend at: ${url}`);
-                    return { reachable: true, version: '1.0' };
-                }
-            } catch (e) {
-                // Ignore connection refused errors and try the next candidate
+                clearTimeout(timer);
+                if (res.status === 404 || res.status === 405) return null;
+                if (res.ok || res.status === 400 || res.status === 422) return url;
+                return null;
+            } catch {
+                clearTimeout(timer);
+                return null;
             }
+        };
+
+        // Race all candidates in parallel — first non-null wins.
+        const results = await Promise.all(candidates.map(tryOne));
+        const found = results.find(r => r !== null) || null;
+
+        if (found) {
+            this.endpoint = found;
+            _cachedProbeResult = { reachable: true, endpoint: found, version: '1.0' };
+            console.log(`[RvmHelperBridge] Found active local backend at: ${found}`);
+            return { reachable: true, version: '1.0' };
         }
+
+        _cachedProbeResult = { reachable: false, endpoint: null, version: null };
         this.endpoint = null;
         return { reachable: false };
     }
