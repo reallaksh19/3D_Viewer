@@ -106,6 +106,7 @@ export class RvmSelectionAdapter {
         }
         this._selectedCanonicalId = this._selectedCanonicalIds[0] || null;
         this._rebuildRenderIds();
+        this._highlight(this._selectedRenderIds, COLORS.SELECTED);
         this._emitSelection();
     }
 

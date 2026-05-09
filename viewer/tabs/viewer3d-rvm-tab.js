@@ -495,7 +495,7 @@ function _bindToolbarActions(container) {
         state.rvmPcfExtract.scope = scope;
         state.rvmPcfExtract.lastRequestedAt = new Date().toISOString();
         emit(RuntimeEvents.RVM_EXTRACT_PCF_REQUESTED, { scope, selectedCanonicalIds });
-        setActiveTab('rvm-json-pcf-extract');
+        window.dispatchEvent(new CustomEvent('app:switch-tab', { detail: { tabId: 'rvm-json-pcf-extract' } }));
         break;
       }
       default: break;
