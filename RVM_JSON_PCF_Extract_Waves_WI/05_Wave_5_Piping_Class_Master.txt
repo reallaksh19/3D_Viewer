@@ -1,0 +1,69 @@
+Wave 5 — Piping Class Auto-Mapping
+
+Goal:
+Populate piping class data automatically using Pipeline Ref, Line No, Converted Bore, Linelist Master, and Piping Class Master.
+
+Primary files:
+- viewer/rvm-pcf-extract/RvmPipingClassMapper.js
+- viewer/core/state.js
+- viewer/rvm-pcf-extract/RvmFinal2dCsvBuilder.js
+- viewer/tabs/rvm-json-pcf-extract-tab.js
+
+Output fields:
+- pipingClass
+- rating
+- material
+- schedule
+- wallThickness
+- corrosionAllowance
+- endCondition
+- facing
+- classMatchScore
+- classMappingSource
+- classMappingRuleId
+- pipingClassMapping
+
+Mapping priority:
+1. Direct row class: PIPING_CLASS, CLASS, SPEC, PSPEC, PIPING_SPEC, SPECIFICATION
+2. Linelist Master: match lineNo / pipelineRef.
+3. Parse from Pipeline Ref: regex tokens such as CS150, SS300, A1A.
+4. Piping Class Master: match class + converted bore + component type.
+5. Project fallback defaults.
+
+Piping Class Master normalized fields:
+- convertedBore
+- pipingClass
+- rating
+- material
+- schedule
+- wallThickness
+- corrosionAllowance
+- endCondition
+- facing
+- componentType
+- commodityCode
+- skeyHint
+
+Scoring:
++40 exact pipingClass
++30 exact convertedBore
++20 component type
++15 rating
++10 material
++10 end condition
++5 component type wildcard
+-50 class mismatch
+-30 bore mismatch
+-10 component type mismatch
+-10 rating mismatch
+
+Thresholds:
+>=70 auto-apply
+50 to 69 apply with warning
+<50 unresolved warning
+
+Validation gate:
+PASS: Direct class maps.
+PASS: Linelist maps by Pipeline Ref / Line No.
+PASS: Class Master enriches rating/material/schedule/wall/end/facing.
+PASS: Inspector shows source/rule/score.

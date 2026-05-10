@@ -1,0 +1,59 @@
+Wave 8 — PCF Emitter, Validation, Preview, Downloads
+
+Goal:
+Generate PCF text from Final 2D CSV rows.
+
+Primary files:
+- viewer/rvm-pcf-extract/RvmPcfEmitter.js
+- viewer/rvm-pcf-extract/RvmPcfDownload.js
+- viewer/core/state.js
+- viewer/tabs/rvm-json-pcf-extract-tab.js
+
+Supported blocks:
+- PIPE
+- BEND
+- TEE
+- OLET
+- FLANGE
+- VALVE
+- REDUCER-CONCENTRIC
+- REDUCER-ECCENTRIC
+- SUPPORT
+
+PCF header:
+ISOGEN-FILES ISOGEN.FLS
+UNITS-BORE MM
+UNITS-CO-ORDS MM
+UNITS-WEIGHT KGS
+UNITS-BOLT-DIA MM
+UNITS-BOLT-LENGTH MM
+PIPELINE-REFERENCE <pipelineRef>
+    PROJECT-IDENTIFIER P1
+    AREA A1
+
+Validation:
+PIPE: EP1 + EP2
+BEND: EP1 + EP2 + CP
+TEE: EP1 + EP2 + CP + BP
+OLET: CP + BP
+VALVE/FLANGE/REDUCER: EP1 + EP2
+SUPPORT: supportCoor, CP, or EP1 fallback
+
+Emitter:
+PIPE emits END-POINT, END-POINT, PIPELINE-REFERENCE, SKEY, CA.
+BEND emits END-POINT, END-POINT, CENTRE-POINT, ANGLE, SKEY, CA.
+TEE emits END-POINT, END-POINT, CENTRE-POINT, BRANCH1-POINT, SKEY, CA.
+OLET emits CENTRE-POINT, BRANCH1-POINT, SKEY, CA.
+SUPPORT emits CO-ORDS, SUPPORT_NAME, SUPPORT_GUID.
+
+Downloads:
+- Final 2D CSV
+- Generated PCF
+- Diagnostics JSON
+
+Validation gate:
+PASS: Missing geometry errors are reported.
+PASS: PCF generation blocked if errors and allowPartialPcf=false.
+PASS: Supported blocks emit correct records.
+PASS: include=false rows are skipped.
+PASS: CSV, PCF, diagnostics download.

@@ -1,0 +1,240 @@
+/* JSON → PCF Extract tab styles */
+
+.rvm-pcf-extract-tab {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--geo-bg, #1a1c21);
+  color: var(--geo-text, #d4d4d4);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.rvm-pcf-extract-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  background: var(--geo-banner-bg, #252830);
+  border-bottom: 1px solid var(--geo-border, #333);
+  font-size: 12px;
+  color: var(--geo-text-muted, #aaa);
+  flex-shrink: 0;
+}
+
+.rvm-pcf-extract-source-label,
+.rvm-pcf-extract-scope-label {
+  white-space: nowrap;
+}
+
+.rvm-pcf-extract-node-count {
+  color: #7ab3ff;
+  font-size: 11px;
+}
+
+.rvm-pcf-extract-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--geo-ribbon-bg, #20232a);
+  border-bottom: 1px solid var(--geo-border, #333);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.rvm-pcf-extract-toolbar button {
+  padding: 4px 10px;
+  background: #1a3a5c;
+  border: 1px solid #4a9eff;
+  border-radius: 5px;
+  color: #7ab3ff;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.rvm-pcf-extract-toolbar button:hover {
+  background: #1e4a7a;
+}
+
+.rvm-pcf-extract-toolbar button:active {
+  background: #0e2a4c;
+}
+
+.rvm-pcf-extract-body {
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.rvm-pcf-extract-layout {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+.rvm-pcf-extract-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 6px;
+  background: var(--geo-banner-bg, #252830);
+  border-right: 1px solid var(--geo-border, #333);
+  flex-shrink: 0;
+  min-width: 110px;
+}
+
+.rvm-pcf-extract-rail button {
+  padding: 6px 10px;
+  background: #20242e;
+  border: 1px solid #3a4560;
+  border-radius: 5px;
+  color: #9ab3d4;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  transition: background 0.12s;
+}
+
+.rvm-pcf-extract-rail button:hover {
+  background: #28304a;
+  color: #d4e4ff;
+}
+
+.rvm-pcf-extract-rail button.is-active {
+  border-color: #4a9eff;
+  color: #fff;
+  background: rgba(74, 158, 255, 0.18);
+}
+
+.rvm-pcf-extract-main {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+#rvm-pcf-extract-panel-host {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.rvm-pcf-extract-status {
+  color: var(--geo-text-muted, #999);
+  font-size: 12px;
+  font-style: italic;
+  padding: 16px;
+}
+
+.rvm-pcf-extract-pre {
+  color: #c8d8f0;
+  font-size: 11px;
+  white-space: pre-wrap;
+  padding: 12px;
+  margin: 0;
+  overflow: auto;
+}
+
+/* Scope panel */
+.rvm-pcf-extract-status-card {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rvm-pcf-status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #2a3040;
+  padding-bottom: 6px;
+  font-size: 12px;
+}
+
+.rvm-pcf-label {
+  color: #9aa9bd;
+}
+
+/* 2D CSV table */
+.rvm-pcf-table-wrap {
+  overflow: auto;
+  padding: 8px;
+}
+
+.rvm-pcf-table {
+  border-collapse: collapse;
+  font-size: 11px;
+  min-width: 800px;
+  width: 100%;
+}
+
+.rvm-pcf-table th,
+.rvm-pcf-table td {
+  border: 1px solid #2d3545;
+  padding: 4px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.rvm-pcf-table th {
+  background: #1a2235;
+  color: #7ab3ff;
+  font-weight: 700;
+  position: sticky;
+  top: 0;
+}
+
+.rvm-pcf-table td { color: #d4e0f0; }
+
+.rvm-pcf-table tr.row-excluded td { opacity: 0.45; }
+
+/* Diagnostics panel */
+.rvm-pcf-diag-list {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rvm-pcf-diag {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  border-left: 3px solid #6fa8ff;
+  background: #141a24;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.rvm-pcf-diag.diag-error  { border-left-color: #ff7171; }
+.rvm-pcf-diag.diag-warn   { border-left-color: #f2c46d; }
+.rvm-pcf-diag.diag-info   { border-left-color: #7ddc9a; }
+
+.rvm-pcf-diag-code {
+  font-weight: 700;
+  color: #9dc4ff;
+  white-space: nowrap;
+  min-width: 120px;
+}
+
+/* PCF panel */
+.rvm-pcf-ref-block {
+  margin-bottom: 16px;
+  padding: 8px;
+}
+
+.rvm-pcf-ref-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #4a9eff;
+  margin-bottom: 4px;
+  padding: 4px 0;
+  border-bottom: 1px solid #2d3545;
+}

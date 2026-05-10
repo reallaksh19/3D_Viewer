@@ -1,0 +1,57 @@
+Wave 6 — Legacy-Compatible Valve CA8 Weight Mapping
+
+Critical correction:
+Valve CA8 weight lookup must use:
+    VALVE + Bore + Rating + Length
+
+It must not use:
+    Type + Bore + Rating + Piping Class + Material
+
+Primary files:
+- viewer/rvm-pcf-extract/RvmValveWeightMapper.js
+- viewer/core/state.js
+- viewer/rvm-pcf-extract/RvmFinal2dCsvBuilder.js
+- viewer/tabs/rvm-json-pcf-extract-tab.js
+
+Legacy behavior:
+findValveWeightCandidates({ boreMm, ratingClass, lengthMm })
+
+Filter:
+- same bore
+- exact rating class
+- length within ±6 mm
+- valid weight row
+
+Input row requirements:
+- type = VALVE
+- bore or convertedBore
+- rating
+- length
+
+Length source priority:
+1. lengthMm, length, len
+2. lenAxis.len1, lenAxis.length, axisLength
+3. distance(ep1, ep2)
+
+Weight Master normalized row:
+- boreMm
+- ratingClass
+- lengthMm
+- valveWeight
+- valveType
+- sourceRowIndex
+- qualityOk
+
+Behavior:
+- Non-VALVE: skip.
+- VALVE with incomplete key: WM-VALVE-KEY-INCOMPLETE.
+- One candidate: apply row.weight, row.directWeight, row.ca["8"], row.ca8.
+- Multiple candidates: no auto-apply; store ambiguousValveWeightRequests.
+- No candidate: WM-VALVE-CA8-NO-MATCH.
+
+Validation gate:
+PASS: Non-VALVE rows are skipped.
+PASS: VALVE without bore/rating/length warns.
+PASS: One candidate applies CA8.
+PASS: Multiple candidates are ambiguous.
+PASS: Piping class and material are not used as valve CA8 keys.

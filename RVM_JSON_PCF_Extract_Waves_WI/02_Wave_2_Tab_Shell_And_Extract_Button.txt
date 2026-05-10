@@ -1,0 +1,56 @@
+Wave 2 — Extract Button + JSON → PCF Extract Tab Shell
+
+Goal:
+Add the new "Extract PCF (from Json)" button and create the "JSON → PCF Extract" tab.
+
+Primary files:
+- viewer/contracts/runtime-events.js
+- viewer/core/state.js
+- viewer/core/app.js
+- viewer/tabs/viewer3d-rvm-tab.js
+- viewer/tabs/viewer3d-rvm-tab.css
+- viewer/opt/tab-visibility.json
+- viewer/tabs/rvm-json-pcf-extract-tab.js
+- viewer/tabs/rvm-json-pcf-extract-tab.css
+
+New runtime events:
+- RVM_EXTRACT_PCF_REQUESTED
+- RVM_PCF_EXTRACT_STATE_CHANGED
+
+New state:
+state.rvmPcfExtract = {
+  source,
+  sourceLabel,
+  scope,
+  selectedCanonicalIds,
+  selectedRenderObjectIds,
+  sourceStatus,
+  sourceDiagnostics,
+  pipelineGroups,
+  rows,
+  masters,
+  diagnostics,
+  pcfTextByPipelineRef,
+  lastRequestedAt,
+  lastBuiltAt
+}
+
+Extract button behavior:
+1. Read state.rvm.selection.canonicalObjectIds.
+2. scope = selected if ids exist, otherwise full.
+3. requestRvmPcfExtract(...).
+4. emit RuntimeEvents.RVM_EXTRACT_PCF_REQUESTED.
+5. switch tab to rvm-json-pcf-extract.
+
+New tab UI:
+- Header: source, scope, selected node count, RVM node count.
+- Toolbar: Reload Scope, Rebuild Final 2D CSV, Validate, Generate PCF, Download CSV, Download PCF.
+- Icon rail: Scope, Master, Table, Diagnostics, PCF, Config.
+- Side panel, main table, row inspector, PCF preview.
+
+Validation gate:
+PASS: New events exist.
+PASS: state.rvmPcfExtract initializes.
+PASS: JSON → PCF Extract appears in tab bar.
+PASS: Extract PCF button appears in 3D RVM Viewer.
+PASS: Clicking button opens new tab and carries selected ids.
