@@ -156,6 +156,12 @@ export class RvmTreeModel {
             cb.checked = isChecked;
             cb.indeterminate = false;
         }
+        for (const [id, li] of this._liMap) {
+            if (li && li.classList) {
+                li.classList.toggle('is-checked', selectedSet.has(id));
+                li.classList.remove('is-indeterminate');
+            }
+        }
         // Recompute indeterminate for all parents
         for (const [id] of this._treeMap) {
             if (!this._parentMap.has(id)) {
@@ -170,6 +176,11 @@ export class RvmTreeModel {
             if (checked > 0 && checked < desc.length) {
                 cb.checked = false;
                 cb.indeterminate = true;
+                const li = this._liMap.get(id);
+                if (li && li.classList) {
+                    li.classList.add('is-indeterminate');
+                    li.classList.remove('is-checked');
+                }
             }
         }
     }
