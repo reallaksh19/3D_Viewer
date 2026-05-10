@@ -123,9 +123,9 @@ async function runTests() {
 
   // T13: VALVE with ca['8'] already set → preserved
   {
-    const row = makeRow({ type: 'VALVE', ca: { '8': 45.0 }, attributes: { CA8: 99 } });
+    const row = makeRow({ type: 'VALVE', ca: { '8': '45.0 kg' }, attributes: { CA8: 99 } });
     mapper.mapRow(row);
-    if (row.ca['8'] === 45.0) console.log('✅ T13: VALVE ca[8] preserved from Wave 6');
+    if (row.ca['8'] === '45.0 kg') console.log('✅ T13: VALVE ca[8] preserved from Wave 6');
     else errors.push(`T13 failed: ca[8]=${row.ca['8']}`);
   }
 

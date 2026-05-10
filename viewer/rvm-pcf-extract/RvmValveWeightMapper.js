@@ -117,6 +117,8 @@ function getDescription(row) {
   );
 }
 
+import { applyWeightCa8UnitsToRow } from './RvmLineListUnitDetector.js';
+
 export class RvmValveWeightMapper {
   constructor(masters = {}) {
     this._master = getWeightRows(masters);
@@ -267,8 +269,12 @@ export class RvmValveWeightMapper {
     if (candidates.length === 1) {
       const candidate = candidates[0];
 
-      row.ca = row.ca || {};
-      row.ca['8'] = candidate.valveWeight ?? candidate.directWeight ?? candidate.weight;
+      applyWeightCa8UnitsToRow({
+        row,
+        weightValue: candidate.valveWeight ?? candidate.directWeight ?? candidate.weight,
+        header: 'Weight',
+        diagnostics: row.diagnostics || []
+      });
 
       result.valveWeightSource = 'WM-WEIGHT-CA8-MATCH';
 
