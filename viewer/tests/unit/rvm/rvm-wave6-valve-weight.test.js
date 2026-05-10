@@ -54,14 +54,14 @@ console.log('\nT1: Non-VALVE row → skipped');
   assert(row.ca === undefined, 'ca not set on PIPE row');
 }
 
-// ─── T2: VALVE with incomplete key (no bore) → WM-VALVE-KEY-INCOMPLETE ───────
+// ─── T2: VALVE with incomplete key (no bore) → WM-WEIGHT-KEY-INCOMPLETE ───────
 
 console.log('\nT2: VALVE with incomplete key (no bore)');
 {
   const row = { type: 'VALVE', convertedBore: null, rating: '150', attributes: { lengthMm: 205 }, diagnostics: [] };
   const result = mapper.mapRow(row);
-  assertEqual(result.valveWeightSource, 'WM-VALVE-KEY-INCOMPLETE', 'source = WM-VALVE-KEY-INCOMPLETE');
-  assert(row.diagnostics.includes('WM-VALVE-KEY-INCOMPLETE'), 'diagnostic pushed to row');
+  assertEqual(result.valveWeightSource, 'WM-WEIGHT-KEY-INCOMPLETE', 'source = WM-WEIGHT-KEY-INCOMPLETE');
+  assert(row.diagnostics.includes('WM-WEIGHT-KEY-INCOMPLETE'), 'diagnostic pushed to row');
   assert(row.ca === undefined, 'ca not set');
 }
 
@@ -71,7 +71,7 @@ console.log('\nT3: VALVE bore=100, rating=150, length=205 → one candidate');
 {
   const row = { type: 'VALVE', convertedBore: 100, rating: '150', attributes: { lengthMm: 205 }, diagnostics: [], rowNo: 10 };
   const result = mapper.mapRow(row);
-  assertEqual(result.valveWeightSource, 'WM-VALVE-CA8-MATCH', 'source = WM-VALVE-CA8-MATCH');
+  assertEqual(result.valveWeightSource, 'WM-WEIGHT-CA8-MATCH', 'source = WM-WEIGHT-CA8-MATCH');
   assertEqual(result.valveWeightLengthMm, 205, 'lengthMm resolved correctly');
   assertEqual(row.ca['8'], 45.0, 'ca["8"] = 45.0 (GATE valve at 203mm)');
 }
@@ -82,11 +82,11 @@ console.log('\nT4: VALVE bore=100, rating=150, length=207 → ambiguous');
 {
   const row = { type: 'VALVE', convertedBore: 100, rating: '150', attributes: { lengthMm: 207 }, diagnostics: [], rowNo: 20 };
   const result = mapper.mapRow(row);
-  assertEqual(result.valveWeightSource, 'WM-VALVE-CA8-AMBIGUOUS', 'source = WM-VALVE-CA8-AMBIGUOUS');
+  assertEqual(result.valveWeightSource, 'WM-WEIGHT-CA8-AMBIGUOUS', 'source = WM-WEIGHT-CA8-AMBIGUOUS');
   assert(result.ambiguousValveWeightRequests.length === 1, 'one ambiguous request');
   assert(result.ambiguousValveWeightRequests[0].candidates.length === 2, 'two candidates');
   assert(row.ca === undefined || row.ca?.['8'] === undefined, 'ca["8"] NOT auto-applied');
-  assert(row.diagnostics.includes('WM-VALVE-CA8-AMBIGUOUS'), 'diagnostic pushed');
+  assert(row.diagnostics.includes('WM-WEIGHT-CA8-AMBIGUOUS'), 'diagnostic pushed');
 }
 
 // ─── T5: VALVE bore=100, rating='300', length=205 → no match ─────────────────
@@ -95,9 +95,9 @@ console.log('\nT5: VALVE bore=100, rating=300, length=205 → no match');
 {
   const row = { type: 'VALVE', convertedBore: 100, rating: '300', attributes: { lengthMm: 205 }, diagnostics: [], rowNo: 30 };
   const result = mapper.mapRow(row);
-  assertEqual(result.valveWeightSource, 'WM-VALVE-CA8-NO-MATCH', 'source = WM-VALVE-CA8-NO-MATCH');
+  assertEqual(result.valveWeightSource, 'WM-WEIGHT-CA8-NO-MATCH', 'source = WM-WEIGHT-CA8-NO-MATCH');
   assert(row.ca === undefined || row.ca?.['8'] === undefined, 'ca["8"] not set');
-  assert(row.diagnostics.includes('WM-VALVE-CA8-NO-MATCH'), 'diagnostic pushed');
+  assert(row.diagnostics.includes('WM-WEIGHT-CA8-NO-MATCH'), 'diagnostic pushed');
 }
 
 // ─── T6: Piping class and material NOT used as keys ──────────────────────────
@@ -114,7 +114,7 @@ console.log('\nT6: Piping class and material are NOT used as lookup keys');
     rowNo: 40,
   };
   const result = mapper.mapRow(row);
-  assertEqual(result.valveWeightSource, 'WM-VALVE-CA8-MATCH', 'pipingClass/material ignored, match still found');
+  assertEqual(result.valveWeightSource, 'WM-WEIGHT-CA8-MATCH', 'pipingClass/material ignored, match still found');
   assertEqual(row.ca['8'], 45.0, 'ca["8"] = 45.0');
 }
 

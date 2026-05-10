@@ -238,12 +238,54 @@ function _showPanel(container, panelId) {
     return;
   }
 
+function _masterResolutionSummaryHtml() {
+  const requests = state.rvmPcfExtract?.pendingMasterResolutionRequests || [];
+
+  if (!requests.length) {
+    return `
+      <div class="rvm-pcf-extract-status-card">
+        <div class="rvm-pcf-status-row">
+          <span class="rvm-pcf-label">Master resolution</span>
+          <span>Complete</span>
+        </div>
+      </div>
+    `;
+  }
+
+  const byKind = requests.reduce((acc, req) => {
+    acc[req.kind] = (acc[req.kind] || 0) + 1;
+    return acc;
+  }, {});
+
+  return `
+    <div class="rvm-pcf-extract-status-card">
+      <div class="rvm-pcf-status-row">
+        <span class="rvm-pcf-label">Master resolution pending</span>
+        <span>${requests.length}</span>
+      </div>
+      <div class="rvm-pcf-status-row">
+        <span class="rvm-pcf-label">Piping class</span>
+        <span>${byKind.PIPING_CLASS || 0}</span>
+      </div>
+      <div class="rvm-pcf-status-row">
+        <span class="rvm-pcf-label">Line list</span>
+        <span>${byKind.LINELIST || 0}</span>
+      </div>
+      <div class="rvm-pcf-status-row">
+        <span class="rvm-pcf-label">Weight</span>
+        <span>${byKind.WEIGHT || 0}</span>
+      </div>
+    </div>
+  `;
+}
+
   if (panelId === 'diagnostics') {
     const diags = state.rvmPcfExtract?.diagnostics || [];
     const audit = state.rvmPcfExtract?.pcfAuditReport || null;
     const sevClass = s => s === 'ERROR' ? 'diag-error' : s === 'WARNING' ? 'diag-warn' : 'diag-info';
     host.innerHTML = `
       ${_auditSummaryHtml(audit)}
+      ${_masterResolutionSummaryHtml()}
       <div style="padding:8px;font-size:11px;color:#9aa9bd;">${diags.length} diagnostic(s)</div>
       <div class="rvm-pcf-diag-list">
         ${diags.length ? diags.map(d => `
@@ -284,29 +326,120 @@ function _setStatus(container, msg, isError = false) {
 
 async function _runRebuildCsv(container) {
   const indexJson = state.rvm?.index;
+
   if (!indexJson?.nodes?.length) {
     _setStatus(container, 'No model loaded. Load an RVM bundle in the 3D viewer first.', true);
     return false;
   }
+
   _setStatus(container, 'Building 2D CSV…');
+
   try {
-    const [{ RvmFinal2dCsvBuilder }, { RvmExtractHardening }] = await Promise.all([
+    const [
+      { RvmFinal2dCsvBuilder },
+      { RvmExtractHardening },
+      {
+        RvmMasterResolutionWorkflow,
+        showRvmMasterResolutionDialog
+      }
+    ] = await Promise.all([
       import('../rvm-pcf-extract/RvmFinal2dCsvBuilder.js'),
       import('../rvm-pcf-extract/RvmExtractHardening.js'),
+      import('../rvm-pcf-extract/RvmMasterResolutionWorkflow.js')
     ]);
+
     const selectedCanonicalIds = state.rvmPcfExtract.selectedCanonicalIds || [];
-    const masters              = state.rvmPcfExtract.masters || {};
+    const masters = state.rvmPcfExtract.masters || {};
+
     const builder = new RvmFinal2dCsvBuilder(indexJson, {
       selectedCanonicalIds,
-      selectedRootIds: selectedCanonicalIds,
-      masters,
+      masters
     });
+
     const { rows, diagnostics: buildDiags } = builder.build();
+
     const hardening = new RvmExtractHardening();
     hardening.sortRows(rows);
-    updateRvmPcfExtractState({ rows, diagnostics: [...(state.rvmPcfExtract.diagnostics || []), ...buildDiags], lastBuiltAt: new Date().toISOString() }, 'rebuild-csv');
-    emit(RuntimeEvents.RVM_PCF_EXTRACT_STATE_CHANGED, { action: 'REBUILD_CSV' });
-    _setStatus(container, `Built ${rows.length} row(s).`);
+
+    const resolver = new RvmMasterResolutionWorkflow({
+      masters,
+      options: {
+        pipingClassRegex: localStorage.getItem('rvm_pcf_piping_class_regex') || undefined,
+        pipingClassRegexGroup: Number(localStorage.getItem('rvm_pcf_piping_class_regex_group') || 1)
+      }
+    });
+
+    const resolution = resolver.processRows(rows);
+
+    const allDiagnostics = [
+      ...(state.rvmPcfExtract.diagnostics || []).filter(d => d._source !== 'master-resolution'),
+      ...(buildDiags || []),
+      ...(resolution.diagnostics || []).map(d => ({
+        ...d,
+        _source: 'master-resolution'
+      })),
+      ...(resolution.requests || []).map(req => ({
+        severity: req.reason === 'NO_MATCH' || req.reason === 'NO_MASTER' ? 'WARNING' : 'WARNING',
+        code: `MASTER-${req.kind}-${req.reason}`,
+        message: `${req.kind} requires user resolution: ${req.reason}`,
+        rowNo: req.rowNo,
+        type: req.componentType,
+        pipelineRef: req.pipelineRef,
+        requestId: req.id,
+        _source: 'master-resolution'
+      }))
+    ];
+
+    updateRvmPcfExtractState({
+      rows,
+      diagnostics: allDiagnostics,
+      pendingMasterResolutionRequests: resolution.requests || [],
+      lastBuiltAt: new Date().toISOString()
+    }, 'rebuild-csv');
+
+    emit(RuntimeEvents.RVM_PCF_EXTRACT_STATE_CHANGED, {
+      action: 'REBUILD_CSV'
+    });
+
+    if (resolution.requests?.length) {
+      _setStatus(
+        container,
+        `Built ${rows.length} row(s). ${resolution.requests.length} master resolution request(s) need review.`,
+        true
+      );
+
+      showRvmMasterResolutionDialog({
+        requests: resolution.requests,
+        rows,
+        resolver,
+        onApplied: result => {
+          const current = state.rvmPcfExtract || {};
+          const existingDiagnostics = current.diagnostics || [];
+
+          updateRvmPcfExtractState({
+            rows,
+            diagnostics: [
+              ...existingDiagnostics,
+              ...(result.diagnostics || []).map(d => ({
+                ...d,
+                _source: 'master-resolution'
+              }))
+            ],
+            pendingMasterResolutionRequests: []
+          }, 'master-resolution-applied');
+
+          emit(RuntimeEvents.RVM_PCF_EXTRACT_STATE_CHANGED, {
+            action: 'MASTER_RESOLUTION_APPLIED'
+          });
+
+          _setStatus(container, `Master resolution applied to ${result.applied || 0} row(s).`);
+          _showPanel(container, 'table');
+        }
+      });
+    } else {
+      _setStatus(container, `Built ${rows.length} row(s). Master resolution complete.`);
+    }
+
     return true;
   } catch (err) {
     _setStatus(container, `Build failed: ${err.message}`, true);

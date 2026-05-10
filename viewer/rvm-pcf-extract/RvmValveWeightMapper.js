@@ -1,43 +1,185 @@
 /**
  * RvmValveWeightMapper.js
- * Wave 6 – maps valve CA8 weight using legacy key: VALVE + Bore + Rating + Length.
- * Pure JS: no DOM, no three.js.
+ *
+ * Maps CA8 weight using key:
+ * component type + convertedBore + rating/pipingClass + length.
+ *
+ * Applies to:
+ * - VALVE
+ * - FLANGE
+ *
+ * Ambiguous/no-match cases are not guessed here. They are reported through
+ * ambiguousWeightRequests and handled by RvmMasterResolutionWorkflow popup.
  */
+
+const SUPPORTED_TYPES = new Set(['VALVE', 'FLANGE']);
+const LENGTH_TOLERANCE_MM = 4;
+
+function clean(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function upper(value) {
+  return clean(value).toUpperCase();
+}
+
+function toNumber(value) {
+  if (value == null || value === '') return null;
+  const n = Number(String(value).replace(/[^0-9.+-]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeRating(value) {
+  return upper(value).replace(/#/g, '');
+}
+
+function getWeightRows(masters) {
+  if (Array.isArray(masters?.valveWeightMaster)) return masters.valveWeightMaster;
+  if (Array.isArray(masters?.weight)) return masters.weight;
+  if (Array.isArray(masters?.weight?.rows)) return masters.weight.rows;
+  return [];
+}
+
+function getBore(row) {
+  return (
+    toNumber(row.boreMm) ??
+    toNumber(row.convertedBore) ??
+    toNumber(row['Converted Bore']) ??
+    toNumber(row.bore) ??
+    toNumber(row.Bore) ??
+    toNumber(row.DN) ??
+    toNumber(row.NB) ??
+    toNumber(row._raw?.['Converted Bore']) ??
+    toNumber(row._raw?.DN) ??
+    toNumber(row._raw?.NB)
+  );
+}
+
+function getRating(row) {
+  return clean(
+    row.ratingClass ??
+    row.rating ??
+    row.Rating ??
+    row.RATING ??
+    row.Class ??
+    row.CLASS ??
+    row['Pressure Class'] ??
+    row._raw?.Rating ??
+    row._raw?.RATING ??
+    row._raw?.Class ??
+    row._raw?.['Pressure Class'] ??
+    ''
+  );
+}
+
+function getLength(row) {
+  return (
+    toNumber(row.lengthMm) ??
+    toNumber(row.length) ??
+    toNumber(row.Length) ??
+    toNumber(row['Length (RF-F/F)']) ??
+    toNumber(row['RF-F/F']) ??
+    toNumber(row.LEN) ??
+    toNumber(row.faceToFace) ??
+    toNumber(row._raw?.['Length (RF-F/F)']) ??
+    toNumber(row._raw?.['RF-F/F']) ??
+    toNumber(row._raw?.Length)
+  );
+}
+
+function getWeight(row) {
+  return (
+    toNumber(row.valveWeight) ??
+    toNumber(row.directWeight) ??
+    toNumber(row.weight) ??
+    toNumber(row.Weight) ??
+    toNumber(row['RF/RTJ KG']) ??
+    toNumber(row['Valve Weight']) ??
+    toNumber(row._raw?.['RF/RTJ KG']) ??
+    toNumber(row._raw?.['Valve Weight']) ??
+    toNumber(row._raw?.Weight)
+  );
+}
+
+function getDescription(row) {
+  return clean(
+    row.valveType ??
+    row.componentType ??
+    row.description ??
+    row.Description ??
+    row['Type Description'] ??
+    row['Valve Type'] ??
+    row.Type ??
+    row._raw?.['Type Description'] ??
+    row._raw?.['Valve Type'] ??
+    row._raw?.Type ??
+    ''
+  );
+}
 
 export class RvmValveWeightMapper {
   constructor(masters = {}) {
-    // masters: { valveWeightMaster: [...rows] }
-    // Each master row normalized: { boreMm, ratingClass, lengthMm, valveWeight, valveType, sourceRowIndex, qualityOk }
-    this._master = Array.isArray(masters.valveWeightMaster) ? masters.valveWeightMaster : [];
+    this._master = getWeightRows(masters);
   }
 
-  // ── Length resolution ──────────────────────────────────────────────────────
+  _parsePoint(value) {
+    if (!value) return null;
 
-  _resolveLength(attrs) {
-    // Priority 1: direct length fields
-    for (const key of ['lengthMm', 'length', 'len']) {
-      if (attrs[key] != null && typeof attrs[key] === 'number' && isFinite(attrs[key])) {
-        return attrs[key];
+    if (Array.isArray(value) && value.length >= 3) {
+      const [x, y, z] = value;
+      if ([x, y, z].every(v => Number.isFinite(Number(v)))) {
+        return { x: Number(x), y: Number(y), z: Number(z) };
       }
     }
 
-    // Priority 2: nested lenAxis
+    if (typeof value === 'object' && !Array.isArray(value)) {
+      const x = value.x ?? value.X;
+      const y = value.y ?? value.Y;
+      const z = value.z ?? value.Z;
+
+      if ([x, y, z].every(v => Number.isFinite(Number(v)))) {
+        return { x: Number(x), y: Number(y), z: Number(z) };
+      }
+    }
+
+    return null;
+  }
+
+  _resolveLength(row) {
+    const attrs = row.attributes || {};
+
+    const direct =
+      toNumber(row.lengthMm) ??
+      toNumber(row.length) ??
+      toNumber(row.len) ??
+      toNumber(attrs.lengthMm) ??
+      toNumber(attrs.length) ??
+      toNumber(attrs.len) ??
+      toNumber(attrs.axisLength);
+
+    if (direct != null) return direct;
+
     if (attrs.lenAxis) {
-      for (const key of ['len1', 'length']) {
-        if (attrs.lenAxis[key] != null && typeof attrs.lenAxis[key] === 'number' && isFinite(attrs.lenAxis[key])) {
-          return attrs.lenAxis[key];
-        }
-      }
+      const nested = toNumber(attrs.lenAxis.len1) ?? toNumber(attrs.lenAxis.length);
+      if (nested != null) return nested;
     }
 
-    // axisLength
-    if (attrs.axisLength != null && typeof attrs.axisLength === 'number' && isFinite(attrs.axisLength)) {
-      return attrs.axisLength;
-    }
+    const ep1 =
+      this._parsePoint(row.ep1) ??
+      this._parsePoint(attrs.ep1) ??
+      this._parsePoint(attrs.EP1) ??
+      this._parsePoint(attrs.APOS) ??
+      this._parsePoint(attrs.A_POS) ??
+      this._parsePoint(attrs.START);
 
-    // Priority 3: Euclidean distance from ep1 to ep2
-    const ep1 = this._parsePoint(attrs.ep1 ?? attrs.EP1 ?? attrs.APOS ?? attrs.A_POS ?? attrs.START);
-    const ep2 = this._parsePoint(attrs.ep2 ?? attrs.EP2 ?? attrs.LPOS ?? attrs.L_POS ?? attrs.END);
+    const ep2 =
+      this._parsePoint(row.ep2) ??
+      this._parsePoint(attrs.ep2) ??
+      this._parsePoint(attrs.EP2) ??
+      this._parsePoint(attrs.LPOS) ??
+      this._parsePoint(attrs.L_POS) ??
+      this._parsePoint(attrs.END);
+
     if (ep1 && ep2) {
       const dx = ep2.x - ep1.x;
       const dy = ep2.y - ep1.y;
@@ -48,80 +190,117 @@ export class RvmValveWeightMapper {
     return null;
   }
 
-  _parsePoint(value) {
-    if (!value) return null;
-    if (Array.isArray(value) && value.length >= 3) {
-      const [x, y, z] = value;
-      if ([x, y, z].every(v => typeof v === 'number' && isFinite(v))) return { x, y, z };
-    }
-    if (typeof value === 'object' && !Array.isArray(value)) {
-      const x = value.x ?? value.X;
-      const y = value.y ?? value.Y;
-      const z = value.z ?? value.Z;
-      if ([x, y, z].every(v => typeof v === 'number' && isFinite(v))) return { x, y, z };
-    }
-    return null;
+  findWeightCandidates({ boreMm, ratingClass, lengthMm }) {
+    const ratingNorm = normalizeRating(ratingClass);
+
+    return this._master
+      .map(row => {
+        const bore = getBore(row);
+        const rating = getRating(row);
+        const length = getLength(row);
+        const weight = getWeight(row);
+        const description = getDescription(row);
+
+        const boreOk = bore != null && Math.abs(bore - boreMm) < 1;
+        const ratingOk = normalizeRating(rating) === ratingNorm;
+        const lengthDelta = length == null ? Infinity : Math.abs(length - lengthMm);
+        const lengthOk = lengthDelta <= LENGTH_TOLERANCE_MM;
+
+        return {
+          ...row,
+          boreMm: bore,
+          ratingClass: rating,
+          lengthMm: length,
+          valveWeight: weight,
+          weight,
+          description,
+          lengthDelta,
+          qualityOk: row.qualityOk !== false,
+          _matchOk: boreOk && ratingOk && lengthOk && row.qualityOk !== false
+        };
+      })
+      .filter(row => row._matchOk);
   }
-
-  // ── Candidate search ───────────────────────────────────────────────────────
-
-  findValveWeightCandidates({ boreMm, ratingClass, lengthMm }) {
-    const ratingNorm = String(ratingClass).toLowerCase();
-    return this._master.filter(m => {
-      if (m.qualityOk === false) return false;
-      if (m.boreMm !== boreMm) return false;
-      if (String(m.ratingClass).toLowerCase() !== ratingNorm) return false;
-      if (Math.abs(m.lengthMm - lengthMm) > 4) return false;
-      return true;
-    });
-  }
-
-  // ── Main mapping ───────────────────────────────────────────────────────────
 
   mapRow(row) {
     const result = {
       valveWeightSource: null,
       valveWeightLengthMm: null,
       ambiguousValveWeightRequests: [],
+      weightCandidates: [],
+      weightKey: null
     };
 
-    // Non-VALVE rows: skip
-    if (row.type !== 'VALVE') {
+    const type = upper(row.type);
+
+    if (!SUPPORTED_TYPES.has(type)) {
       return result;
     }
 
-    const attrs      = row.attributes || {};
-    const boreMm     = row.convertedBore;
-    const ratingClass = row.rating ?? attrs.rating ?? attrs.RATING ?? attrs.ratingClass ?? null;
-    const lengthMm   = this._resolveLength(attrs);
+    const boreMm = toNumber(row.convertedBore);
+    const ratingClass =
+      row.rating ??
+      row.ratingClass ??
+      row.pipingClass ??
+      row.attributes?.rating ??
+      row.attributes?.RATING ??
+      row.attributes?.ratingClass ??
+      null;
 
-    // Incomplete key check
-    if (boreMm == null || ratingClass == null || lengthMm == null) {
-      result.valveWeightSource = 'WM-VALVE-KEY-INCOMPLETE';
-      if (!Array.isArray(row.diagnostics)) row.diagnostics = [];
-      row.diagnostics.push('WM-VALVE-KEY-INCOMPLETE');
-      return result;
-    }
+    const lengthMm = this._resolveLength(row);
 
     result.valveWeightLengthMm = lengthMm;
+    result.weightKey = `${type}|${normalizeRating(ratingClass)}|DN${boreMm ?? 'NA'}|L${lengthMm != null ? Math.round(lengthMm) : 'NA'}`;
 
-    const candidates = this.findValveWeightCandidates({ boreMm, ratingClass, lengthMm });
+    if (boreMm == null || ratingClass == null || clean(ratingClass) === '' || lengthMm == null) {
+      result.valveWeightSource = 'WM-WEIGHT-KEY-INCOMPLETE';
+
+      if (!Array.isArray(row.diagnostics)) row.diagnostics = [];
+      row.diagnostics.push('WM-WEIGHT-KEY-INCOMPLETE');
+
+      return result;
+    }
+
+    const candidates = this.findWeightCandidates({ boreMm, ratingClass, lengthMm });
+    result.weightCandidates = candidates;
 
     if (candidates.length === 1) {
-      const c = candidates[0];
+      const candidate = candidates[0];
+
       row.ca = row.ca || {};
-      row.ca['8'] = c.valveWeight ?? c.directWeight ?? c.weight;
-      result.valveWeightSource = 'WM-VALVE-CA8-MATCH';
-    } else if (candidates.length > 1) {
-      result.ambiguousValveWeightRequests.push({ rowNo: row.rowNo, candidates });
-      result.valveWeightSource = 'WM-VALVE-CA8-AMBIGUOUS';
+      row.ca['8'] = candidate.valveWeight ?? candidate.directWeight ?? candidate.weight;
+
+      result.valveWeightSource = 'WM-WEIGHT-CA8-MATCH';
+
       if (!Array.isArray(row.diagnostics)) row.diagnostics = [];
-      row.diagnostics.push('WM-VALVE-CA8-AMBIGUOUS');
-    } else {
-      result.valveWeightSource = 'WM-VALVE-CA8-NO-MATCH';
-      if (!Array.isArray(row.diagnostics)) row.diagnostics = [];
-      row.diagnostics.push('WM-VALVE-CA8-NO-MATCH');
+      row.diagnostics.push('WM-WEIGHT-CA8-MATCH');
+
+      return result;
     }
+
+    if (candidates.length > 1) {
+      result.ambiguousValveWeightRequests.push({
+        rowNo: row.rowNo,
+        type,
+        boreMm,
+        ratingClass,
+        lengthMm,
+        weightKey: result.weightKey,
+        candidates
+      });
+
+      result.valveWeightSource = 'WM-WEIGHT-CA8-AMBIGUOUS';
+
+      if (!Array.isArray(row.diagnostics)) row.diagnostics = [];
+      row.diagnostics.push('WM-WEIGHT-CA8-AMBIGUOUS');
+
+      return result;
+    }
+
+    result.valveWeightSource = 'WM-WEIGHT-CA8-NO-MATCH';
+
+    if (!Array.isArray(row.diagnostics)) row.diagnostics = [];
+    row.diagnostics.push('WM-WEIGHT-CA8-NO-MATCH');
 
     return result;
   }

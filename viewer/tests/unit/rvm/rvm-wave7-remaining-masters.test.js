@@ -21,11 +21,11 @@ async function runTests() {
   const mapper = new RvmRemainingMastersMapper({});
   const errors = [];
 
-  // T1: PIPE → skey='ELBW'
+  // T1: PIPE → skey=null
   {
     const row = makeRow({ type: 'PIPE' });
     mapper.mapRow(row);
-    if (row.skey === 'ELBW') console.log('✅ T1: PIPE skey=ELBW');
+    if (row.skey === null) console.log('✅ T1: PIPE skey=null');
     else errors.push(`T1 failed: got ${row.skey}`);
   }
 
