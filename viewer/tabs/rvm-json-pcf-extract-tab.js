@@ -238,6 +238,46 @@ function _showPanel(container, panelId) {
     return;
   }
 
+function _continuitySummaryHtml() {
+  const report = state.rvmPcfExtract?.continuityReport || null;
+
+  if (!report) {
+    return `
+      <div class="rvm-pcf-extract-status-card">
+        <div class="rvm-pcf-status-row">
+          <span class="rvm-pcf-label">Continuity</span>
+          <span>Not checked</span>
+        </div>
+      </div>
+    `;
+  }
+
+  const kv = [
+    ['Continuity pass', report.ok ? 'YES' : 'NO'],
+    ['Tolerance mm', report.toleranceMm ?? 6],
+    ['Auto-fix limit mm', report.pipeGapClashFixToleranceMm ?? 25],
+    ['Fatal count', report.fatalCount || 0],
+    ['Warning count', report.warningCount || 0],
+    ['TEE issues', report.teeIssueCount || 0],
+    ['OLET issues', report.oletIssueCount || 0],
+    ['Connections', report.connectionCount || 0],
+    ['Open pipe terminals', report.terminalCount || 0],
+    ['Pipe gap fills', (report.pipeGapFills || []).length],
+    ['Pipe clash trims', (report.pipeClashTrims || []).length],
+  ];
+
+  return `
+    <div class="rvm-pcf-extract-status-card">
+      ${kv.map(([k, v]) => `
+        <div class="rvm-pcf-status-row">
+          <span class="rvm-pcf-label">${_esc(k)}</span>
+          <span>${_esc(v)}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
 function _masterResolutionSummaryHtml() {
   const requests = state.rvmPcfExtract?.pendingMasterResolutionRequests || [];
 
@@ -285,6 +325,7 @@ function _masterResolutionSummaryHtml() {
     const sevClass = s => s === 'ERROR' ? 'diag-error' : s === 'WARNING' ? 'diag-warn' : 'diag-info';
     host.innerHTML = `
       ${_auditSummaryHtml(audit)}
+      ${_continuitySummaryHtml()}
       ${_masterResolutionSummaryHtml()}
       <div style="padding:8px;font-size:11px;color:#9aa9bd;">${diags.length} diagnostic(s)</div>
       <div class="rvm-pcf-diag-list">
@@ -443,6 +484,182 @@ async function _runRebuildCsv(container) {
     return true;
   } catch (err) {
     _setStatus(container, `Build failed: ${err.message}`, true);
+    return false;
+  }
+}
+
+function _getPipeFixToleranceMm(container) {
+  const input = container.querySelector('[data-pipe-fix-tolerance-mm]');
+  const raw = Number(input?.value ?? 25);
+
+  if (!Number.isFinite(raw)) return 25;
+
+  return Math.max(0, Math.min(100, raw));
+}
+
+async function _runContinuityAudit(container) {
+  const rows = state.rvmPcfExtract?.rows || [];
+
+  if (!rows.length) {
+    _setStatus(container, 'No rows to check — rebuild CSV first.', true);
+    _showPanel(container, 'diagnostics');
+    return false;
+  }
+
+  try {
+    const { RvmPcfContinuityChecker } = await import('../rvm-pcf-extract/RvmPcfContinuityChecker.js');
+
+    const checker = new RvmPcfContinuityChecker();
+
+    const report = checker.analyzeComponents(rows, {
+      continuityMismatchToleranceMm: 6,
+      pipeGapClashFixToleranceMm: _getPipeFixToleranceMm(container),
+    });
+
+    const existing = (state.rvmPcfExtract.diagnostics || []).filter(d => d._source !== 'continuity');
+
+    const diagnostics = [
+      ...existing,
+      ...(report.issues || []).map(issue => ({
+        severity: issue.severity || 'WARNING',
+        code: issue.code || 'CONTINUITY-ISSUE',
+        message: issue.message || `${issue.type || 'Component'} continuity issue`,
+        rowNo: issue.rowNo ?? null,
+        type: issue.type ?? null,
+        pipelineRef: issue.pipelineRef ?? null,
+        sourceCanonicalId: issue.componentId ?? null,
+        _source: 'continuity',
+        issue,
+      })),
+      {
+        severity: report.ok ? 'INFO' : 'ERROR',
+        code: report.ok ? 'CONTINUITY-PASS' : 'CONTINUITY-FAIL',
+        message:
+          `Continuity: ${report.fatalCount || 0} fatal, ${report.warningCount || 0} warning, ` +
+          `${report.teeIssueCount || 0} tee issue, ${report.oletIssueCount || 0} olet issue.`,
+        _source: 'continuity',
+      },
+    ];
+
+    updateRvmPcfExtractState({
+      diagnostics,
+      continuityReport: report,
+    }, 'continuity-audit');
+
+    emit(RuntimeEvents.RVM_PCF_EXTRACT_STATE_CHANGED, {
+      action: 'CONTINUITY_AUDIT',
+    });
+
+    _setStatus(
+      container,
+      report.ok
+        ? 'Continuity check passed.'
+        : `Continuity check failed: ${report.fatalCount || 0} fatal issue(s).`,
+      !report.ok
+    );
+
+    _showPanel(container, 'diagnostics');
+
+    return report.ok;
+  } catch (err) {
+    _setStatus(container, `Continuity check failed: ${err.message}`, true);
+    return false;
+  }
+}
+
+async function _runAutoFix25(container) {
+  const rows = state.rvmPcfExtract?.rows || [];
+
+  if (!rows.length) {
+    _setStatus(container, 'No rows to fix — rebuild CSV first.', true);
+    _showPanel(container, 'diagnostics');
+    return false;
+  }
+
+  const toleranceMm = _getPipeFixToleranceMm(container);
+
+  try {
+    const { RvmPcfContinuityChecker } = await import('../rvm-pcf-extract/RvmPcfContinuityChecker.js');
+
+    const checker = new RvmPcfContinuityChecker();
+
+    const result = checker.applyPipeOnlyGapClashFixComponents(rows, {
+      continuityMismatchToleranceMm: 6,
+      pipeGapClashFixToleranceMm: toleranceMm,
+      fillGapsEnabled: true,
+      trimClashesEnabled: true,
+    });
+
+    const report = result.report || {};
+    const fixedRows = result.components || rows;
+
+    const existing = (state.rvmPcfExtract.diagnostics || []).filter(d => d._source !== 'continuity-autofix');
+
+    const autoFixDiagnostics = [
+      ...existing,
+      ...(report.pipeGapFills || []).map(fix => ({
+        severity: 'INFO',
+        code: 'PIPE-GAP-FILLED',
+        message:
+          `Pipe endpoint ${fix.componentId}.${fix.pointKey} moved ${fix.movementMm}mm to fill gap.`,
+        pipelineRef: fix.pipelineRef,
+        sourceCanonicalId: fix.componentId,
+        _source: 'continuity-autofix',
+        fix,
+      })),
+      ...(report.pipeClashTrims || []).map(fix => ({
+        severity: 'INFO',
+        code: 'PIPE-CLASH-TRIMMED',
+        message:
+          `Pipe endpoint ${fix.componentId}.${fix.pointKey} trimmed ${fix.movementMm}mm to ${fix.fittingType}.`,
+        pipelineRef: fix.pipelineRef,
+        sourceCanonicalId: fix.componentId,
+        _source: 'continuity-autofix',
+        fix,
+      })),
+      ...(report.issues || []).map(issue => ({
+        severity: issue.severity || 'WARNING',
+        code: issue.code || 'CONTINUITY-ISSUE-AFTER-FIX',
+        message: issue.message || `${issue.type || 'Component'} continuity issue after auto fix.`,
+        pipelineRef: issue.pipelineRef,
+        sourceCanonicalId: issue.componentId,
+        _source: 'continuity-autofix',
+        issue,
+      })),
+      {
+        severity: report.ok ? 'INFO' : 'WARNING',
+        code: report.ok ? 'AUTO-FIX-25-PASS' : 'AUTO-FIX-25-PARTIAL',
+        message:
+          `Auto Fix ${toleranceMm}mm complete: ` +
+          `${(report.pipeGapFills || []).length} gap fill(s), ` +
+          `${(report.pipeClashTrims || []).length} pipe trim(s), ` +
+          `${report.fatalCount || 0} fatal remaining.`,
+        _source: 'continuity-autofix',
+      },
+    ];
+
+    updateRvmPcfExtractState({
+      rows: fixedRows,
+      diagnostics: autoFixDiagnostics,
+      continuityReport: report,
+      pcfTextByPipelineRef: {},
+    }, 'auto-fix-25mm');
+
+    emit(RuntimeEvents.RVM_PCF_EXTRACT_STATE_CHANGED, {
+      action: 'AUTO_FIX_25MM',
+    });
+
+    _setStatus(
+      container,
+      `Auto Fix ${toleranceMm}mm: ${(report.pipeGapFills || []).length} gap(s) filled, ${(report.pipeClashTrims || []).length} clash(es) trimmed.`,
+      !report.ok
+    );
+
+    _showPanel(container, 'diagnostics');
+
+    return report.ok;
+  } catch (err) {
+    _setStatus(container, `Auto Fix ${toleranceMm}mm failed: ${err.message}`, true);
     return false;
   }
 }
@@ -614,6 +831,20 @@ export function mount(container) {
     <button data-action="REBUILD_CSV">Rebuild 2D CSV</button>
     <button data-action="VALIDATE">Validate</button>
     <button data-action="RUN_AUDIT">Run PCF Audit</button>
+    <button data-action="CHECK_CONTINUITY">Check Continuity</button>
+    <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#9aa9bd;">
+      Auto Fix mm
+      <input
+        data-pipe-fix-tolerance-mm
+        type="number"
+        min="0"
+        max="100"
+        step="1"
+        value="25"
+        style="width:58px;background:#0f172a;color:#dbeafe;border:1px solid #334155;border-radius:4px;padding:3px 5px;"
+      >
+    </label>
+    <button data-action="AUTO_FIX_25MM">Auto Fix 25mm</button>
     <button data-action="GENERATE_PCF">Generate PCF</button>
     <button data-action="DOWNLOAD_CSV">Download CSV</button>
     <button data-action="DOWNLOAD_PCF">Download PCF</button>
@@ -632,6 +863,8 @@ export function mount(container) {
           case 'REBUILD_CSV': await _runRebuildCsv(container); _showPanel(container, 'table'); break;
           case 'VALIDATE': await _runValidate(container); break;
           case 'RUN_AUDIT': await _runAudit(container); break;
+          case 'CHECK_CONTINUITY': await _runContinuityAudit(container); break;
+          case 'AUTO_FIX_25MM': await _runAutoFix25(container); break;
           case 'GENERATE_PCF': await _runGeneratePcf(container); break;
           case 'DOWNLOAD_CSV': await _runDownloadCsv(container); break;
           case 'DOWNLOAD_PCF': await _runDownloadPcf(container); break;
