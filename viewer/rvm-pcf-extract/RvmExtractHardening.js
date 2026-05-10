@@ -224,6 +224,8 @@ function _downloadBlob(filename, blob) {
   return true;
 }
 
+import { auditCaUnits } from './RvmLineListUnitDetector.js';
+
 export class RvmExtractHardening {
   sortRows(rows) {
     rows.sort((a, b) => {
@@ -330,6 +332,8 @@ export class RvmExtractHardening {
   buildPcfAuditReport(rows = [], pcfTextByPipelineRef = {}, sourceLabel = '') {
     const diagnostics = [];
     const pcfRefs = Object.keys(pcfTextByPipelineRef || {});
+
+    const unitAudit = auditCaUnits(rows);
 
     const summary = {
       rowCount: rows.length,
@@ -541,10 +545,16 @@ export class RvmExtractHardening {
       schema: 'pcf-extract-audit/v1',
       sourceLabel,
       generatedAt: new Date().toISOString(),
-      pass: !bySeverity.ERROR,
+      pass: !bySeverity.ERROR && unitAudit.pass,
       bySeverity,
-      summary,
-      diagnostics,
+      summary: {
+        ...summary,
+        ...unitAudit.summary
+      },
+      diagnostics: [
+        ...diagnostics,
+        ...unitAudit.diagnostics.map(d => ({ ...d, _source: 'unit-audit' }))
+      ],
     };
   }
 

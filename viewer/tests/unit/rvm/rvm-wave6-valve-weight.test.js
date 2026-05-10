@@ -73,7 +73,7 @@ console.log('\nT3: VALVE bore=100, rating=150, length=205 → one candidate');
   const result = mapper.mapRow(row);
   assertEqual(result.valveWeightSource, 'WM-WEIGHT-CA8-MATCH', 'source = WM-WEIGHT-CA8-MATCH');
   assertEqual(result.valveWeightLengthMm, 205, 'lengthMm resolved correctly');
-  assertEqual(row.ca['8'], 45.0, 'ca["8"] = 45.0 (GATE valve at 203mm)');
+  assertEqual(row.ca['8'], '45 kg', 'ca["8"] = 45.0 (GATE valve at 203mm)');
 }
 
 // ─── T4: VALVE bore=100, rating='150', length=207 → two candidates → ambiguous
@@ -115,7 +115,7 @@ console.log('\nT6: Piping class and material are NOT used as lookup keys');
   };
   const result = mapper.mapRow(row);
   assertEqual(result.valveWeightSource, 'WM-WEIGHT-CA8-MATCH', 'pipingClass/material ignored, match still found');
-  assertEqual(row.ca['8'], 45.0, 'ca["8"] = 45.0');
+  assertEqual(row.ca['8'], '45 kg', 'ca["8"] = 45.0');
 }
 
 // ─── T7: SUPPORT row → skipped ───────────────────────────────────────────────

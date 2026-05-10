@@ -1,3 +1,5 @@
+import { applyLineListCaUnitsToRow } from './RvmLineListUnitDetector.js';
+
 const DEFAULT_SKEY = {
   'BEND': 'ELBW',
   'TEE': 'TEBW',
@@ -47,16 +49,30 @@ export class RvmRemainingMastersMapper {
 
   _applyLinelist(row) {
     const { linelist } = this.masters;
-    if (!linelist || !Array.isArray(linelist)) return;
+    const linelistBlock = this.masters.linelistBlock || this.masters.linelist;
+
+    let linelistRows = [];
+    let fieldMap = {};
+    if (linelistBlock && Array.isArray(linelistBlock.rows)) {
+        linelistRows = linelistBlock.rows;
+        fieldMap = linelistBlock.linelistFieldMap || {};
+    } else if (Array.isArray(linelist)) {
+        linelistRows = linelist;
+        fieldMap = this.options?.fieldMap?.linelistFieldMap || {};
+    }
+
+    if (!linelistRows || !Array.isArray(linelistRows)) return;
     
     // Find matching linelist row based on pipelineRef or lineKey
-    const match = linelist.find(m => m.pipelineRef === row.pipelineRef || m.lineNo === row.pipelineRef);
+    const match = linelistRows.find(m => m.pipelineRef === row.pipelineRef || m.lineNo === row.pipelineRef || m.ColumnX1 === row.pipelineRef);
     if (!match) return;
 
-    if (match.p1 != null && match.p1 !== '') row.ca['1'] = String(match.p1);
-    if (match.t1 != null && match.t1 !== '') row.ca['2'] = String(match.t1);
-    if (match.insThk != null && match.insThk !== '') row.ca['5'] = String(match.insThk);
-    if (match.hp != null && match.hp !== '') row.ca['10'] = String(match.hp);
+    applyLineListCaUnitsToRow({
+      row,
+      lineListRow: match,
+      fieldMap: fieldMap,
+      diagnostics: row.diagnostics || []
+    });
   }
 
   _applySkey(row) {
