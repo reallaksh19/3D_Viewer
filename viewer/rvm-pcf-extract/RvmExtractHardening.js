@@ -1,3 +1,5 @@
+import { auditCaUnits } from './RvmLineListUnitDetector.js';
+
 const NPS_TO_MM = {
   '1/2': 15,
   '3/4': 20,
@@ -223,8 +225,6 @@ function _downloadBlob(filename, blob) {
 
   return true;
 }
-
-import { auditCaUnits } from './RvmLineListUnitDetector.js';
 
 export class RvmExtractHardening {
   sortRows(rows) {

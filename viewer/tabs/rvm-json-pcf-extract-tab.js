@@ -238,46 +238,6 @@ function _showPanel(container, panelId) {
     return;
   }
 
-function _continuitySummaryHtml() {
-  const report = state.rvmPcfExtract?.continuityReport || null;
-
-  if (!report) {
-    return `
-      <div class="rvm-pcf-extract-status-card">
-        <div class="rvm-pcf-status-row">
-          <span class="rvm-pcf-label">Continuity</span>
-          <span>Not checked</span>
-        </div>
-      </div>
-    `;
-  }
-
-  const kv = [
-    ['Continuity pass', report.ok ? 'YES' : 'NO'],
-    ['Tolerance mm', report.toleranceMm ?? 6],
-    ['Auto-fix limit mm', report.pipeGapClashFixToleranceMm ?? 25],
-    ['Fatal count', report.fatalCount || 0],
-    ['Warning count', report.warningCount || 0],
-    ['TEE issues', report.teeIssueCount || 0],
-    ['OLET issues', report.oletIssueCount || 0],
-    ['Connections', report.connectionCount || 0],
-    ['Open pipe terminals', report.terminalCount || 0],
-    ['Pipe gap fills', (report.pipeGapFills || []).length],
-    ['Pipe clash trims', (report.pipeClashTrims || []).length],
-  ];
-
-  return `
-    <div class="rvm-pcf-extract-status-card">
-      ${kv.map(([k, v]) => `
-        <div class="rvm-pcf-status-row">
-          <span class="rvm-pcf-label">${_esc(k)}</span>
-          <span>${_esc(v)}</span>
-        </div>
-      `).join('')}
-    </div>
-  `;
-}
-
 function _masterResolutionSummaryHtml() {
   const requests = state.rvmPcfExtract?.pendingMasterResolutionRequests || [];
 
@@ -319,14 +279,35 @@ function _masterResolutionSummaryHtml() {
   `;
 }
 
+function _pcfReadinessAuditHierarchyHtml() {
+  const readinessGate = state.rvmPcfExtract?.readinessGate;
+
+  if (readinessGate?.report) {
+    const { generateReadinessHtml } = _syncImportReadinessReport();
+    if (generateReadinessHtml) {
+      return generateReadinessHtml(readinessGate.report);
+    }
+  }
+
+  return `
+    <div class="rvm-pcf-extract-status-card">
+      <div class="rvm-pcf-status-row">
+        <span class="rvm-pcf-label">PCF readiness</span>
+        <span>Not checked. Click "Run Readiness Check".</span>
+      </div>
+    </div>
+  `;
+}
+
+function _syncImportReadinessReport() {
+  return window._rvmPcfReadinessReportModule || {};
+}
+
   if (panelId === 'diagnostics') {
     const diags = state.rvmPcfExtract?.diagnostics || [];
-    const audit = state.rvmPcfExtract?.pcfAuditReport || null;
     const sevClass = s => s === 'ERROR' ? 'diag-error' : s === 'WARNING' ? 'diag-warn' : 'diag-info';
     host.innerHTML = `
-      ${_auditSummaryHtml(audit)}
-      ${_continuitySummaryHtml()}
-      ${_masterResolutionSummaryHtml()}
+      ${_pcfReadinessAuditHierarchyHtml()}
       <div style="padding:8px;font-size:11px;color:#9aa9bd;">${diags.length} diagnostic(s)</div>
       <div class="rvm-pcf-diag-list">
         ${diags.length ? diags.map(d => `
@@ -497,6 +478,166 @@ function _getPipeFixToleranceMm(container) {
   return Math.max(0, Math.min(100, raw));
 }
 
+function _getTopoFixToleranceMm(container) {
+  const input = container.querySelector('[data-topo-fix-tolerance-mm]');
+  const raw = Number(input?.value ?? 25);
+
+  if (!Number.isFinite(raw)) return 25;
+
+  return Math.max(0, Math.min(100, raw));
+}
+
+async function _runPcfReadinessGate(container) {
+  const rows = state.rvmPcfExtract?.rows || [];
+
+  if (!rows.length) {
+    _setStatus(container, 'No rows to check — rebuild CSV first.', true);
+    _showPanel(container, 'diagnostics');
+    return false;
+  }
+
+  try {
+    const { runPcfReadinessGate, assertPcfExportAllowed } = await import('../rvm-pcf-extract/RvmPcfReadinessGate.js');
+    const { generateReadinessHtml } = await import('../rvm-pcf-extract/RvmPcfReadinessReport.js');
+
+    // Save to global for synchronous HTML rendering without awaiting
+    window._rvmPcfReadinessReportModule = { generateReadinessHtml };
+
+    const result = runPcfReadinessGate(rows, {
+      connectToleranceMm: 6,
+      fixToleranceMm: _getTopoFixToleranceMm(container),
+    });
+
+    const exportCheck = assertPcfExportAllowed(result, { allowPartialExport: true });
+
+    // Append the report to the result payload directly
+    result.report = {
+      allowPcfExport: exportCheck.ok,
+      exportBlockReason: exportCheck.reason,
+      summary: result.summary,
+    };
+
+    const existing = (state.rvmPcfExtract.diagnostics || []).filter(
+      d => d._source !== 'pcf-readiness-gate'
+    );
+
+    updateRvmPcfExtractState({
+      readinessGate: result,
+      diagnostics: [
+        ...existing,
+        ...(result.diagnostics || []).map(d => ({
+          ...d,
+          _source: 'pcf-readiness-gate',
+        })),
+      ],
+    }, 'pcf-readiness-gate');
+
+    emit(RuntimeEvents.RVM_PCF_EXTRACT_STATE_CHANGED, {
+      action: 'PCF_READINESS_GATE',
+    });
+
+    _setStatus(
+      container,
+      result.pass
+        ? 'PCF readiness passed.'
+        : `PCF readiness failed: ${result.summary.blockedRows} blocked row(s), ${result.summary.safeFixPlanCount} safe fix plan(s).`,
+      !result.pass
+    );
+
+    _showPanel(container, 'diagnostics');
+    return result.pass;
+  } catch (err) {
+    _setStatus(container, `PCF readiness check failed: ${err.message}`, true);
+    return false;
+  }
+}
+
+async function _dryRunReadinessGapOverlap(container) {
+  const rows = state.rvmPcfExtract?.rows || [];
+
+  if (!rows.length) {
+    _setStatus(container, 'No rows to check — rebuild CSV first.', true);
+    return false;
+  }
+
+  const { runPcfReadinessGate } = await import('../rvm-pcf-extract/RvmPcfReadinessGate.js');
+
+  const result = runPcfReadinessGate(rows, {
+    connectToleranceMm: 6,
+    fixToleranceMm: _getTopoFixToleranceMm(container),
+  });
+
+  updateRvmPcfExtractState({
+    readinessGate: result,
+  }, 'dry-run-gap-overlap');
+
+  _setStatus(
+    container,
+    `Dry run complete: ${result.summary.safeFixPlanCount} safe fix plan(s), ${result.summary.blockedFixPlanCount} blocked plan(s).`,
+    result.summary.blockedFixPlanCount > 0
+  );
+
+  _showPanel(container, 'diagnostics');
+  return true;
+}
+
+async function _applySafeReadinessGapOverlapFix(container) {
+  const rows = state.rvmPcfExtract?.rows || [];
+  const readiness = state.rvmPcfExtract?.readinessGate;
+
+  if (!rows.length || !readiness?.graph || !readiness?.fixPlan) {
+    _setStatus(container, 'Run readiness/dry-run before applying fixes.', true);
+    return false;
+  }
+
+  const { applySafeGapOverlapFixTransaction } = await import('../rvm-pcf-topology/RvmPcfGapOverlapResolver.js');
+
+  const result = applySafeGapOverlapFixTransaction(
+    rows,
+    readiness.graph,
+    readiness.fixPlan,
+    {
+      connectToleranceMm: 6,
+      fixToleranceMm: _getTopoFixToleranceMm(container),
+    }
+  );
+
+  const diagnostics = [
+    ...(state.rvmPcfExtract.diagnostics || []).filter(d => d._source !== 'pcf-topology-transaction'),
+    {
+      severity: result.transactionReport.committed ? 'INFO' : 'ERROR',
+      code: result.transactionReport.committed ? 'TOPO-FIX-TRANSACTION-COMMITTED' : 'TOPO-FIX-TRANSACTION-REJECTED',
+      message: result.transactionReport.committed
+        ? `Applied ${result.transactionReport.appliedFixCount} pipe-only topology fix(es).`
+        : `Topology fix rejected: ${result.transactionReport.rejectReasons.join(', ')}`,
+      _source: 'pcf-topology-transaction',
+      report: result.transactionReport,
+    },
+  ];
+
+  updateRvmPcfExtractState({
+    rows: result.rows,
+    diagnostics,
+    topologyTransactionReport: result.transactionReport,
+    pcfTextByPipelineRef: {},
+  }, 'apply-safe-gap-overlap-fix');
+
+  emit(RuntimeEvents.RVM_PCF_EXTRACT_STATE_CHANGED, {
+    action: 'APPLY_SAFE_GAP_OVERLAP_FIX',
+  });
+
+  _setStatus(
+    container,
+    result.transactionReport.committed
+      ? `Applied ${result.transactionReport.appliedFixCount} safe pipe-only fix(es).`
+      : `Safe fix rejected: ${result.transactionReport.rejectReasons.join(', ')}`,
+    !result.transactionReport.committed
+  );
+
+  _showPanel(container, 'diagnostics');
+  return result.transactionReport.committed;
+}
+
 async function _runContinuityAudit(container) {
   const rows = state.rvmPcfExtract?.rows || [];
 
@@ -543,161 +684,15 @@ async function _runContinuityAudit(container) {
 
     updateRvmPcfExtractState({
       diagnostics,
-      continuityReport: report,
-    }, 'continuity-audit');
+    }, 'legacy-continuity-audit-removed');
 
     emit(RuntimeEvents.RVM_PCF_EXTRACT_STATE_CHANGED, {
-      action: 'CONTINUITY_AUDIT',
+      action: 'CONTINUITY_AUDIT_REMOVED',
     });
 
-    _setStatus(
-      container,
-      report.ok
-        ? 'Continuity check passed.'
-        : `Continuity check failed: ${report.fatalCount || 0} fatal issue(s).`,
-      !report.ok
-    );
-
-    _showPanel(container, 'diagnostics');
-
-    return report.ok;
+    return false;
   } catch (err) {
-    _setStatus(container, `Continuity check failed: ${err.message}`, true);
-    return false;
-  }
-}
-
-async function _runAutoFix25(container) {
-  const rows = state.rvmPcfExtract?.rows || [];
-
-  if (!rows.length) {
-    _setStatus(container, 'No rows to fix — rebuild CSV first.', true);
-    _showPanel(container, 'diagnostics');
-    return false;
-  }
-
-  const toleranceMm = _getPipeFixToleranceMm(container);
-
-  try {
-    const { RvmPcfContinuityChecker } = await import('../rvm-pcf-extract/RvmPcfContinuityChecker.js');
-
-    const checker = new RvmPcfContinuityChecker();
-
-    const result = checker.applyPipeOnlyGapClashFixComponents(rows, {
-      continuityMismatchToleranceMm: 6,
-      pipeGapClashFixToleranceMm: toleranceMm,
-      fillGapsEnabled: true,
-      trimClashesEnabled: true,
-    });
-
-    const report = result.report || {};
-    const fixedRows = result.components || rows;
-
-    const existing = (state.rvmPcfExtract.diagnostics || []).filter(d => d._source !== 'continuity-autofix');
-
-    const autoFixDiagnostics = [
-      ...existing,
-      ...(report.pipeGapFills || []).map(fix => ({
-        severity: 'INFO',
-        code: 'PIPE-GAP-FILLED',
-        message:
-          `Pipe endpoint ${fix.componentId}.${fix.pointKey} moved ${fix.movementMm}mm to fill gap.`,
-        pipelineRef: fix.pipelineRef,
-        sourceCanonicalId: fix.componentId,
-        _source: 'continuity-autofix',
-        fix,
-      })),
-      ...(report.pipeClashTrims || []).map(fix => ({
-        severity: 'INFO',
-        code: 'PIPE-CLASH-TRIMMED',
-        message:
-          `Pipe endpoint ${fix.componentId}.${fix.pointKey} trimmed ${fix.movementMm}mm to ${fix.fittingType}.`,
-        pipelineRef: fix.pipelineRef,
-        sourceCanonicalId: fix.componentId,
-        _source: 'continuity-autofix',
-        fix,
-      })),
-      ...(report.issues || []).map(issue => ({
-        severity: issue.severity || 'WARNING',
-        code: issue.code || 'CONTINUITY-ISSUE-AFTER-FIX',
-        message: issue.message || `${issue.type || 'Component'} continuity issue after auto fix.`,
-        pipelineRef: issue.pipelineRef,
-        sourceCanonicalId: issue.componentId,
-        _source: 'continuity-autofix',
-        issue,
-      })),
-      {
-        severity: report.ok ? 'INFO' : 'WARNING',
-        code: report.ok ? 'AUTO-FIX-25-PASS' : 'AUTO-FIX-25-PARTIAL',
-        message:
-          `Auto Fix ${toleranceMm}mm complete: ` +
-          `${(report.pipeGapFills || []).length} gap fill(s), ` +
-          `${(report.pipeClashTrims || []).length} pipe trim(s), ` +
-          `${report.fatalCount || 0} fatal remaining.`,
-        _source: 'continuity-autofix',
-      },
-    ];
-
-    updateRvmPcfExtractState({
-      rows: fixedRows,
-      diagnostics: autoFixDiagnostics,
-      continuityReport: report,
-      pcfTextByPipelineRef: {},
-    }, 'auto-fix-25mm');
-
-    emit(RuntimeEvents.RVM_PCF_EXTRACT_STATE_CHANGED, {
-      action: 'AUTO_FIX_25MM',
-    });
-
-    _setStatus(
-      container,
-      `Auto Fix ${toleranceMm}mm: ${(report.pipeGapFills || []).length} gap(s) filled, ${(report.pipeClashTrims || []).length} clash(es) trimmed.`,
-      !report.ok
-    );
-
-    _showPanel(container, 'diagnostics');
-
-    return report.ok;
-  } catch (err) {
-    _setStatus(container, `Auto Fix ${toleranceMm}mm failed: ${err.message}`, true);
-    return false;
-  }
-}
-
-async function _runAudit(container) {
-  const rows = state.rvmPcfExtract?.rows || [];
-  const byRef = state.rvmPcfExtract?.pcfTextByPipelineRef || {};
-  if (!rows.length) {
-    _setStatus(container, 'No rows to audit — rebuild CSV first.', true);
-    _showPanel(container, 'diagnostics');
-    return false;
-  }
-  try {
-    const [{ RvmExtractHardening }, { RvmPcfContinuityChecker }] = await Promise.all([
-      import('../rvm-pcf-extract/RvmExtractHardening.js'),
-      import('../rvm-pcf-extract/RvmPcfContinuityChecker.js'),
-    ]);
-    const hardening = new RvmExtractHardening();
-    const report = hardening.buildPcfAuditReport(rows, byRef, state.rvm?.sourceName || 'RVM JSON PCF Extract');
-    const continuityChecker = new RvmPcfContinuityChecker();
-    const continuitySettings = state.rvmPcfExtract.continuity || {};
-    const singlePcfForMultiLineSelection = state.rvmPcfExtract.singlePcfForMultiLineSelection !== false;
-    const continuityRows = singlePcfForMultiLineSelection
-      ? _collapseRowsToSinglePcf(rows).rows
-      : rows;
-    const continuityReport = continuityChecker.analyzeComponents(continuityRows, continuitySettings);
-    const existing = (state.rvmPcfExtract.diagnostics || []).filter(d => d._source !== 'pcf-audit');
-    updateRvmPcfExtractState({
-      pcfAuditReport: report,
-      continuityReport,
-      diagnostics: [...existing, ...report.diagnostics.map(d => ({ ...d, _source: 'pcf-audit' }))],
-    }, 'pcf-audit');
-    emit(RuntimeEvents.RVM_PCF_EXTRACT_STATE_CHANGED, { action: 'PCF_AUDIT' });
-    _setStatus(container, `Audit complete: ${(report.bySeverity.ERROR || 0)} error(s), ${(report.bySeverity.WARNING || 0)} warning(s).`, !report.pass);
-    _showPanel(container, 'diagnostics');
-    return report.pass;
-  } catch (err) {
-    _setStatus(container, `Audit failed: ${err.message}`, true);
+    _setStatus(container, `Check failed: ${err.message}`, true);
     return false;
   }
 }
@@ -724,6 +719,57 @@ async function _runValidate(container) {
   }
 }
 
+async function _exportReadinessReport(container, format = 'json') {
+  const readinessGate = state.rvmPcfExtract?.readinessGate;
+
+  if (!readinessGate?.report) {
+    _setStatus(container, 'Run Readiness Check first to generate a report.', true);
+    return;
+  }
+
+  try {
+    const { generateReadinessMarkdown } = await import('../rvm-pcf-extract/RvmPcfReadinessReport.js');
+
+    let content, mimeType, filename;
+
+    if (format === 'md') {
+      content = generateReadinessMarkdown(readinessGate.report);
+      mimeType = 'text/markdown';
+      filename = `pcf-readiness-report-${new Date().toISOString().replace(/[:.]/g, '-')}.md`;
+    } else {
+      content = JSON.stringify(readinessGate.report, null, 2);
+      mimeType = 'application/json';
+      filename = `pcf-readiness-report-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    }
+
+    const { downloadText } = await import('../pcfx/Pcfx_FileIO.js');
+    downloadText(content, filename, mimeType);
+
+    _setStatus(container, `Exported readiness report as ${format.toUpperCase()}.`, false);
+  } catch (err) {
+    _setStatus(container, `Failed to export report: ${err.message}`, true);
+  }
+}
+
+async function _ensureReadinessBeforePcfExport(container) {
+  let readinessGate = state.rvmPcfExtract?.readinessGate;
+
+  if (!readinessGate?.report) {
+    _setStatus(container, 'Implicitly running Readiness Check...', false);
+    const ok = await _runPcfReadinessGate(container);
+    if (!ok) return false;
+    readinessGate = state.rvmPcfExtract?.readinessGate;
+  }
+
+  if (readinessGate?.report && !readinessGate.report.allowPcfExport) {
+    _setStatus(container, 'PCF Generation blocked by Readiness Gate. Check Diagnostics tab.', true);
+    _showPanel(container, 'diagnostics');
+    return false;
+  }
+
+  return true;
+}
+
 async function _runGeneratePcf(container) {
   let rows = state.rvmPcfExtract?.rows || [];
   if (!rows.length) {
@@ -731,6 +777,9 @@ async function _runGeneratePcf(container) {
     if (!ok) return;
     rows = state.rvmPcfExtract?.rows || [];
   }
+
+  const ok = await _ensureReadinessBeforePcfExport(container);
+  if (!ok) return;
   _setStatus(container, 'Generating PCF…');
   try {
     const { RvmPcfContinuityChecker } = await import('../rvm-pcf-extract/RvmPcfContinuityChecker.js');
@@ -830,12 +879,14 @@ export function mount(container) {
     <button data-action="RELOAD_SCOPE">Reload Scope</button>
     <button data-action="REBUILD_CSV">Rebuild 2D CSV</button>
     <button data-action="VALIDATE">Validate</button>
-    <button data-action="RUN_AUDIT">Run PCF Audit</button>
-    <button data-action="CHECK_CONTINUITY">Check Continuity</button>
+    <button data-action="RUN_PCF_READINESS">Run Readiness Check</button>
+    <button data-action="EXPORT_READINESS_JSON">Export Report (JSON)</button>
+    <button data-action="EXPORT_READINESS_MD">Export Report (MD)</button>
+
     <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#9aa9bd;">
-      Auto Fix mm
+      Gap/Overlap Fix mm
       <input
-        data-pipe-fix-tolerance-mm
+        data-topo-fix-tolerance-mm
         type="number"
         min="0"
         max="100"
@@ -844,7 +895,9 @@ export function mount(container) {
         style="width:58px;background:#0f172a;color:#dbeafe;border:1px solid #334155;border-radius:4px;padding:3px 5px;"
       >
     </label>
-    <button data-action="AUTO_FIX_25MM">Auto Fix 25mm</button>
+    <button data-action="DRY_RUN_GAP_OVERLAP">Dry Run Gap/Overlap</button>
+    <button data-action="APPLY_SAFE_GAP_OVERLAP">Apply Safe Gap/Overlap Fix</button>
+
     <button data-action="GENERATE_PCF">Generate PCF</button>
     <button data-action="DOWNLOAD_CSV">Download CSV</button>
     <button data-action="DOWNLOAD_PCF">Download PCF</button>
@@ -862,9 +915,14 @@ export function mount(container) {
           case 'RELOAD_SCOPE': _updateHeader(container); _showPanel(container, 'scope'); break;
           case 'REBUILD_CSV': await _runRebuildCsv(container); _showPanel(container, 'table'); break;
           case 'VALIDATE': await _runValidate(container); break;
-          case 'RUN_AUDIT': await _runAudit(container); break;
-          case 'CHECK_CONTINUITY': await _runContinuityAudit(container); break;
-          case 'AUTO_FIX_25MM': await _runAutoFix25(container); break;
+          case 'RUN_PCF_READINESS':
+          case 'RUN_AUDIT':
+          case 'CHECK_CONTINUITY': await _runPcfReadinessGate(container); break;
+          case 'DRY_RUN_GAP_OVERLAP': await _dryRunReadinessGapOverlap(container); break;
+          case 'APPLY_SAFE_GAP_OVERLAP':
+          case 'AUTO_FIX_25MM': await _applySafeReadinessGapOverlapFix(container); break;
+          case 'EXPORT_READINESS_JSON': await _exportReadinessReport(container, 'json'); break;
+          case 'EXPORT_READINESS_MD': await _exportReadinessReport(container, 'md'); break;
           case 'GENERATE_PCF': await _runGeneratePcf(container); break;
           case 'DOWNLOAD_CSV': await _runDownloadCsv(container); break;
           case 'DOWNLOAD_PCF': await _runDownloadPcf(container); break;
@@ -872,6 +930,17 @@ export function mount(container) {
       } finally { btn.disabled = false; }
     });
   });
+
+  _offExtractRequested = on(RuntimeEvents.RVM_EXTRACT_PCF_REQUESTED, async (payload = {}) => {
+    updateRvmPcfExtractState({
+      scope: payload.scope || 'ALL',
+      selectedCanonicalIds: payload.selectedCanonicalIds || [],
+    }, 'extract-requested');
+    _updateHeader(container);
+    _showPanel(container, 'scope');
+  });
+
+  _offStateChanged = on(RuntimeEvents.RVM_PCF_EXTRACT_STATE_CHANGED, () => { _updateHeader(container); });
   _updateHeader(container); _showPanel(container, 'scope');
   _offExtractRequested = on(RuntimeEvents.RVM_EXTRACT_PCF_REQUESTED, async (payload = {}) => {
     const selectedCanonicalIds = Array.isArray(payload.selectedCanonicalIds)
