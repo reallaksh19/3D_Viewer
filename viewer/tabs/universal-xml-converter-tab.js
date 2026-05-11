@@ -491,7 +491,6 @@ function bindEvents(container, state) {
         message: `Source type set to ${state.selectedSourceType}.`,
       };
       render(container, state);
-      bindEvents(container, state);
       return;
     }
 
@@ -505,7 +504,6 @@ function bindEvents(container, state) {
           message: 'No file selected.',
         };
         render(container, state);
-        bindEvents(container, state);
         return;
       }
 
@@ -537,7 +535,6 @@ function bindEvents(container, state) {
       }
 
       render(container, state);
-      bindEvents(container, state);
     }
   });
 
@@ -546,7 +543,6 @@ function bindEvents(container, state) {
     if (panelButton) {
       state.activePanel = panelButton.dataset.uxmlPanel || 'source';
       render(container, state);
-      bindEvents(container, state);
       return;
     }
 
@@ -570,7 +566,6 @@ function bindEvents(container, state) {
       }
 
       render(container, state);
-      bindEvents(container, state);
       return;
     }
 
@@ -581,7 +576,6 @@ function bindEvents(container, state) {
         message: 'Universal XML Converter U1 summary exported.',
       };
       render(container, state);
-      bindEvents(container, state);
     }
   });
 }
