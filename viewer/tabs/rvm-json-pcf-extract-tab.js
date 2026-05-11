@@ -638,65 +638,6 @@ async function _applySafeReadinessGapOverlapFix(container) {
   return result.transactionReport.committed;
 }
 
-async function _runContinuityAudit(container) {
-  const rows = state.rvmPcfExtract?.rows || [];
-
-  if (!rows.length) {
-    _setStatus(container, 'No rows to check — rebuild CSV first.', true);
-    _showPanel(container, 'diagnostics');
-    return false;
-  }
-
-  try {
-    const { RvmPcfContinuityChecker } = await import('../rvm-pcf-extract/RvmPcfContinuityChecker.js');
-
-    const checker = new RvmPcfContinuityChecker();
-
-    const report = checker.analyzeComponents(rows, {
-      continuityMismatchToleranceMm: 6,
-      pipeGapClashFixToleranceMm: _getPipeFixToleranceMm(container),
-    });
-
-    const existing = (state.rvmPcfExtract.diagnostics || []).filter(d => d._source !== 'continuity');
-
-    const diagnostics = [
-      ...existing,
-      ...(report.issues || []).map(issue => ({
-        severity: issue.severity || 'WARNING',
-        code: issue.code || 'CONTINUITY-ISSUE',
-        message: issue.message || `${issue.type || 'Component'} continuity issue`,
-        rowNo: issue.rowNo ?? null,
-        type: issue.type ?? null,
-        pipelineRef: issue.pipelineRef ?? null,
-        sourceCanonicalId: issue.componentId ?? null,
-        _source: 'continuity',
-        issue,
-      })),
-      {
-        severity: report.ok ? 'INFO' : 'ERROR',
-        code: report.ok ? 'CONTINUITY-PASS' : 'CONTINUITY-FAIL',
-        message:
-          `Continuity: ${report.fatalCount || 0} fatal, ${report.warningCount || 0} warning, ` +
-          `${report.teeIssueCount || 0} tee issue, ${report.oletIssueCount || 0} olet issue.`,
-        _source: 'continuity',
-      },
-    ];
-
-    updateRvmPcfExtractState({
-      diagnostics,
-    }, 'legacy-continuity-audit-removed');
-
-    emit(RuntimeEvents.RVM_PCF_EXTRACT_STATE_CHANGED, {
-      action: 'CONTINUITY_AUDIT_REMOVED',
-    });
-
-    return false;
-  } catch (err) {
-    _setStatus(container, `Check failed: ${err.message}`, true);
-    return false;
-  }
-}
-
 async function _runValidate(container) {
   const rows = state.rvmPcfExtract?.rows || [];
   if (!rows.length) {
@@ -918,9 +859,9 @@ export function mount(container) {
           case 'RUN_PCF_READINESS':
           case 'RUN_AUDIT':
           case 'CHECK_CONTINUITY': await _runPcfReadinessGate(container); break;
-          case 'DRY_RUN_GAP_OVERLAP': await _dryRunReadinessGapOverlap(container); break;
-          case 'APPLY_SAFE_GAP_OVERLAP':
-          case 'AUTO_FIX_25MM': await _applySafeReadinessGapOverlapFix(container); break;
+          case 'DRY_RUN_GAP_OVERLAP':
+          case 'AUTO_FIX_25MM': await _dryRunReadinessGapOverlap(container); break;
+          case 'APPLY_SAFE_GAP_OVERLAP': await _applySafeReadinessGapOverlapFix(container); break;
           case 'EXPORT_READINESS_JSON': await _exportReadinessReport(container, 'json'); break;
           case 'EXPORT_READINESS_MD': await _exportReadinessReport(container, 'md'); break;
           case 'GENERATE_PCF': await _runGeneratePcf(container); break;
