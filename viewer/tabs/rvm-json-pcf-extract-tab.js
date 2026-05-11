@@ -305,15 +305,39 @@ function _syncImportReadinessReport() {
 
   if (panelId === 'diagnostics') {
     const diags = state.rvmPcfExtract?.diagnostics || [];
-    const sevClass = s => s === 'ERROR' ? 'diag-error' : s === 'WARNING' ? 'diag-warn' : 'diag-info';
+    const sevClass = (s, d = {}) => {
+      if (d.skipApplied) return 'diag-warn';
+      return s === 'ERROR' ? 'diag-error' : s === 'WARNING' ? 'diag-warn' : 'diag-info';
+    };
     host.innerHTML = `
       ${_pcfReadinessAuditHierarchyHtml()}
       <div style="padding:8px;font-size:11px;color:#9aa9bd;">${diags.length} diagnostic(s)</div>
       <div class="rvm-pcf-diag-list">
         ${diags.length ? diags.map(d => `
-          <div class="rvm-pcf-diag ${sevClass(d.severity || d.level || 'INFO')}">
+          <div class="rvm-pcf-diag ${sevClass(d.severity || d.level || 'INFO', d)}">
             <span class="rvm-pcf-diag-code">${_esc(d.code || d.severity || 'INFO')}</span>
-            <span>${_esc(d.message || JSON.stringify(d))}</span>
+            <span>
+              ${_esc(d.message || JSON.stringify(d))}
+              ${
+                d.refNo || d.seqNo || d.lineNo || d.pipelineRef || d.portRole || d.point
+                  ? `
+                    <div style="margin-top:4px;font-size:11px;color:#9aa9bd;line-height:1.35;">
+                      ${d.refNo ? `<b>Ref:</b> ${_esc(d.refNo)} ` : ''}
+                      ${d.seqNo ? `<b>Seq:</b> ${_esc(d.seqNo)} ` : ''}
+                      ${d.lineNo ? `<b>Line:</b> ${_esc(d.lineNo)} ` : ''}
+                      ${d.pipelineRef ? `<b>Pipeline:</b> ${_esc(d.pipelineRef)} ` : ''}
+                      ${d.portRole ? `<b>Port:</b> ${_esc(d.portRole)} ` : ''}
+                      ${d.pointKey ? `<b>Point:</b> ${_esc(d.pointKey)} ` : ''}
+                      ${
+                        d.point
+                          ? `<b>XYZ:</b> ${_esc(`${d.point.x}, ${d.point.y}, ${d.point.z}`)}`
+                          : ''
+                      }
+                    </div>
+                  `
+                  : ''
+              }
+            </span>
           </div>
         `).join('') : '<div class="rvm-pcf-extract-status">No diagnostics yet.</div>'}
       </div>
@@ -478,6 +502,18 @@ function _getPipeFixToleranceMm(container) {
   return Math.max(0, Math.min(100, raw));
 }
 
+function _getReadinessSkipOptions(container) {
+  const enabled = !!container.querySelector('[data-readiness-skip-errors]')?.checked;
+  const rawCodes = String(
+    container.querySelector('[data-readiness-skip-error-codes]')?.value || ''
+  );
+
+  return {
+    skipReadinessErrors: enabled,
+    skipReadinessErrorCodes: rawCodes,
+  };
+}
+
 function _getTopoFixToleranceMm(container) {
   const input = container.querySelector('[data-topo-fix-tolerance-mm]');
   const raw = Number(input?.value ?? 25);
@@ -506,6 +542,7 @@ async function _runPcfReadinessGate(container) {
     const result = runPcfReadinessGate(rows, {
       connectToleranceMm: 6,
       fixToleranceMm: _getTopoFixToleranceMm(container),
+      ..._getReadinessSkipOptions(container),
     });
 
     const exportCheck = assertPcfExportAllowed(result, { allowPartialExport: true });
@@ -565,6 +602,7 @@ async function _dryRunReadinessGapOverlap(container) {
   const result = runPcfReadinessGate(rows, {
     connectToleranceMm: 6,
     fixToleranceMm: _getTopoFixToleranceMm(container),
+    ..._getReadinessSkipOptions(container),
   });
 
   updateRvmPcfExtractState({
@@ -823,6 +861,19 @@ export function mount(container) {
     <button data-action="RUN_PCF_READINESS">Run Readiness Check</button>
     <button data-action="EXPORT_READINESS_JSON">Export Report (JSON)</button>
     <button data-action="EXPORT_READINESS_MD">Export Report (MD)</button>
+
+    <label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#9aa9bd;">
+      <input data-readiness-skip-errors type="checkbox">
+      Skip selected readiness errors
+    </label>
+
+    <input
+      data-readiness-skip-error-codes
+      type="text"
+      value="TOPO-OLET-BRANCH-DISCONNECTED,TOPO-TEE-BRANCH-DISCONNECTED,TOPO-PORT-DISCONNECTED"
+      title="Comma-separated readiness error codes to demote to warnings for this run"
+      style="min-width:360px;background:#0f172a;color:#dbeafe;border:1px solid #334155;border-radius:4px;padding:4px 6px;font-size:11px;"
+    >
 
     <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#9aa9bd;">
       Gap/Overlap Fix mm

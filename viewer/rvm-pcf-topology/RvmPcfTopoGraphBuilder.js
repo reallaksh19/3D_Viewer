@@ -349,8 +349,12 @@ function buildDisconnectedIssues(ports, acceptedEndpointEdges, acceptedSegmentTa
       topoDiagnostic({
         severity: 'ERROR',
         code,
-        message: `${port.componentType} ${port.role} row ${port.rowNo} is disconnected.`,
         port,
+        details: {
+          disconnectedPortRole: port.role,
+          disconnectedPointKey: port.pointKey,
+          disconnectedPoint: port.point,
+        },
       })
     );
   }
