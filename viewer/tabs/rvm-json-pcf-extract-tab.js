@@ -1080,8 +1080,8 @@ export function mount(container) {
           case 'CHECK_CONTINUITY': await _runContinuityAudit(container); break;
           case 'AUTO_FIX_25MM': await _runAutoFix25(container); break;
           case 'RUN_PCF_READINESS': await _runPcfReadinessGate(container); break;
-          case 'DRY_RUN_GAP_OVERLAP': await _dryRunGapOverlapFix(container); break;
-          case 'APPLY_SAFE_GAP_OVERLAP': await _applySafeGapOverlapFix(container); break;
+          case 'DRY_RUN_GAP_OVERLAP': await _dryRunReadinessGapOverlap(container); break;
+          case 'APPLY_SAFE_GAP_OVERLAP': await _applySafeReadinessGapOverlapFix(container); break;
           case 'GENERATE_PCF': await _runGeneratePcf(container); break;
           case 'DOWNLOAD_CSV': await _runDownloadCsv(container); break;
           case 'DOWNLOAD_PCF': await _runDownloadPcf(container); break;
