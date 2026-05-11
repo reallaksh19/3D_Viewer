@@ -618,7 +618,7 @@ async function _applySafeReadinessGapOverlapFix(container) {
   updateRvmPcfExtractState({
     rows: result.rows,
     diagnostics,
-    topologyTransactionReport: result.transactionReport,
+      readinessTransactionReport: result.transactionReport,
     pcfTextByPipelineRef: {},
   }, 'apply-safe-gap-overlap-fix');
 
@@ -859,9 +859,9 @@ export function mount(container) {
           case 'RUN_PCF_READINESS':
           case 'RUN_AUDIT':
           case 'CHECK_CONTINUITY': await _runPcfReadinessGate(container); break;
-          case 'DRY_RUN_GAP_OVERLAP':
-          case 'AUTO_FIX_25MM': await _dryRunReadinessGapOverlap(container); break;
-          case 'APPLY_SAFE_GAP_OVERLAP': await _applySafeReadinessGapOverlapFix(container); break;
+          case 'DRY_RUN_GAP_OVERLAP': await _dryRunReadinessGapOverlap(container); break;
+          case 'APPLY_SAFE_GAP_OVERLAP':
+          case 'AUTO_FIX_25MM': await _applySafeReadinessGapOverlapFix(container); break;
           case 'EXPORT_READINESS_JSON': await _exportReadinessReport(container, 'json'); break;
           case 'EXPORT_READINESS_MD': await _exportReadinessReport(container, 'md'); break;
           case 'GENERATE_PCF': await _runGeneratePcf(container); break;
