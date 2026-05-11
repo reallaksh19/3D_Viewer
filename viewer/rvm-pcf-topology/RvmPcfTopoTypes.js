@@ -107,6 +107,7 @@ export function normalizeTopoConfig(raw = {}) {
       DEFAULT_PCF_TOPO_CONFIG.minPipeLengthMm
     ),
     allowCrossPipelineCandidates: raw.allowCrossPipelineCandidates === true,
+    allowPartialExport: raw.allowPartialExport !== false,
   };
 }
 

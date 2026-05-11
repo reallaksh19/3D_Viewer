@@ -206,6 +206,10 @@ export function runPcfReadinessGate(rows = [], rawOptions = {}) {
     rowStates,
     graph,
     fixPlan,
+    report: {
+      allowPcfExport: summary.pcfReady,
+      summary,
+    },
     diagnostics: [
       ...(graph.diagnostics || []),
       ...rowStates.flatMap(state =>
@@ -220,6 +224,36 @@ export function runPcfReadinessGate(rows = [], rawOptions = {}) {
         }))
       ),
     ],
+  };
+}
+
+export function assertPcfExportAllowed(gateResult, config = {}) {
+  const pass = !!gateResult?.pass;
+  const allowPartial = config.allowPartialExport !== false;
+
+  if (pass) {
+    return { ok: true, reason: 'PCF readiness passed completely.' };
+  }
+
+  if (!allowPartial) {
+    return { ok: false, reason: 'PCF readiness failed and allowPartialExport is false.' };
+  }
+
+  const s = gateResult?.summary;
+  if (!s) {
+    return { ok: false, reason: 'No readiness summary available.' };
+  }
+
+  if (s.blockedRows > 0) {
+    return {
+      ok: false,
+      reason: `Cannot export: ${s.blockedRows} row(s) are blocked by fatal errors (e.g., missing mandatory masters, missing geometry, unresolved BRLEN).`,
+    };
+  }
+
+  return {
+    ok: true,
+    reason: `Exporting partial PCF (ignoring warnings/continuity issues).`,
   };
 }
 
