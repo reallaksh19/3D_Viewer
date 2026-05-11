@@ -26,6 +26,7 @@ const tests = [
   './unit/rvm/rvm-wave8-pcf-emitter.test.js',
   './unit/rvm/rvm-wave9-hardening.test.js',
   './unit/rvm/rvm-pcf-topology-roi2.test.js',
+  'unit/rvm/rvm-pcf-readiness-roi2-3d-gap-overlap-benchmark.test.js',
   './unit/rvm/rvm-search.test.js',
   './unit/rvm/rvm-bundle-manifest.test.js',
   './unit/rvm/rvm-identity-map.test.js',
