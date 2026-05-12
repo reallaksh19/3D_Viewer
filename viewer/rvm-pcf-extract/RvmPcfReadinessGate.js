@@ -319,6 +319,8 @@ export function readinessSummaryText(result) {
     `PCF Ready: ${s.pcfReady ? 'YES' : 'NO'}`,
     `Ready rows: ${s.readyRows ?? 0}`,
     `Blocked rows: ${s.blockedRows ?? 0}`,
+    `Skipped readiness errors: ${s.skippedReadinessErrorCount ?? 0}`,
+    `Skipped readiness codes: ${(s.skippedReadinessErrorCodes || []).join(', ') || '-'}`,
     `Topology components: ${s.topoComponentCount ?? 0}`,
     `Ports: ${s.topoPortCount ?? 0}`,
     `Pipe segments: ${s.pipeSegmentCount ?? 0}`,
