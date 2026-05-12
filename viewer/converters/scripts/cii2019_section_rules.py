@@ -685,3 +685,59 @@ def assert_cii2019_sections_valid(cii_text: str) -> None:
     ]
 
     raise ValueError("CII 2019 section validation failed:\n" + "\n".join(messages))
+def build_control_from_sections(
+    sections: Mapping[str, Sequence[str]],
+    *,
+    numelt: int,
+    numnoz: int,
+    nohgrs: int,
+    nonam: int = 0,
+    izup: int = 0,
+) -> ControlCounts:
+    """
+    Build CONTROL counts from already-emitted section payloads.
+
+    This prevents CONTROL from becoming an independent guessed/cached count.
+    The caller supplies only source-model counts that are not directly row-derived:
+    - numelt
+    - numnoz
+    - nohgrs
+    - nonam
+    - izup
+
+    All auxiliary counts are derived from emitted section row counts.
+    """
+
+    def _block_count(section_name: str) -> int:
+        rows = nonblank_rows(sections.get(section_name, []))
+        lines_per_block = LINES_PER_AUX_BLOCK[section_name]
+
+        if len(rows) % lines_per_block != 0:
+            raise ValueError(
+                f"Cannot build CONTROL: #$ {section_name} has {len(rows)} rows, "
+                f"not a multiple of {lines_per_block}."
+            )
+
+        return len(rows) // lines_per_block
+
+    return ControlCounts(
+        numelt=numelt,
+        numnoz=numnoz,
+        nohgrs=nohgrs,
+        nonam=nonam,
+        nored=_block_count("REDUCERS"),
+        numflg=_block_count("FLANGES"),
+        bends=_block_count("BEND"),
+        rigids=_block_count("RIGID"),
+        expjts=_block_count("EXPJT"),
+        restraints=_block_count("RESTRANT"),
+        displmnt=_block_count("DISPLMNT"),
+        forcmnt=_block_count("FORCMNT"),
+        uniform=_block_count("UNIFORM"),
+        wind=_block_count("WIND"),
+        offsets=_block_count("OFFSETS"),
+        allowbls=_block_count("ALLOWBLS"),
+        sif_tees=_block_count("SIF&TEES"),
+        izup=izup,
+        equipmnt=_block_count("EQUIPMNT"),
+    )
