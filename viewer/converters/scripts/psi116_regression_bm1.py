@@ -5,7 +5,7 @@ This is the non-ad-hoc gate for the repeated failure signature:
 "0 restraints, 0 bends, 0 SIF/tee entries, 0 reducers".
 
 It intentionally uses the repo fixture:
-BM1/Sample 4_ RVM TO REV TO XML TO CII/RMSS_ATTRIBUTE.zip
+Benchmarks/Managejson to Input XML/RMSS/RMSS_ATTRIBUTE.zip
 
 Steps:
 1. Extract and parse the attribute TXT/ATT blocks.
@@ -31,7 +31,7 @@ from psi116_upstream_common import parse_attribute_blocks, read_attribute_text
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parents[2]
-DEFAULT_ATTR_ZIP = REPO_ROOT / 'BM1' / 'Sample 4_ RVM TO REV TO XML TO CII' / 'RMSS_ATTRIBUTE.zip'
+DEFAULT_ATTR_ZIP = REPO_ROOT / 'Benchmarks' / 'Managejson to Input XML' / 'RMSS' / 'RMSS_ATTRIBUTE.zip'
 
 SPECIAL_RULES = (
     (re.compile(r'WELDOLET|SOCKOLET|THREDOLET|SWEEPOLET|\bOLET\b', re.I), 'OLET'),
