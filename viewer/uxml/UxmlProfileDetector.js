@@ -12,7 +12,7 @@ export function detectUxmlProfile(xmlText) {
   }
 
   // Detect UXML
-  if (text.includes('<UXML') && text.includes('profile=')) {
+  if (text.includes('<UXML')) {
     return {
       profile: XML_PROFILES.UXML,
       blockers: [],
@@ -30,7 +30,7 @@ export function detectUxmlProfile(xmlText) {
   }
 
   // Detect INPUT_XML (uses InputXML, Nodes, Elements)
-  if (text.includes('<InputXML') && text.includes('<Nodes') && text.includes('<Elements')) {
+  if (text.includes('<InputXML')) {
     return {
       profile: XML_PROFILES.INPUT_XML,
       blockers: [],
@@ -74,4 +74,18 @@ export function assertXmlProfileBuildAllowed(profileReport) {
 
   return { ok: true, message: 'Build allowed.' };
 }
-export const detectXmlProfile = detectUxmlProfile;
+
+export function detectXmlProfile(xmlText) {
+  const report = detectUxmlProfile(xmlText);
+  return {
+    ...report,
+    isXml: report.profile !== XML_PROFILES.UNKNOWN_XML || !report.blockers.includes('NOT_XML'),
+    isKnownProfile: report.profile !== XML_PROFILES.UNKNOWN_XML,
+    shouldBlockTopologyBuild: !assertXmlProfileBuildAllowed(report).ok,
+    stats: {
+      profile: report.profile,
+      confidence: report.confidence,
+      blockerCount: report.blockers.length,
+    }
+  };
+}
