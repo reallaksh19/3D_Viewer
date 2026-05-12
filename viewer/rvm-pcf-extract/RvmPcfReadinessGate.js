@@ -156,6 +156,12 @@ export function runPcfReadinessGate(rows = [], rawOptions = {}) {
   const skipCodes = normalizeSkipCodes(rawOptions);
 
   const graph = buildPcfTopoGraph(rows, config);
+  const graphDiagnostics = (graph.diagnostics || []).map(d =>
+    applyReadinessSkipPolicy(d, skipCodes)
+  );
+
+  const skippedReadinessErrors = graphDiagnostics.filter(d => d.skipApplied === true);
+
   const fixPlan = createGapOverlapFixPlan(rows, graph, config);
 
   const byRow = makeByRow(rows);
@@ -171,12 +177,6 @@ export function runPcfReadinessGate(rows = [], rawOptions = {}) {
     state.pcfBlockers.push(...basics.blockers, ...ca.blockers);
     state.pcfWarnings.push(...basics.warnings, ...ca.warnings);
   }
-
-  const graphDiagnostics = (graph.diagnostics || []).map(d =>
-    applyReadinessSkipPolicy(d, skipCodes)
-  );
-
-  const skippedReadinessErrors = graphDiagnostics.filter(d => d.skipApplied === true);
 
   for (const diagnostic of graphDiagnostics) {
     const state = getByRow(byRow, diagnostic.rowNo);

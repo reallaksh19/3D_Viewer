@@ -193,7 +193,7 @@ export function isFitting(rowOrType) {
   return FITTING_TYPES.has(type) && !PIPE_TYPES.has(type);
 }
 
-function pickFirstNonBlank(...values) {
+export function pickFirstNonBlank(...values) {
   for (const value of values) {
     const text = clean(value);
     if (text) return text;

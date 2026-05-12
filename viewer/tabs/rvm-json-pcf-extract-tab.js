@@ -285,7 +285,7 @@ function _pcfReadinessAuditHierarchyHtml() {
   if (readinessGate?.report) {
     const { generateReadinessHtml } = _syncImportReadinessReport();
     if (generateReadinessHtml) {
-      return generateReadinessHtml(readinessGate.report);
+      return generateReadinessHtml(readinessGate.report) + _raySecondPassSummaryHtml();
     }
   }
 
@@ -295,6 +295,45 @@ function _pcfReadinessAuditHierarchyHtml() {
         <span class="rvm-pcf-label">PCF readiness</span>
         <span>Not checked. Click "Run Readiness Check".</span>
       </div>
+    </div>
+  `;
+}
+
+function _raySecondPassSummaryHtml() {
+  const rsp = state.rvmPcfExtract?.raySecondPass;
+  if (!rsp) return '';
+
+  const rs = rsp.rayResult?.summary || {};
+  const fs = rsp.fixPlan?.summary || {};
+  const tx = rsp.transactionReport || {};
+
+  const rows = [
+    ['Disconnected branch ports', rs.disconnectedBranchPortCount || 0],
+    ['Ray candidates', rs.rayCandidateCount || 0],
+    ['Safe candidates', rs.safeCandidateCount || 0],
+    ['Blocked candidates', rs.blockedCandidateCount || 0],
+    ['High-confidence candidates', rs.highConfidenceCandidateCount || 0],
+    ['Medium-confidence candidates', rs.mediumConfidenceCandidateCount || 0],
+    ['Fix plans', fs.planCount || 0],
+    ['Safe fix plans', fs.safePlanCount || 0],
+    ['Applied fixes', tx.appliedFixCount || 0],
+    ['High-confidence applied', tx.highConfidenceAppliedCount || 0],
+    ['Medium-confidence applied', tx.mediumConfidenceAppliedCount || 0],
+    ['Committed', tx.committed ? 'YES' : 'NO'],
+    ['Ray max mm', rs.maxRayLengthMm || tx.maxRayLengthMm || 500],
+    ['Ray miss mm', rs.perpendicularToleranceMm || tx.perpendicularToleranceMm || 12],
+    ['Allow TEE midpoint fallback', rs.allowMediumConfidenceAutoFix ? 'YES' : 'NO'],
+  ];
+
+  return `
+    <div class="rvm-pcf-extract-status-card" style="margin-top:12px;">
+      <div style="font-size:11px;font-weight:600;margin-bottom:8px;color:#dbeafe;text-transform:uppercase;">Ray 2nd Pass Fix Summary</div>
+      ${rows.map(([label, val]) => `
+        <div class="rvm-pcf-status-row" style="padding:2px 0;">
+          <span class="rvm-pcf-label">${label}</span>
+          <span style="font-family:monospace;color:#7ddc9a;">${val}</span>
+        </div>
+      `).join('')}
     </div>
   `;
 }
@@ -502,6 +541,47 @@ function _getPipeFixToleranceMm(container) {
   return Math.max(0, Math.min(100, raw));
 }
 
+function _getReadinessSkipOptions(container) {
+  const enabled = !!container.querySelector('[data-readiness-skip-errors]')?.checked;
+  const rawCodes = String(
+    container.querySelector('[data-readiness-skip-error-codes]')?.value || ''
+  );
+
+  return {
+    skipReadinessErrors: enabled,
+    skipReadinessErrorCodes: rawCodes,
+  };
+}
+
+function _getRaySecondPassMaxLengthMm(container) {
+  const input = container.querySelector('[data-ray-second-pass-max-mm]');
+  const raw = Number(input?.value ?? 500);
+
+  if (!Number.isFinite(raw)) return 500;
+
+  return Math.max(1, Math.min(5000, raw));
+}
+
+function _getRaySecondPassToleranceMm(container) {
+  const input = container.querySelector('[data-ray-second-pass-miss-mm]');
+  const raw = Number(input?.value ?? 12);
+
+  if (!Number.isFinite(raw)) return 12;
+
+  return Math.max(0, Math.min(100, raw));
+}
+
+function _getRaySecondPassOptions(container) {
+  return {
+    connectToleranceMm: 6,
+    fixToleranceMm: _getTopoFixToleranceMm(container),
+    maxRayLengthMm: _getRaySecondPassMaxLengthMm(container),
+    perpendicularToleranceMm: _getRaySecondPassToleranceMm(container),
+    allowMediumConfidenceAutoFix:
+      container.querySelector('[data-ray-second-pass-allow-medium]')?.checked !== false,
+  };
+}
+
 function _getTopoFixToleranceMm(container) {
   const input = container.querySelector('[data-topo-fix-tolerance-mm]');
   const raw = Number(input?.value ?? 25);
@@ -530,6 +610,7 @@ async function _runPcfReadinessGate(container) {
     const result = runPcfReadinessGate(rows, {
       connectToleranceMm: 6,
       fixToleranceMm: _getTopoFixToleranceMm(container),
+      ..._getReadinessSkipOptions(container),
     });
 
     const exportCheck = assertPcfExportAllowed(result, { allowPartialExport: true });
@@ -589,6 +670,7 @@ async function _dryRunReadinessGapOverlap(container) {
   const result = runPcfReadinessGate(rows, {
     connectToleranceMm: 6,
     fixToleranceMm: _getTopoFixToleranceMm(container),
+    ..._getReadinessSkipOptions(container),
   });
 
   updateRvmPcfExtractState({
@@ -603,6 +685,125 @@ async function _dryRunReadinessGapOverlap(container) {
 
   _showPanel(container, 'diagnostics');
   return true;
+}
+
+async function _applyRaySecondPass(container) {
+  const rows = state.rvmPcfExtract?.rows || [];
+
+  if (!rows.length) {
+    _setStatus(container, 'No rows to check — rebuild CSV first.', true);
+    _showPanel(container, 'diagnostics');
+    return false;
+  }
+
+  try {
+    const { runPcfReadinessGate } = await import('../rvm-pcf-extract/RvmPcfReadinessGate.js');
+    const {
+      buildRaySecondPassCandidates,
+      createRaySecondPassFixPlan,
+      applyRaySecondPassTransaction,
+    } = await import('../rvm-pcf-topology/RvmPcfRaySecondPass.js');
+
+    const options = _getRaySecondPassOptions(container);
+
+    const readiness = state.rvmPcfExtract?.readinessGate?.graph
+      ? state.rvmPcfExtract.readinessGate
+      : runPcfReadinessGate(rows, options);
+
+    const graph = readiness.graph;
+
+    const rayResult = buildRaySecondPassCandidates(rows, graph, options);
+    const fixPlan = createRaySecondPassFixPlan(rows, graph, rayResult, options);
+    const tx = applyRaySecondPassTransaction(rows, graph, fixPlan, options);
+
+    const recheck = tx.transactionReport.committed
+      ? runPcfReadinessGate(tx.rows, {
+          ...options,
+          ..._getReadinessSkipOptions(container),
+        })
+      : readiness;
+
+    const diagnostics = [
+      ...(state.rvmPcfExtract.diagnostics || []).filter(d =>
+        d._source !== 'ray-second-pass' &&
+        d._source !== 'pcf-readiness-gate'
+      ),
+      ...(rayResult.diagnostics || []),
+      ...((rayResult.candidates || []).map(c => ({
+        severity: c.safeForAutoApply ? 'INFO' : 'WARNING',
+        code: c.safeForAutoApply
+          ? 'RAY2-SAFE-BRANCH-CANDIDATE'
+          : 'RAY2-BLOCKED-BRANCH-CANDIDATE',
+        message:
+          `Ray 2nd pass ${c.safeForAutoApply ? 'safe' : 'blocked'} candidate: ` +
+          `${c.sourceType} row ${c.sourceRowNo} ${c.sourceRole} → ` +
+          `${c.targetType} row ${c.targetRowNo} ${c.targetRole}; ` +
+          `method=${c.rayMethod}, confidence=${c.rayConfidence}, ` +
+          `ray=${c.distanceAlongRayMm}mm, miss=${c.perpendicularMissMm}mm.`,
+        rowNo: c.sourceRowNo,
+        type: c.sourceType,
+        refNo: c.sourceRefNo,
+        seqNo: c.sourceSeqNo,
+        lineNo: c.sourceLineNo,
+        pipelineRef: c.pipelineRef,
+        portRole: c.sourceRole,
+        point: c.sourcePoint,
+        rayMethod: c.rayMethod,
+        rayConfidence: c.rayConfidence,
+        rayOrigin: c.rayOrigin,
+        rayDirection: c.rayDirection,
+        rayReferencePoint: c.rayReferencePoint,
+        candidate: c,
+        _source: 'ray-second-pass',
+      }))),
+      {
+        severity: tx.transactionReport.committed ? 'INFO' : 'ERROR',
+        code: tx.transactionReport.committed
+          ? 'RAY2-TRANSACTION-COMMITTED'
+          : 'RAY2-TRANSACTION-REJECTED',
+        message: tx.transactionReport.committed
+          ? `Ray 2nd pass applied ${tx.transactionReport.appliedFixCount} pipe-endpoint branch fix(es).`
+          : `Ray 2nd pass rejected: ${tx.transactionReport.rejectReasons.join(', ')}`,
+        _source: 'ray-second-pass',
+        report: tx.transactionReport,
+      },
+      ...(recheck.diagnostics || []).map(d => ({
+        ...d,
+        _source: 'pcf-readiness-gate',
+      })),
+    ];
+
+    updateRvmPcfExtractState({
+      rows: tx.rows,
+      diagnostics,
+      readinessGate: recheck,
+      raySecondPass: {
+        rayResult,
+        fixPlan,
+        transactionReport: tx.transactionReport,
+      },
+      pcfTextByPipelineRef: {},
+    }, 'apply-ray-second-pass');
+
+    emit(RuntimeEvents.RVM_PCF_EXTRACT_STATE_CHANGED, {
+      action: 'APPLY_RAY_SECOND_PASS',
+    });
+
+    _setStatus(
+      container,
+      tx.transactionReport.committed
+        ? `Ray 2nd pass applied ${tx.transactionReport.appliedFixCount} pipe-endpoint fix(es).`
+        : `Ray 2nd pass rejected: ${tx.transactionReport.rejectReasons.join(', ')}`,
+      !tx.transactionReport.committed
+    );
+
+    _showPanel(container, 'diagnostics');
+    return tx.transactionReport.committed;
+  } catch (err) {
+    _setStatus(container, `Ray 2nd pass failed: ${err.message}`, true);
+    _showPanel(container, 'diagnostics');
+    return false;
+  }
 }
 
 async function _applySafeReadinessGapOverlapFix(container) {
@@ -848,6 +1049,19 @@ export function mount(container) {
     <button data-action="EXPORT_READINESS_JSON">Export Report (JSON)</button>
     <button data-action="EXPORT_READINESS_MD">Export Report (MD)</button>
 
+    <label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#9aa9bd;">
+      <input data-readiness-skip-errors type="checkbox">
+      Skip selected readiness errors
+    </label>
+
+    <input
+      data-readiness-skip-error-codes
+      type="text"
+      value="TOPO-OLET-BRANCH-DISCONNECTED,TOPO-TEE-BRANCH-DISCONNECTED,TOPO-PORT-DISCONNECTED"
+      title="Comma-separated readiness error codes to demote to warnings for this run"
+      style="min-width:360px;background:#0f172a;color:#dbeafe;border:1px solid #334155;border-radius:4px;padding:4px 6px;font-size:11px;"
+    >
+
     <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#9aa9bd;">
       Gap/Overlap Fix mm
       <input
@@ -862,6 +1076,39 @@ export function mount(container) {
     </label>
     <button data-action="DRY_RUN_GAP_OVERLAP">Dry Run Gap/Overlap</button>
     <button data-action="APPLY_SAFE_GAP_OVERLAP">Apply Safe Gap/Overlap Fix</button>
+
+    <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#9aa9bd;">
+      Ray max mm
+      <input
+        data-ray-second-pass-max-mm
+        type="number"
+        min="1"
+        max="5000"
+        step="1"
+        value="500"
+        style="width:70px;background:#0f172a;color:#dbeafe;border:1px solid #334155;border-radius:4px;padding:3px 5px;"
+      >
+    </label>
+
+    <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#9aa9bd;">
+      Ray miss mm
+      <input
+        data-ray-second-pass-miss-mm
+        type="number"
+        min="0"
+        max="100"
+        step="1"
+        value="12"
+        style="width:64px;background:#0f172a;color:#dbeafe;border:1px solid #334155;border-radius:4px;padding:3px 5px;"
+      >
+    </label>
+
+    <label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#9aa9bd;">
+      <input data-ray-second-pass-allow-medium type="checkbox" checked>
+      Allow TEE midpoint fallback
+    </label>
+
+    <button data-action="APPLY_RAY_SECOND_PASS">Apply Ray 2nd Pass</button>
 
     <button data-action="GENERATE_PCF">Generate PCF</button>
     <button data-action="DOWNLOAD_CSV">Download CSV</button>
@@ -886,6 +1133,7 @@ export function mount(container) {
           case 'DRY_RUN_GAP_OVERLAP': await _dryRunReadinessGapOverlap(container); break;
           case 'APPLY_SAFE_GAP_OVERLAP':
           case 'AUTO_FIX_25MM': await _applySafeReadinessGapOverlapFix(container); break;
+          case 'APPLY_RAY_SECOND_PASS': await _applyRaySecondPass(container); break;
           case 'EXPORT_READINESS_JSON': await _exportReadinessReport(container, 'json'); break;
           case 'EXPORT_READINESS_MD': await _exportReadinessReport(container, 'md'); break;
           case 'GENERATE_PCF': await _runGeneratePcf(container); break;

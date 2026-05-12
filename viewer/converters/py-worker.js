@@ -22,6 +22,7 @@ const SCRIPT_FILE_NAMES = Object.freeze([
   'cii_syntax_check_2019.py',
   'inputxml_to_cii2014.py',
   'inputxml_to_cii2019.py',
+  'cii2019_miscel_hardener.py',
   'inputxml_profile_sys30_b7410250_benchmark.cii',
   'inputxml_profile_bm_cii_2019.cii',
   'pdf_to_inputxml.py',
@@ -150,6 +151,32 @@ function _contractSourceKind(converterId) {
   return 'auto';
 }
 
+async function _runInputXml2019CiiHardener(pyodide, converterId, outputPath, stdout, stderr) {
+  if (converterId !== 'inputxml_to_cii2019') return null;
+
+  const argv = [
+    '/scripts/cii2019_miscel_hardener.py',
+    '--input',
+    outputPath,
+    '--output',
+    outputPath,
+    '--strict',
+  ];
+
+  await _runPythonScript(
+    pyodide,
+    '/scripts/cii2019_miscel_hardener.py',
+    argv,
+    stdout,
+    stderr,
+  );
+
+  return {
+    script: 'cii2019_miscel_hardener.py',
+    outputPath,
+  };
+}
+
 async function _runContractGate(pyodide, converterId, sourcePath, outputPath, jobDir, stdout, stderr) {
   if (!XML_CONTRACT_GATED_CONVERTERS.has(converterId)) return null;
   const reportPath = `${jobDir}/${_sanitizeFileName(converterId)}_psi116_contract_report.json`;
@@ -194,6 +221,15 @@ async function _runJob(message) {
   const invocation = buildInvocation(converterId, primaryPath, primary.name, secondaryPath, options, jobDir);
 
   await _runPythonScript(pyodide, invocation.scriptPath, invocation.argv, stdout, stderr);
+
+  const hardenerResult = await _runInputXml2019CiiHardener(
+    pyodide,
+    converterId,
+    invocation.outputPath,
+    stdout,
+    stderr,
+  );
+
   const contractReportText = await _runContractGate(
     pyodide,
     converterId,
@@ -219,7 +255,12 @@ async function _runJob(message) {
   }
   return {
     output: outputs,
-    logs: { stdout: stdoutLines, stderr: stderrLines, argv: invocation.argv.slice(1) },
+    logs: {
+      stdout: stdoutLines,
+      stderr: stderrLines,
+      argv: invocation.argv.slice(1),
+      postprocess: hardenerResult ? [hardenerResult] : [],
+    },
   };
 }
 

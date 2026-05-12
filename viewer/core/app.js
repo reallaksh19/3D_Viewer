@@ -10,6 +10,7 @@ import { renderSupportMappingConfigTab } from '../tabs/support-mapping-config-ta
 import { renderModelConvertersTab } from '../tabs/model-converters-tab.js?v=20260509-elements-line78';
 import { renderAdapterMappingTab } from '../tabs/adapter-mapping-tab.js';
 import { mount as mountRvmJsonPcfExtractTab } from '../tabs/rvm-json-pcf-extract-tab.js';
+import { renderUniversalXmlConverterTab } from '../tabs/universal-xml-converter-tab.js';
 import { emit, on } from './event-bus.js';
 import { initDevDebugWindow, destroyDevDebugWindow } from '../debug/dev-debug-window.js';
 import { loadRvmSource } from '../rvm/RvmLoadPipeline.js';
@@ -36,6 +37,7 @@ const TABS = [
     { id: 'pcfx-converter', label: 'PCF<->PCFX<->GLB', render: renderPcfxConverterTab }
   ] : []),
   { id: 'adapter-mapping', label: '⚙ 3D RVM Adapter Mapping', render: renderAdapterMappingTab },
+  { id: 'universal-xml-converter', label: 'Universal XML Converter', render: renderUniversalXmlConverterTab },
   { id: 'rvm-json-pcf-extract', label: 'JSON → PCF Extract', render: (container, ctx) => mountRvmJsonPcfExtractTab(container, ctx) },
 ];
 

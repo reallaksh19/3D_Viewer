@@ -1,0 +1,334 @@
+.uxml-tab {
+  min-height: 100%;
+  padding: 16px;
+  color: #dbeafe;
+  background:
+    radial-gradient(circle at top left, rgba(30, 64, 175, 0.22), transparent 34rem),
+    linear-gradient(180deg, #020617 0%, #0f172a 100%);
+  box-sizing: border-box;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.uxml-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.86);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.24);
+}
+
+.uxml-header h2 {
+  margin: 0 0 6px;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.uxml-header p {
+  margin: 0;
+  color: #93a4bd;
+  max-width: 980px;
+}
+
+.uxml-header-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.uxml-badge,
+.uxml-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: rgba(37, 99, 235, 0.22);
+  color: #bfdbfe;
+  border: 1px solid rgba(96, 165, 250, 0.28);
+}
+
+.uxml-badge.muted,
+.uxml-pill.muted {
+  background: rgba(71, 85, 105, 0.28);
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.24);
+}
+
+.uxml-pill.ok {
+  background: rgba(22, 163, 74, 0.22);
+  color: #bbf7d0;
+  border-color: rgba(74, 222, 128, 0.28);
+}
+
+.uxml-pill.warn {
+  background: rgba(202, 138, 4, 0.22);
+  color: #fef3c7;
+  border-color: rgba(250, 204, 21, 0.28);
+}
+
+.uxml-toolbar {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.72);
+}
+
+.uxml-field {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  color: #93a4bd;
+}
+
+.uxml-field select {
+  min-width: 260px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #e2e8f0;
+  background: #0f172a;
+}
+
+.uxml-toolbar button,
+.uxml-file-btn {
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  border-radius: 8px;
+  padding: 8px 11px;
+  color: #dbeafe;
+  background: rgba(30, 64, 175, 0.28);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.uxml-toolbar button:hover,
+.uxml-file-btn:hover {
+  background: rgba(37, 99, 235, 0.36);
+}
+
+.uxml-toolbar button:disabled {
+  cursor: not-allowed;
+  color: #64748b;
+  border-color: rgba(100, 116, 139, 0.22);
+  background: rgba(51, 65, 85, 0.18);
+}
+
+.uxml-file-btn {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.uxml-file-btn input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.uxml-status {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-size: 13px;
+}
+
+.uxml-status-info {
+  color: #bfdbfe;
+  background: rgba(30, 64, 175, 0.2);
+  border-color: rgba(96, 165, 250, 0.25);
+}
+
+.uxml-status-ok {
+  color: #bbf7d0;
+  background: rgba(22, 163, 74, 0.16);
+  border-color: rgba(74, 222, 128, 0.22);
+}
+
+.uxml-status-warn {
+  color: #fef3c7;
+  background: rgba(202, 138, 4, 0.16);
+  border-color: rgba(250, 204, 21, 0.22);
+}
+
+.uxml-status-error {
+  color: #fecaca;
+  background: rgba(220, 38, 38, 0.16);
+  border-color: rgba(248, 113, 113, 0.22);
+}
+
+.uxml-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.uxml-stages {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.uxml-stage-card {
+  text-align: left;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  padding: 12px;
+  color: #dbeafe;
+  background: rgba(15, 23, 42, 0.82);
+  cursor: pointer;
+}
+
+.uxml-stage-card:hover {
+  border-color: rgba(96, 165, 250, 0.36);
+  background: rgba(15, 23, 42, 0.96);
+}
+
+.uxml-stage-card.is-active {
+  border-color: rgba(96, 165, 250, 0.6);
+  box-shadow: inset 3px 0 0 #60a5fa;
+}
+
+.uxml-stage-card.is-deferred {
+  opacity: 0.78;
+}
+
+.uxml-stage-title {
+  font-weight: 800;
+  font-size: 13px;
+  margin-bottom: 5px;
+}
+
+.uxml-stage-description {
+  color: #93a4bd;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.uxml-stage-meta {
+  margin-top: 8px;
+}
+
+.uxml-panel {
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.74);
+  overflow: hidden;
+}
+
+.uxml-panel-section {
+  padding: 16px;
+}
+
+.uxml-panel-section h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.uxml-panel-section p {
+  margin: 0 0 14px;
+  color: #93a4bd;
+  line-height: 1.45;
+}
+
+.uxml-empty,
+.uxml-placeholder {
+  border: 1px dashed rgba(148, 163, 184, 0.3);
+  border-radius: 10px;
+  padding: 18px;
+  color: #93a4bd;
+  background: rgba(2, 6, 23, 0.45);
+}
+
+.uxml-kv-grid {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 8px 14px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.45);
+}
+
+.uxml-kv-grid > div:nth-child(odd) {
+  color: #93a4bd;
+}
+
+.uxml-preview-block {
+  margin-top: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #020617;
+}
+
+.uxml-preview-title {
+  padding: 9px 12px;
+  color: #cbd5e1;
+  background: rgba(30, 41, 59, 0.72);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.uxml-preview-block pre {
+  margin: 0;
+  padding: 12px;
+  max-height: 520px;
+  overflow: auto;
+  color: #dbeafe;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.uxml-master-placeholder-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.uxml-master-card {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 10px;
+  padding: 12px;
+  background: rgba(2, 6, 23, 0.45);
+}
+
+.uxml-master-card h4 {
+  margin: 0 0 8px;
+}
+
+@media (max-width: 980px) {
+  .uxml-header,
+  .uxml-layout {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+
+  .uxml-header {
+    display: grid;
+  }
+
+  .uxml-master-placeholder-grid {
+    grid-template-columns: 1fr;
+  }
+}

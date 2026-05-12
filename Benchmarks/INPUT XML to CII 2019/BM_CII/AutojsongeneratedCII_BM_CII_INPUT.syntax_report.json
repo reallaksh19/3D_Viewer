@@ -1,12 +1,13 @@
 {
   "ok": true,
   "profile": "cii2019",
-  "inputFile": "C:\\Code3\\PCF_GLB_Viewer_Conv_Latest2\\Benchmarks\\INPUT XML to CII 2019\\BM_CII\\AutojsongeneratedCII_BM_CII_INPUT.cii",
+  "inputFile": "Benchmarks/INPUT XML to CII 2019/BM_CII/AutojsongeneratedCII_BM_CII_INPUT.cii",
   "sectionsFound": [
     "VERSION",
     "CONTROL",
     "ELEMENTS",
     "AUX_DATA",
+    "NODENAME",
     "BEND",
     "RIGID",
     "EXPJT",
@@ -28,14 +29,14 @@
   "metrics": {
     "elements": 40,
     "nozzles": 0,
-    "hangers": 3,
-    "nodename_blocks": 0,
+    "hangers": 1,
+    "nodename_blocks": 2,
     "reducers": 0,
     "flanges": 0,
     "bends": 7,
     "rigids": 15,
     "expjts": 0,
-    "restraints": 12,
+    "restraints": 8,
     "displmnt": 0,
     "forcmnt": 0,
     "uniform": 0,
@@ -67,9 +68,9 @@
       "remainderRows": 0
     },
     "RESTRANT": {
-      "rows": 288,
+      "rows": 192,
       "linesPerBlock": 24,
-      "derivedBlocks": 12,
+      "derivedBlocks": 8,
       "remainderRows": 0
     },
     "DISPLMNT": {
@@ -134,12 +135,5 @@
     }
   },
   "errors": [],
-  "warnings": [
-    {
-      "code": "optional_section_missing",
-      "section": "NODENAME",
-      "line": 0,
-      "message": "Optional section '#$ NODENAME' is missing."
-    }
-  ]
+  "warnings": []
 }
