@@ -34,8 +34,6 @@ ${report.allowPcfExport ? 'PCF Export is **ALLOWED**.' : 'PCF Export is **BLOCKE
 - **TEE Issues**: ${s.teeIssueCount}
 - **OLET Issues**: ${s.oletIssueCount}
 - **Unresolved Required Ports**: ${s.unresolvedRequiredPortCount}
-- **Skipped readiness errors**: ${s.skippedReadinessErrorCount || 0}
-- **Skipped readiness codes**: ${(s.skippedReadinessErrorCodes || []).join(', ') || '-'}
 `;
 }
 
@@ -89,8 +87,6 @@ export function generateReadinessHtml(report) {
           <li>TEE issues: ${s.teeIssueCount}</li>
           <li>OLET issues: ${s.oletIssueCount}</li>
           <li>Unresolved required ports: ${s.unresolvedRequiredPortCount}</li>
-          <li>Skipped readiness errors: ${s.skippedReadinessErrorCount || 0}</li>
-          <li>Skipped readiness codes: ${(s.skippedReadinessErrorCodes || []).join(', ') || '-'}</li>
         </ul>
       </div>
     </div>

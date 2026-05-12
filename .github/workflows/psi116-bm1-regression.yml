@@ -5,7 +5,7 @@ on:
     paths:
       - 'viewer/converters/scripts/**'
       - '.github/workflows/psi116-bm1-regression.yml'
-      - 'Benchmarks/Managejson to Input XML/RMSS/RMSS_ATTRIBUTE.zip'
+      - 'BM1/Sample 4_ RVM TO REV TO XML TO CII/RMSS_ATTRIBUTE.zip'
   workflow_dispatch:
 
 permissions:

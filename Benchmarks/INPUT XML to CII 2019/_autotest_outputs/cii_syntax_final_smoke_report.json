@@ -1,7 +1,7 @@
 {
   "ok": true,
   "profile": "cii2019",
-  "inputFile": "Benchmarks/INPUT XML to CII 2019/BM_CII/BM_CII[Benchmark].CII",
+  "inputFile": "Benchmarks\\INPUT XML to CII 2019\\BM_CII\\BM_CII[Benchmark].CII",
   "sectionsFound": [
     "VERSION",
     "CONTROL",
