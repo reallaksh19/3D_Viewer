@@ -20,6 +20,11 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    import cii2019_section_rules
+except ImportError:
+    cii2019_section_rules = None
+
 
 SECTION_HEADER_RX = re.compile(r"^\s*#\$\s+([A-Z0-9_&]+)\s*$")
 INTEGER_TOKEN_RX = re.compile(r"^[+-]?\d+$")
@@ -876,6 +881,7 @@ def _build_report(
     metrics: dict[str, int],
     errors: list[dict[str, object]],
     warnings: list[dict[str, object]],
+    text: str | None = None,
 ) -> dict[str, object]:
     section_map = _get_section_map(sections)
     derived_counts: dict[str, object] = {}
@@ -891,10 +897,32 @@ def _build_report(
             "remainderRows": rows % lines_per_block,
         }
 
+    spec_section_rules = None
+
+    if cii2019_section_rules is not None and text is not None:
+        try:
+            section_report = cii2019_section_rules.validate_cii2019_sections(text)
+            spec_section_rules = section_report.to_dict()
+        except Exception as exc:
+            spec_section_rules = {
+                "ok": False,
+                "issues": [
+                    {
+                        "code": "CII2019-SECTION-RULES-EXCEPTION",
+                        "severity": "error",
+                        "section": "GLOBAL",
+                        "message": str(exc),
+                        "expected": None,
+                        "actual": None,
+                    }
+                ],
+            }
+
     return {
         "ok": len(errors) == 0,
         "profile": "cii2019",
         "inputFile": str(input_path),
+        "specSectionRules": spec_section_rules,
         "sectionsFound": [section.name for section in sections],
         "metrics": metrics,
         "derivedBlockCounts": derived_counts,
@@ -921,7 +949,7 @@ def _validate(
             0,
             "No '#$ <SECTION>' headers found in file.",
         )
-        return _build_report(input_path, sections, {}, errors, warnings)
+        return _build_report(input_path, sections, {}, errors, warnings, text=text)
 
     _validate_duplicates(sections, errors)
     _validate_order(sections, options, errors, warnings)
@@ -942,7 +970,7 @@ def _validate(
     _validate_units(section_map.get("UNITS"), errors)
     _validate_coords(section_map.get("COORDS"), options, errors)
 
-    return _build_report(input_path, sections, metrics, errors, warnings)
+    return _build_report(input_path, sections, metrics, errors, warnings, text=text)
 
 
 def _build_parser() -> argparse.ArgumentParser:
