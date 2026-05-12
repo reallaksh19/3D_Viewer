@@ -13,6 +13,10 @@ ${report.allowPcfExport ? 'PCF Export is **ALLOWED**.' : 'PCF Export is **BLOCKE
 - **Blocked Rows**: ${s.blockedRows}
 - **Warning Rows**: ${s.warningRows}
 
+## Readiness Skip Options
+- **Skipped readiness errors**: ${s.skippedReadinessErrorCount ?? 0}
+- **Skipped readiness codes**: ${(s.skippedReadinessErrorCodes || []).join(', ') || '-'}
+
 ## Topology Statistics
 - **Components**: ${s.topoComponentCount}
 - **Ports**: ${s.topoPortCount}
@@ -66,6 +70,14 @@ export function generateReadinessHtml(report) {
           <span>${s.overlapCandidateCount} overlaps</span>
           <span style="color:#86efac;font-weight:600;">${s.safeFixPlanCount} safe fixes</span>
           <span style="color:#fca5a5;">${s.blockedFixPlanCount} blocked</span>
+        </div>
+      </div>
+
+      <div style="background:#0f172a;padding:8px;border-radius:4px;border:1px solid #1e293b;margin-bottom:12px;">
+        <div style="font-size:10px;color:#64748b;text-transform:uppercase;margin-bottom:4px;">Skipped Readiness Errors</div>
+        <div style="font-size:12px;">
+          <span style="color:#fde047;">${s.skippedReadinessErrorCount ?? 0}</span> errors skipped<br>
+          <span style="color:#64748b;">Codes:</span> ${(s.skippedReadinessErrorCodes || []).join(', ') || '-'}
         </div>
       </div>
 
