@@ -3,6 +3,14 @@ import { state, updateRvmPcfExtractState } from '../core/state.js';
 import { on, off, emit } from '../core/event-bus.js';
 import { mountRvmPcfLegacyMasterPanel } from '../rvm-pcf-master-tabs/RvmPcfLegacyMasterPanel.js';
 
+import {
+  DEFAULT_RVM_PCF_TOPOLOGY_MODE,
+  RVM_PCF_TOPOLOGY_MODES,
+  isUxmlTopologyMode,
+  normalizeRvmPcfTopologyMode,
+  topologyModeLabel,
+} from '../rvm-pcf-extract/RvmPcfTopologyModes.js';
+
 let _offExtractRequested = null;
 let _offStateChanged = null;
 
@@ -43,6 +51,7 @@ function _auditSummaryHtml(report) {
   const sev = report.bySeverity || {};
   const continuity = state.rvmPcfExtract?.continuityReport || null;
   const kv = [
+    ['Topology mode', topologyModeLabel(state.rvmPcfExtract?.topologyMode || DEFAULT_RVM_PCF_TOPOLOGY_MODE)],
     ['Audit pass', report.pass ? 'YES' : 'NO'],
     ['Errors', sev.ERROR || 0],
     ['Warnings', sev.WARNING || 0],
@@ -73,6 +82,48 @@ function _auditSummaryHtml(report) {
       ${kv.map(([k, v]) => `<div class="rvm-pcf-status-row"><span class="rvm-pcf-label">${_esc(k)}</span><span>${_esc(v)}</span></div>`).join('')}
     </div>
   `;
+}
+
+function _topologyModeSettingsHtml(topologyMode) {
+  const mode = normalizeRvmPcfTopologyMode(topologyMode || DEFAULT_RVM_PCF_TOPOLOGY_MODE);
+
+  return `
+    <div class="rvm-pcf-extract-status-card" style="margin-top:12px;">
+      <div class="rvm-pcf-status-row">
+        <span class="rvm-pcf-label">Topology mode</span>
+        <select data-topology-mode style="max-width:220px;background:#182334;color:#e6edf5;border:1px solid #31455f;border-radius:6px;padding:6px 8px;">
+          <option value="${RVM_PCF_TOPOLOGY_MODES.LEGACY}" ${mode === RVM_PCF_TOPOLOGY_MODES.LEGACY ? 'selected' : ''}>
+            Legacy — present logic
+          </option>
+          <option value="${RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY}" ${mode === RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY ? 'selected' : ''}>
+            UXML topology — topology only
+          </option>
+        </select>
+      </div>
+      <div class="rvm-pcf-extract-status" style="margin-top:6px;">
+        UXML mode routes rows/json to UXML only for topology generation/checking.
+        Masters and PCF export continue through existing legacy routing.
+      </div>
+    </div>
+  `;
+}
+
+function _bindTopologyModeSettings(container) {
+  const control = container.querySelector('[data-topology-mode]');
+  if (!control) return;
+
+  control.addEventListener('change', () => {
+    const topologyMode = normalizeRvmPcfTopologyMode(control.value);
+
+    updateRvmPcfExtractState({
+      topologyMode,
+    }, 'topology-mode-settings');
+
+    emit(RuntimeEvents.RVM_PCF_EXTRACT_STATE_CHANGED, {
+      action: 'TOPOLOGY_MODE_CHANGED',
+      topologyMode,
+    });
+  });
 }
 
 function _continuitySettingsHtml(continuity) {
@@ -207,10 +258,12 @@ function _showPanel(container, panelId) {
         <div class="rvm-pcf-status-row"><span class="rvm-pcf-label">2D CSV rows</span><span>${(s.rows || []).length}</span></div>
         <div class="rvm-pcf-status-row"><span class="rvm-pcf-label">PCF pipelines</span><span>${Object.keys(s.pcfTextByPipelineRef || {}).length}</span></div>
       </div>
+      ${_topologyModeSettingsHtml(s.topologyMode || DEFAULT_RVM_PCF_TOPOLOGY_MODE)}
       ${_continuitySettingsHtml(continuity)}
       ${_exportSettingsHtml(singlePcfForMultiLineSelection)}
     `;
-    _bindContinuitySettings(host);
+    _bindTopologyModeSettings(host);
+  _bindContinuitySettings(host);
     _bindExportSettings(host);
     return;
   }
@@ -591,7 +644,77 @@ function _getTopoFixToleranceMm(container) {
   return Math.max(0, Math.min(100, raw));
 }
 
+async function _runUxmlTopologyReadinessGate(container) {
+  const rows = state.rvmPcfExtract?.rows || [];
+
+  if (!rows.length) {
+    _setStatus(container, 'No rows to check — rebuild CSV first.', true);
+    _showPanel(container, 'diagnostics');
+    return false;
+  }
+
+  try {
+    const { runUxmlTopologyForRvmRows } = await import('../rvm-pcf-extract/RvmUxmlTopologyBridge.js');
+
+    const result = runUxmlTopologyForRvmRows(rows, {
+      connectToleranceMm: 6,
+      fixToleranceMm: _getTopoFixToleranceMm(container),
+      maxRayLengthMm: _getRaySecondPassMaxLengthMm(container),
+      tubeToleranceMm: _getRaySecondPassToleranceMm(container),
+      allowPartialExport: true,
+      name: 'rvm-json-pcf-extract-rows',
+    });
+
+    const existing = (state.rvmPcfExtract.diagnostics || []).filter(
+      d =>
+        d._source !== 'uxml-topology' &&
+        d._source !== 'pcf-readiness-gate'
+    );
+
+    updateRvmPcfExtractState({
+      topologyMode: RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY,
+      uxmlTopology: result,
+      rows: result.legacyRows,
+      readinessGate: result.readinessGate,
+      diagnostics: [
+        ...existing,
+        ...(result.diagnostics || []).map(d => ({
+          ...d,
+          _source: 'uxml-topology',
+        })),
+      ],
+    }, 'uxml-topology-readiness-gate');
+
+    emit(RuntimeEvents.RVM_PCF_EXTRACT_STATE_CHANGED, {
+      action: 'UXML_TOPOLOGY_READINESS_GATE',
+      topologyMode: RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY,
+    });
+
+    _setStatus(
+      container,
+      result.readinessGate.pass
+        ? `UXML topology passed. Legacy routing continues for masters/PCF. Edges=${result.readinessGate.summary.universalEdgeCount}.`
+        : `UXML topology needs review. Legacy routing retained. Disconnected=${result.readinessGate.summary.disconnectedCount}, manual=${result.readinessGate.summary.manualReviewCount}.`,
+      !result.readinessGate.pass
+    );
+
+    _showPanel(container, 'diagnostics');
+    return result.readinessGate.pass;
+  } catch (err) {
+    _setStatus(container, `UXML topology readiness failed: ${err.message}`, true);
+    return false;
+  }
+}
+
 async function _runPcfReadinessGate(container) {
+  const topologyMode = normalizeRvmPcfTopologyMode(
+    state.rvmPcfExtract?.topologyMode || DEFAULT_RVM_PCF_TOPOLOGY_MODE
+  );
+
+  if (isUxmlTopologyMode(topologyMode)) {
+    return _runUxmlTopologyReadinessGate(container);
+  }
+
   const rows = state.rvmPcfExtract?.rows || [];
 
   if (!rows.length) {
