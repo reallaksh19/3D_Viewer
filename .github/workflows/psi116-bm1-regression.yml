@@ -3,9 +3,9 @@ name: PSI116 BM1 Regression
 on:
   push:
     paths:
-      - 'viewer/converters/scripts/**'
-      - '.github/workflows/psi116-bm1-regression.yml'
-      - 'Benchmarks/Managejson to Input XML/RMSS/RMSS_ATTRIBUTE.zip'
+      - "viewer/converters/scripts/**"
+      - ".github/workflows/psi116-bm1-regression.yml"
+      - "Benchmarks/Managejson to Input XML/RMSS/RMSS_ATTRIBUTE.zip"
   workflow_dispatch:
 
 permissions:
@@ -21,7 +21,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Run BM1 staged JSON XML CII regression
         run: |
