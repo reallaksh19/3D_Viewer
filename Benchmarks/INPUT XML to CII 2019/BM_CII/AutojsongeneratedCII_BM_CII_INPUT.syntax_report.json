@@ -2,6 +2,10 @@
   "ok": true,
   "profile": "cii2019",
   "inputFile": "Benchmarks/INPUT XML to CII 2019/BM_CII/AutojsongeneratedCII_BM_CII_INPUT.cii",
+  "specSectionRules": {
+    "ok": true,
+    "issues": []
+  },
   "sectionsFound": [
     "VERSION",
     "CONTROL",

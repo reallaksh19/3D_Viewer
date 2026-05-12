@@ -1,6 +1,6 @@
 # InputXML to CII 2019 Configured Benchmark Validation
 
-**Commit SHA:** d1f23c12498d8772060f73a997395cb8821abc0c
+**Commit SHA:** d1f23c12498d8772060f73a997395cb8821abc0c (Benchmark generated at d1f23c12498d8772060f73a997395cb8821abc0c, still present and syntax-clean on current main b5ef23774f05175b5154816b0cb7f913ca3f4975)
 
 ## Benchmark Command Executed
 ```bash
