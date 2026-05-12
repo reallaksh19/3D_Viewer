@@ -74,3 +74,4 @@ export function assertXmlProfileBuildAllowed(profileReport) {
 
   return { ok: true, message: 'Build allowed.' };
 }
+export const detectXmlProfile = detectUxmlProfile;
