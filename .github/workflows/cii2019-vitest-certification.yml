@@ -1,0 +1,68 @@
+name: CII 2019 Vitest and Certification
+
+on:
+  push:
+    paths:
+      - "viewer/**/*.js"
+      - "viewer/**/*.mjs"
+      - "viewer/**/*.py"
+      - "viewer/tests/**"
+      - "viewer/converters/scripts/**"
+      - "Benchmarks/INPUT XML to CII 2019/**"
+      - "package.json"
+      - "package-lock.json"
+      - "vitest.config.mjs"
+      - ".github/workflows/cii2019-vitest-certification.yml"
+  pull_request:
+    paths:
+      - "viewer/**/*.js"
+      - "viewer/**/*.mjs"
+      - "viewer/**/*.py"
+      - "viewer/tests/**"
+      - "viewer/converters/scripts/**"
+      - "Benchmarks/INPUT XML to CII 2019/**"
+      - "package.json"
+      - "package-lock.json"
+      - "vitest.config.mjs"
+      - ".github/workflows/cii2019-vitest-certification.yml"
+
+jobs:
+  vitest-and-cii2019-certification:
+    name: Vitest + CII 2019 certification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Node dependencies
+        run: npm install
+
+      - name: Run Vitest
+        run: npm run test:vitest
+
+      - name: Run CII 2019 syntax check
+        run: npm run cert:cii2019
+
+      - name: Certify CII 2019 section rules
+        run: npm run cert:cii2019:assert
+
+      - name: Upload CII certification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cii2019-certification-report
+          path: |
+            Benchmarks/INPUT XML to CII 2019/BM_CII/AutojsongeneratedCII_BM_CII_INPUT.ci.syntax_report.json
