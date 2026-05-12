@@ -193,6 +193,113 @@ export function isFitting(rowOrType) {
   return FITTING_TYPES.has(type) && !PIPE_TYPES.has(type);
 }
 
+function pickFirstNonBlank(...values) {
+  for (const value of values) {
+    const text = clean(value);
+    if (text) return text;
+  }
+  return '';
+}
+
+export function rowCa(row, index) {
+  const ca = row?.ca || row?.attributes || {};
+  const direct = row?.[`ca${index}`] || row?.[`CA${index}`];
+
+  return pickFirstNonBlank(
+    direct,
+    ca?.[String(index)],
+    ca?.[`CA${index}`],
+    ca?.[`COMPONENT-ATTRIBUTE${index}`],
+    row?.attributes?.[`COMPONENT-ATTRIBUTE${index}`]
+  );
+}
+
+export function rowRefNo(row, fallback = '') {
+  return pickFirstNonBlank(
+    row?.refNo,
+    row?.ca97,
+    row?.CA97,
+    rowCa(row, 97),
+    row?.sourceCanonicalId,
+    row?.id,
+    fallback
+  );
+}
+
+export function rowSeqNo(row, fallback = '') {
+  return pickFirstNonBlank(
+    row?.seqNo,
+    row?.ca98,
+    row?.CA98,
+    rowCa(row, 98),
+    row?.rowNo,
+    fallback
+  );
+}
+
+export function rowLineNo(row, fallback = '') {
+  return pickFirstNonBlank(
+    row?.lineNo,
+    row?.lineNoKey,
+    row?.lineKey,
+    row?.lineNoComposite,
+    row?.attributes?.LINE_NO,
+    row?.attributes?.LINENO,
+    row?.attributes?.LINE_NO_KEY,
+    fallback
+  );
+}
+
+export function rowName(row, fallback = '') {
+  return pickFirstNonBlank(
+    row?.name,
+    row?.tag,
+    row?.componentName,
+    row?.sourceName,
+    row?.attributes?.NAME,
+    row?.attributes?.TAG,
+    fallback
+  );
+}
+
+export function rowIdentity(row, fallback = {}) {
+  const type = row ? componentType(row) : fallback.type;
+
+  return {
+    rowNo: row?.rowNo ?? fallback.rowNo ?? null,
+    type: type || null,
+    refNo: rowRefNo(row, fallback.refNo || ''),
+    seqNo: rowSeqNo(row, fallback.seqNo || ''),
+    lineNo: rowLineNo(row, fallback.lineNo || ''),
+    name: rowName(row, fallback.name || ''),
+    pipelineRef: row ? pipelineRef(row, fallback.pipelineRef || '') : (fallback.pipelineRef || ''),
+    sourceCanonicalId: pickFirstNonBlank(
+      row?.sourceCanonicalId,
+      row?.id,
+      fallback.sourceCanonicalId
+    ),
+  };
+}
+
+export function identityLabel(identity = {}) {
+  const parts = [];
+
+  if (identity.refNo) parts.push(`Ref ${identity.refNo}`);
+  if (identity.seqNo) parts.push(`Seq ${identity.seqNo}`);
+  if (identity.lineNo) parts.push(`Line ${identity.lineNo}`);
+  if (identity.pipelineRef) parts.push(`Pipeline ${identity.pipelineRef}`);
+  if (identity.name) parts.push(`Name ${identity.name}`);
+  if (identity.rowNo != null) parts.push(`Row ${identity.rowNo}`);
+
+  return parts.join(' | ') || 'Unknown element';
+}
+
+export function pointLabel(point) {
+  if (!isFinitePoint(point)) return '';
+
+  return `(${round3(point.x)}, ${round3(point.y)}, ${round3(point.z)})`;
+}
+
 export function componentId(row, index = 0) {
   return (
     clean(
@@ -327,16 +434,45 @@ export function topoDiagnostic({
   candidate = null,
   details = {},
 }) {
+  const identity = row
+    ? rowIdentity(row)
+    : {
+        rowNo: port?.rowNo ?? null,
+        type: port?.componentType ?? null,
+        refNo: port?.refNo ?? '',
+        seqNo: port?.seqNo ?? '',
+        lineNo: port?.lineNo ?? '',
+        name: port?.name ?? '',
+        pipelineRef: port?.pipelineRef ?? '',
+        sourceCanonicalId: port?.sourceCanonicalId ?? '',
+      };
+
+  const roleText = port?.role ? ` ${port.role}` : '';
+  const pointText = port?.point ? ` at ${pointLabel(port.point)}` : '';
+  const identityText = identityLabel(identity);
+
   return {
     severity,
     code,
-    message,
-    rowNo: row?.rowNo ?? port?.rowNo ?? null,
-    type: row ? componentType(row) : port?.componentType ?? null,
-    pipelineRef: row ? pipelineRef(row) : port?.pipelineRef ?? null,
-    sourceCanonicalId: row?.sourceCanonicalId ?? port?.sourceCanonicalId ?? null,
+    message: message || `${identity.type || 'Component'}${roleText} is disconnected. ${identityText}${pointText}`,
+
+    rowNo: identity.rowNo,
+    type: identity.type,
+    refNo: identity.refNo,
+    seqNo: identity.seqNo,
+    lineNo: identity.lineNo,
+    name: identity.name,
+    pipelineRef: identity.pipelineRef,
+    sourceCanonicalId: identity.sourceCanonicalId,
+
     portId: port?.portId ?? null,
+    portRole: port?.role ?? null,
+    pointKey: port?.pointKey ?? null,
+    point: port?.point ?? null,
+
     candidateId: candidate?.candidateId ?? null,
+
+    identityLabel: identityText,
     ...details,
   };
 }

@@ -7,6 +7,7 @@ import {
   componentId,
   pipelineRef,
   rowPoint,
+  rowIdentity,
   isPipe,
   isSupport,
   isIgnored,
@@ -43,6 +44,12 @@ function makePort({
     sourceCanonicalId: component.sourceCanonicalId,
     componentType: component.type,
     pipelineRef: component.pipelineRef,
+
+    refNo: component.refNo,
+    seqNo: component.seqNo,
+    lineNo: component.lineNo,
+    name: component.name,
+    identity: component.identity,
 
     role,
     pointKey,
@@ -148,6 +155,11 @@ export function buildPcfTopoFromRows(rows = [], options = {}) {
       continue;
     }
 
+    const identity = rowIdentity(row, {
+      rowNo: row.rowNo ?? index + 1,
+      type,
+    });
+
     const component = {
       topoId: makeTopoId(row, index),
       rowIndex: index,
@@ -155,6 +167,13 @@ export function buildPcfTopoFromRows(rows = [], options = {}) {
       sourceCanonicalId: componentId(row, index),
       type,
       pipelineRef: pipelineRef(row),
+
+      identity,
+      refNo: identity.refNo,
+      seqNo: identity.seqNo,
+      lineNo: identity.lineNo,
+      name: identity.name,
+
       lineKey: clean(row.lineKey || row.lineNoKey || row.pipelineRef || ''),
       include: row.include !== false,
       bore: numericBore(row),

@@ -305,15 +305,39 @@ function _syncImportReadinessReport() {
 
   if (panelId === 'diagnostics') {
     const diags = state.rvmPcfExtract?.diagnostics || [];
-    const sevClass = s => s === 'ERROR' ? 'diag-error' : s === 'WARNING' ? 'diag-warn' : 'diag-info';
+    const sevClass = (s, d = {}) => {
+      if (d.skipApplied) return 'diag-warn';
+      return s === 'ERROR' ? 'diag-error' : s === 'WARNING' ? 'diag-warn' : 'diag-info';
+    };
     host.innerHTML = `
       ${_pcfReadinessAuditHierarchyHtml()}
       <div style="padding:8px;font-size:11px;color:#9aa9bd;">${diags.length} diagnostic(s)</div>
       <div class="rvm-pcf-diag-list">
         ${diags.length ? diags.map(d => `
-          <div class="rvm-pcf-diag ${sevClass(d.severity || d.level || 'INFO')}">
+          <div class="rvm-pcf-diag ${sevClass(d.severity || d.level || 'INFO', d)}">
             <span class="rvm-pcf-diag-code">${_esc(d.code || d.severity || 'INFO')}</span>
-            <span>${_esc(d.message || JSON.stringify(d))}</span>
+            <span>
+              ${_esc(d.message || JSON.stringify(d))}
+              ${
+                d.refNo || d.seqNo || d.lineNo || d.pipelineRef || d.portRole || d.point
+                  ? `
+                    <div style="margin-top:4px;font-size:11px;color:#9aa9bd;line-height:1.35;">
+                      ${d.refNo ? `<b>Ref:</b> ${_esc(d.refNo)} ` : ''}
+                      ${d.seqNo ? `<b>Seq:</b> ${_esc(d.seqNo)} ` : ''}
+                      ${d.lineNo ? `<b>Line:</b> ${_esc(d.lineNo)} ` : ''}
+                      ${d.pipelineRef ? `<b>Pipeline:</b> ${_esc(d.pipelineRef)} ` : ''}
+                      ${d.portRole ? `<b>Port:</b> ${_esc(d.portRole)} ` : ''}
+                      ${d.pointKey ? `<b>Point:</b> ${_esc(d.pointKey)} ` : ''}
+                      ${
+                        d.point
+                          ? `<b>XYZ:</b> ${_esc(`${d.point.x}, ${d.point.y}, ${d.point.z}`)}`
+                          : ''
+                      }
+                    </div>
+                  `
+                  : ''
+              }
+            </span>
           </div>
         `).join('') : '<div class="rvm-pcf-extract-status">No diagnostics yet.</div>'}
       </div>
