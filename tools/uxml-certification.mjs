@@ -23,7 +23,10 @@ const REQUIRED_MODULES = Object.freeze([
   'viewer/uxml/UxmlFaceModelBuilder.js',
   'viewer/uxml/UxmlUniversalTopoGraphBuilder.js',
   'viewer/uxml/UxmlRayTopoGraphBuilder.js',
-  'viewer/uxml/UxmlTopoGraphComparator.js',
+    'viewer/uxml/UxmlTopoGraphComparator.js',
+  'viewer/rvm-pcf-extract/RvmPcfTopologyModes.js',
+  'viewer/rvm-pcf-extract/RvmRowsToUxmlAdapter.js',
+  'viewer/rvm-pcf-extract/RvmUxmlTopologyBridge.js',
 ]);
 
 const REQUIRED_TESTS = Object.freeze([
@@ -34,7 +37,9 @@ const REQUIRED_TESTS = Object.freeze([
   'viewer/tests/uxml-face-model-builder.test.js',
   'viewer/tests/uxml-universal-topo-graph-builder.test.js',
   'viewer/tests/uxml-ray-topo-graph-builder.test.js',
-  'viewer/tests/uxml-topo-graph-comparator.test.js',
+    'viewer/tests/uxml-topo-graph-comparator.test.js',
+  'viewer/tests/universal-xml-converter-tab.test.js',
+  'viewer/tests/rvm-pcf-uxml-topology-bridge.test.js',
 ]);
 
 const REQUIRED_EXPORT_MARKERS = Object.freeze([
@@ -68,6 +73,29 @@ const REQUIRED_EXPORT_MARKERS = Object.freeze([
       'compareUxmlTopoGraphs',
       'compareUxmlTopologyGraphs',
       'buildUxmlTopoGraphComparison',
+    ],
+  },
+  {
+    file: 'viewer/rvm-pcf-extract/RvmPcfTopologyModes.js',
+    markers: [
+      'RVM_PCF_TOPOLOGY_MODES',
+      'normalizeRvmPcfTopologyMode',
+      'isUxmlTopologyMode',
+    ],
+  },
+  {
+    file: 'viewer/rvm-pcf-extract/RvmRowsToUxmlAdapter.js',
+    markers: [
+      'adaptRvmRowsToUxml',
+      'convertRvmRowsToUxml',
+    ],
+  },
+  {
+    file: 'viewer/rvm-pcf-extract/RvmUxmlTopologyBridge.js',
+    markers: [
+      'runUxmlTopologyForRvmRows',
+      'pushUxmlTopologyBackToLegacyRows',
+      'buildRvmPcfUxmlTopology',
     ],
   },
 ]);
