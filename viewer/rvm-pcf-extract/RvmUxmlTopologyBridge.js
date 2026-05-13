@@ -17,6 +17,11 @@ import {
   RVM_PCF_TOPOLOGY_MODES,
 } from './RvmPcfTopologyModes.js';
 
+import {
+  annotateRowsWithAcceptedTopologyHandoff,
+  buildRvmPcfAcceptedTopologyHandoff,
+} from './RvmPcfAcceptedTopologyHandoff.js';
+
 import { validateUxmlDocument } from '../uxml/UxmlValidationGate.js';
 import { buildUxmlFaceModel } from '../uxml/UxmlFaceModelBuilder.js';
 import { buildUxmlUniversalTopoGraph } from '../uxml/UxmlUniversalTopoGraphBuilder.js';
@@ -103,6 +108,7 @@ function makeLegacyReadinessReport(result, options) {
   const raySummary = result.rayGraph?.summary || {};
   const comparisonSummary = result.comparison?.summary || {};
   const decisionSummary = result.topologyDecision?.summary || {};
+  const handoffSummary = result.acceptedTopologyHandoff?.summary || {};
 
   const unresolved =
     comparisonSummary.unresolvedUniversalDisconnectedCount ??
@@ -138,6 +144,7 @@ function makeLegacyReadinessReport(result, options) {
     pass,
     ok: pass,
     topologyDecision: result.topologyDecision,
+    acceptedTopologyHandoff: result.acceptedTopologyHandoff,
     graph: result.universalGraph,
     uxml: result.uxml,
     faceModel: result.faceModel,
@@ -162,6 +169,8 @@ function makeLegacyReadinessReport(result, options) {
       safeFixPlanCount,
       blockedFixPlanCount,
       acceptedConnectionCount: decisionSummary.acceptedConnectionCount || 0,
+      acceptedTopologyHandoffCount: handoffSummary.handoffConnectionCount || 0,
+      acceptedTopologyAnnotatedRowCount: handoffSummary.annotatedRowCount || 0,
       exportAllowed: result.topologyDecision?.exportAllowed === true,
       outputBridgeReady: result.topologyDecision?.outputBridgeReady === true,
       legacyRoutingContinues: true,
@@ -180,6 +189,8 @@ function makeLegacyReadinessReport(result, options) {
         safeFixPlanCount,
         blockedFixPlanCount,
         acceptedConnectionCount: decisionSummary.acceptedConnectionCount || 0,
+        acceptedTopologyHandoffCount: handoffSummary.handoffConnectionCount || 0,
+        acceptedTopologyAnnotatedRowCount: handoffSummary.annotatedRowCount || 0,
         manualReviewCount: decisionSummary.manualReviewCount || 0,
         unresolvedCount: decisionSummary.unresolvedCount || 0,
         rejectedCount: decisionSummary.rejectedCount || 0,
@@ -322,6 +333,12 @@ export function runUxmlTopologyForRvmRows(rows = [], options = {}) {
     maxPromotionPerpendicularMissMm: normalizedOptions.tubeToleranceMm,
   });
 
+  const acceptedTopologyHandoff = buildRvmPcfAcceptedTopologyHandoff({
+    rows,
+    topologyDecision,
+    rowIdentityByComponentId: adapter.rowIdentityByComponentId,
+  });
+
   const diagnostics = flattenDiagnostics({
     adapter,
     validation,
@@ -347,12 +364,16 @@ export function runUxmlTopologyForRvmRows(rows = [], options = {}) {
     rayGraph,
     comparison,
     topologyDecision,
+    acceptedTopologyHandoff,
     diagnostics,
     legacyRows: [],
     readinessGate: null,
   };
 
-  result.legacyRows = pushUxmlTopologyBackToLegacyRows(rows, result);
+  result.legacyRows = annotateRowsWithAcceptedTopologyHandoff(
+    pushUxmlTopologyBackToLegacyRows(rows, result),
+    acceptedTopologyHandoff
+  );
   result.readinessGate = makeLegacyReadinessReport(result, normalizedOptions);
   result.ok = result.readinessGate.pass;
 

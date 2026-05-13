@@ -210,4 +210,32 @@ describe('RVM PCF UXML topology bridge Agent 10', () => {
     expect(result.readinessGate.summary.mastersDeferredToLegacyRoute).toBe(true);
     expect(result.readinessGate.summary.pcfEmitterDeferredToLegacyRoute).toBe(true);
   });
+
+  it('creates accepted topology handoff and annotates legacy rows', () => {
+    const rows = [
+      pipeRow(10, 'PIPE-1', '0,0,0', '1000,0,0'),
+      valveRow(20, 'VALVE-1', '1000,0,0', '1200,0,0'),
+      pipeRow(30, 'PIPE-2', '1200,0,0', '2000,0,0'),
+    ];
+
+    const result = runUxmlTopologyForRvmRows(rows, {
+      allowPartialExport: true,
+    });
+
+    expect(result.acceptedTopologyHandoff).toBeTruthy();
+    expect(result.acceptedTopologyHandoff.schema).toBe('rvm-pcf-accepted-topology-handoff/v1');
+    expect(result.acceptedTopologyHandoff.summary.handoffConnectionCount).toBeGreaterThan(0);
+
+    expect(result.readinessGate.acceptedTopologyHandoff).toBeTruthy();
+    expect(result.readinessGate.summary.acceptedTopologyHandoffCount).toBeGreaterThan(0);
+
+    const annotated = result.legacyRows.find(row => row._uxmlAcceptedTopologyCount > 0);
+
+    expect(annotated).toBeTruthy();
+    expect(Array.isArray(annotated._uxmlAcceptedTopologyTargets)).toBe(true);
+    expect(Array.isArray(annotated._uxmlAcceptedTopologySources)).toBe(true);
+    expect(Array.isArray(annotated._uxmlAcceptedTopologyConnectionIds)).toBe(true);
+
+    expect(annotated.ep1 || annotated.supportCoord).toBeTruthy();
+  });
 });

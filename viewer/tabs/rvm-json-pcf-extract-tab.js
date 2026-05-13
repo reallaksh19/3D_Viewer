@@ -364,6 +364,10 @@ function _pcfExportGuardSummaryHtml() {
     ? '<span style="color:#7ddc9a;font-weight:800;">ALLOWED</span>'
     : '<span style="color:#facc15;font-weight:800;">BLOCKED</span>';
 
+  const reasonHtml = guard.reason
+    ? `<div class="rvm-pcf-extract-status" style="margin-top:8px;">${_esc(guard.reason)}</div>`
+    : '';
+
   return `
     <div class="rvm-pcf-extract-status-card" style="margin-bottom:12px;">
       <div class="rvm-pcf-status-row">
@@ -372,7 +376,7 @@ function _pcfExportGuardSummaryHtml() {
       </div>
       <div class="rvm-pcf-status-row">
         <span class="rvm-pcf-label">Topology mode</span>
-        <span>${guard.topologyModeLabel}</span>
+        <span>${_esc(guard.topologyModeLabel)}</span>
       </div>
       <div class="rvm-pcf-status-row">
         <span class="rvm-pcf-label">Output bridge ready</span>
@@ -388,13 +392,13 @@ function _pcfExportGuardSummaryHtml() {
       </div>
       <div class="rvm-pcf-status-row">
         <span class="rvm-pcf-label">Accepted topology</span>
-        <span>${guard.acceptedConnectionCount}</span>
+        <span>${_esc(guard.acceptedConnectionCount)}</span>
       </div>
       <div class="rvm-pcf-status-row">
         <span class="rvm-pcf-label">Manual / rejected / unresolved</span>
-        <span>${guard.manualReviewCount} / ${guard.rejectedCount} / ${guard.unresolvedCount}</span>
+        <span>${_esc(guard.manualReviewCount)} / ${_esc(guard.rejectedCount)} / ${_esc(guard.unresolvedCount)}</span>
       </div>
-      ${guard.reason ? \`<div class="rvm-pcf-extract-status" style="margin-top:8px;">\${guard.reason}</div>\` : ''}
+      ${reasonHtml}
     </div>
   `;
 }
