@@ -14,6 +14,12 @@ import process from 'node:process';
 
 const ROOT = process.cwd();
 
+const REQUIRED_BENCHMARKS = Object.freeze([
+  'Benchmarks/RVM JSON to PCF UXML Topology/README.md',
+  'Benchmarks/RVM JSON to PCF UXML Topology/broken-topology-50-rows.json',
+  'Benchmarks/RVM JSON to PCF UXML Topology/expected-uxml-topology-outcome.json',
+]);
+
 const REQUIRED_MODULES = Object.freeze([
   'viewer/uxml/UxmlConstants.js',
   'viewer/uxml/UxmlTypes.js',
@@ -44,6 +50,7 @@ const REQUIRED_TESTS = Object.freeze([
   'viewer/tests/rvm-pcf-uxml-topology-bridge.test.js',
   'viewer/tests/uxml-topology-decision-gate.test.js',
   'viewer/tests/rvm-pcf-uxml-topology-diagnostics-panel.test.js',
+  'viewer/tests/rvm-pcf-uxml-topology-benchmark.test.js',
 ]);
 
 const REQUIRED_EXPORT_MARKERS = Object.freeze([
@@ -193,10 +200,12 @@ function main() {
 
   const moduleCheck = checkFiles('Required modules', REQUIRED_MODULES);
   const testCheck = checkFiles('Required tests', REQUIRED_TESTS);
+  const benchmarkCheck = checkFiles('Required benchmarks', REQUIRED_BENCHMARKS);
   const markerFailures = checkExportMarkers();
 
   printResult(moduleCheck);
   printResult(testCheck);
+  printResult(benchmarkCheck);
 
   if (markerFailures.length) {
     console.log('❌ Required export markers: FAIL');
@@ -213,6 +222,7 @@ function main() {
   const failed =
     moduleCheck.missing.length > 0 ||
     testCheck.missing.length > 0 ||
+    benchmarkCheck.missing.length > 0 ||
     markerFailures.length > 0;
 
   console.log('');
@@ -220,6 +230,7 @@ function main() {
   console.log(failed ? 'Certification: ❌ FAIL' : 'Certification: ✅ PASS');
   console.log(`Required modules: ${moduleCheck.missing.length ? '❌' : '✅'} ${moduleCheck.passed} / ${moduleCheck.total}`);
   console.log(`Required tests: ${testCheck.missing.length ? '❌' : '✅'} ${testCheck.passed} / ${testCheck.total}`);
+  console.log(`Required benchmarks: ${benchmarkCheck.missing.length ? '❌' : '✅'} ${benchmarkCheck.passed} / ${benchmarkCheck.total}`);
   console.log(`Required export markers: ${markerFailures.length ? '❌' : '✅'} ${REQUIRED_EXPORT_MARKERS.length - markerFailures.length} / ${REQUIRED_EXPORT_MARKERS.length}`);
 
   if (failed) {
