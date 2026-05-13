@@ -566,9 +566,46 @@ function panelHtml(state) {
   if (panel === 'existing-converter') {
     return `
       <section class="uxml-panel-section">
-        <h3>Existing Converter Output</h3>
-        <p>Bridge remains explicit: PDF / REV / JSON / TXT / PCF must become InputXML or Standard XML before UXML normalization. No raw PDF/REV/JSON parser is introduced here.</p>
-        <div class="uxml-placeholder">Existing converter bridge hook remains deferred to the output/source adapter wave.</div>
+        <h3>Existing Converter Output / PCF Extract Bridge</h3>
+
+        <p>
+          This Universal XML Converter tab is a standalone XML-first workbench.
+          It directly accepts XML, InputXML, and UXML only.
+        </p>
+
+        <div class="uxml-placeholder">
+          <b>For JSON/RVM → PCF extraction:</b><br>
+          Use the existing <b>RVM / JSON → PCF Extract</b> tab and select:
+          <br><br>
+          <code>Topology mode = UXML topology</code>
+          <br><br>
+          That route converts extracted rows to UXML only for topology generation/checking,
+          then pushes topology evidence back into the existing legacy PCF route.
+        </div>
+
+        <div class="uxml-placeholder" style="margin-top:12px;">
+          <b>Routing contract:</b>
+          <pre style="white-space:pre-wrap;margin:8px 0 0;">
+JSON/RVM rows
+  ↓
+Existing 2D CSV / row builder
+  ↓
+Topology mode selector
+  ├─ Legacy topology → existing readiness/topology
+  └─ UXML topology → rows → UXML → FaceModel → UniversalTopoGraph → RayTopoGraph → Comparison
+          ↓
+      Push topology evidence back to rows/readinessGate
+          ↓
+Existing master resolution
+          ↓
+Existing PCF generation/export
+          </pre>
+        </div>
+
+        <div class="uxml-placeholder" style="margin-top:12px;">
+          Raw PDF / REV / JSON / TXT / PCF parsing is intentionally not implemented inside this tab.
+          Those formats must use their existing/planned converters first.
+        </div>
       </section>
     `;
   }
