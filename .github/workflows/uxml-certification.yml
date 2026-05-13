@@ -7,6 +7,7 @@ on:
       - "viewer/tests/uxml-*.test.js"
       - "tools/uxml-certification.mjs"
       - ".github/workflows/uxml-certification.yml"
+      - "Benchmarks/RVM JSON to PCF UXML Topology/**"
   push:
     branches:
       - main
@@ -15,6 +16,7 @@ on:
       - "viewer/tests/uxml-*.test.js"
       - "tools/uxml-certification.mjs"
       - ".github/workflows/uxml-certification.yml"
+      - "Benchmarks/RVM JSON to PCF UXML Topology/**"
   workflow_dispatch:
 
 jobs:
@@ -71,7 +73,8 @@ jobs:
               viewer/tests/universal-xml-converter-tab.test.js \
             viewer/tests/rvm-pcf-uxml-topology-bridge.test.js \
             viewer/tests/uxml-topology-decision-gate.test.js \
-            viewer/tests/rvm-pcf-uxml-topology-diagnostics-panel.test.js
+            viewer/tests/rvm-pcf-uxml-topology-diagnostics-panel.test.js \
+            viewer/tests/rvm-pcf-uxml-topology-benchmark.test.js
           else
             npx vitest run \
               viewer/tests/uxml-contracts.test.js \
@@ -85,7 +88,8 @@ jobs:
               viewer/tests/universal-xml-converter-tab.test.js \
             viewer/tests/rvm-pcf-uxml-topology-bridge.test.js \
             viewer/tests/uxml-topology-decision-gate.test.js \
-            viewer/tests/rvm-pcf-uxml-topology-diagnostics-panel.test.js
+            viewer/tests/rvm-pcf-uxml-topology-diagnostics-panel.test.js \
+            viewer/tests/rvm-pcf-uxml-topology-benchmark.test.js
           fi
 
       - name: Write certification summary
