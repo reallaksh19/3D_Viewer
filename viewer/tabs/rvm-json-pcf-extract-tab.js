@@ -263,7 +263,7 @@ function _showPanel(container, panelId) {
       ${_exportSettingsHtml(singlePcfForMultiLineSelection)}
     `;
     _bindTopologyModeSettings(host);
-  _bindContinuitySettings(host);
+    _bindContinuitySettings(host);
     _bindExportSettings(host);
     return;
   }
