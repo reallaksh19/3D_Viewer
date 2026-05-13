@@ -1,0 +1,104 @@
+{
+  "schema": "cii2019-benchmark-profile/v1",
+  "benchmarkFileCount": 5,
+  "rulePriority": [
+    "observed_nonzero_benchmark_rows_per_block",
+    "current_checker_fallback_for_unobserved_sections",
+    "hexagon_reference_documentation_only"
+  ],
+  "sections": {
+    "BEND": {
+      "status": "observed",
+      "linesPerBlock": 3,
+      "source": "benchmark_corpus",
+      "hexagonReference": 3,
+      "currentCheckerFallback": 3
+    },
+    "RIGID": {
+      "status": "observed",
+      "linesPerBlock": 1,
+      "source": "benchmark_corpus",
+      "hexagonReference": 1,
+      "currentCheckerFallback": 1
+    },
+    "EXPJT": {
+      "status": "unobserved",
+      "linesPerBlock": 1,
+      "source": "fallback_current_checker_until_nonzero_benchmark_exists",
+      "hexagonReference": 1
+    },
+    "RESTRANT": {
+      "status": "observed",
+      "linesPerBlock": 24,
+      "source": "benchmark_corpus",
+      "hexagonReference": 24,
+      "currentCheckerFallback": 24
+    },
+    "DISPLMNT": {
+      "status": "observed",
+      "linesPerBlock": 20,
+      "source": "benchmark_corpus",
+      "hexagonReference": 20,
+      "currentCheckerFallback": 20
+    },
+    "FORCMNT": {
+      "status": "unobserved",
+      "linesPerBlock": 13,
+      "source": "fallback_current_checker_until_nonzero_benchmark_exists",
+      "hexagonReference": 20
+    },
+    "UNIFORM": {
+      "status": "unobserved",
+      "linesPerBlock": 6,
+      "source": "fallback_current_checker_until_nonzero_benchmark_exists",
+      "hexagonReference": 6
+    },
+    "WIND": {
+      "status": "unobserved",
+      "linesPerBlock": 1,
+      "source": "fallback_current_checker_until_nonzero_benchmark_exists",
+      "hexagonReference": 1
+    },
+    "OFFSETS": {
+      "status": "unobserved",
+      "linesPerBlock": 1,
+      "source": "fallback_current_checker_until_nonzero_benchmark_exists",
+      "hexagonReference": 1
+    },
+    "ALLOWBLS": {
+      "status": "observed",
+      "linesPerBlock": 26,
+      "source": "benchmark_corpus",
+      "hexagonReference": 26,
+      "currentCheckerFallback": 26
+    },
+    "SIF&TEES": {
+      "status": "observed",
+      "linesPerBlock": 10,
+      "source": "benchmark_corpus",
+      "hexagonReference": 10,
+      "currentCheckerFallback": 10
+    },
+    "REDUCERS": {
+      "status": "observed",
+      "linesPerBlock": 1,
+      "source": "benchmark_corpus",
+      "hexagonReference": 1,
+      "currentCheckerFallback": 1
+    },
+    "FLANGES": {
+      "status": "observed",
+      "linesPerBlock": 11,
+      "source": "benchmark_corpus",
+      "hexagonReference": 12,
+      "currentCheckerFallback": 11
+    },
+    "EQUIPMNT": {
+      "status": "observed",
+      "linesPerBlock": 6,
+      "source": "benchmark_corpus",
+      "hexagonReference": 6,
+      "currentCheckerFallback": 6
+    }
+  }
+}

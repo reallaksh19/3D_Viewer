@@ -100,6 +100,29 @@ BLOCK_LINES_PER_SECTION = {
 }
 
 
+def _load_block_lines_per_section(profile_path: Path | None) -> dict[str, int]:
+    base = dict(BLOCK_LINES_PER_SECTION)
+
+    if profile_path is None:
+        return base
+
+    profile = json.loads(profile_path.read_text(encoding="utf-8"))
+    sections = profile.get("sections", {})
+
+    for section_name, data in sections.items():
+        if not isinstance(data, dict):
+            continue
+
+        if data.get("status") not in {"observed", "unobserved"}:
+            continue
+
+        value = data.get("linesPerBlock")
+        if isinstance(value, int) and value > 0:
+            base[section_name] = value
+
+    return base
+
+
 @dataclass(frozen=True)
 class Section:
     name: str
@@ -526,11 +549,12 @@ def _validate_blocked_section(
     section: Section | None,
     section_name: str,
     expected_blocks: int,
+    block_lines_per_section: dict[str, int],
     errors: list[dict[str, object]],
 ) -> None:
     if section is None:
         return
-    lines_per_block = BLOCK_LINES_PER_SECTION[section_name]
+    lines_per_block = block_lines_per_section[section_name]
     rows = [entry for entry in section.payload if entry[1].strip()]
     expected_rows = expected_blocks * lines_per_block
     if len(rows) != expected_rows:
@@ -850,6 +874,7 @@ def _validate_miscel_1(
 def _validate_auxiliary_sections(
     section_map: dict[str, Section],
     metrics: dict[str, int],
+    block_lines_per_section: dict[str, int],
     errors: list[dict[str, object]],
 ) -> None:
     metric_key_by_section = {
@@ -868,24 +893,25 @@ def _validate_auxiliary_sections(
         "FLANGES": "flanges",
         "EQUIPMNT": "equipmnt",
     }
-    for section_name in BLOCK_LINES_PER_SECTION:
+    for section_name in block_lines_per_section:
         metric_key = metric_key_by_section[section_name]
         expected_blocks = int(metrics.get(metric_key, 0))
         section = section_map.get(section_name)
-        _validate_blocked_section(section, section_name, expected_blocks, errors)
+        _validate_blocked_section(section, section_name, expected_blocks, block_lines_per_section, errors)
 
 
 def _build_report(
     input_path: Path,
     sections: list[Section],
     metrics: dict[str, int],
+    block_lines_per_section: dict[str, int],
     errors: list[dict[str, object]],
     warnings: list[dict[str, object]],
     text: str | None = None,
 ) -> dict[str, object]:
     section_map = _get_section_map(sections)
     derived_counts: dict[str, object] = {}
-    for section_name, lines_per_block in BLOCK_LINES_PER_SECTION.items():
+    for section_name, lines_per_block in block_lines_per_section.items():
         section = section_map.get(section_name)
         if section is None:
             continue
@@ -934,6 +960,7 @@ def _build_report(
 def _validate(
     input_path: Path,
     options: RuleOptions,
+    block_lines_per_section: dict[str, int],
 ) -> dict[str, object]:
     text = input_path.read_text(encoding="utf-8", errors="replace")
     lines = text.splitlines()
@@ -949,7 +976,7 @@ def _validate(
             0,
             "No '#$ <SECTION>' headers found in file.",
         )
-        return _build_report(input_path, sections, {}, errors, warnings, text=text)
+        return _build_report(input_path, sections, {}, block_lines_per_section, errors, warnings, text=text)
 
     _validate_duplicates(sections, errors)
     _validate_order(sections, options, errors, warnings)
@@ -958,7 +985,7 @@ def _validate(
     metrics = _validate_control(section_map.get("CONTROL"), errors)
 
     _validate_elements(section_map.get("ELEMENTS"), metrics, options, errors)
-    _validate_auxiliary_sections(section_map, metrics, errors)
+    _validate_auxiliary_sections(section_map, metrics, block_lines_per_section, errors)
     _validate_nodename(
         section_map.get("NODENAME"),
         metrics,
@@ -970,7 +997,7 @@ def _validate(
     _validate_units(section_map.get("UNITS"), errors)
     _validate_coords(section_map.get("COORDS"), options, errors)
 
-    return _build_report(input_path, sections, metrics, errors, warnings, text=text)
+    return _build_report(input_path, sections, metrics, block_lines_per_section, errors, warnings, text=text)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -1019,6 +1046,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_false",
         help="Require COORDS section to exist.",
     )
+    parser.add_argument(
+        "--benchmark-profile",
+        type=Path,
+        default=None,
+        help="Optional benchmark-derived CII profile JSON. Benchmark profile overrides generic references.",
+    )
     return parser
 
 
@@ -1031,7 +1064,10 @@ def main() -> int:
         allow_zero_line_no=bool(args.allow_zero_line_no),
         allow_missing_coords=bool(args.allow_missing_coords),
     )
-    report = _validate(args.input, options)
+
+    block_lines_per_section = _load_block_lines_per_section(args.benchmark_profile)
+
+    report = _validate(args.input, options, block_lines_per_section)
     report_text = json.dumps(report, indent=2, sort_keys=False)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
