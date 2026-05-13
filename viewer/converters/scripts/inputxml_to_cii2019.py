@@ -40,6 +40,11 @@ try:
 except ImportError:
     cii2019_section_rules = None
 
+try:
+    import cii2019_hanger_miscel_control
+except ImportError:
+    cii2019_hanger_miscel_control = None
+
 
 SENTINEL_MISSING: Final[float] = -1.0101
 VERSION_PAYLOAD_LINES: Final[int] = 61
@@ -2692,6 +2697,19 @@ def _build_parser() -> argparse.ArgumentParser:
             "LINE labels, NODENAME payload, MISCEL_1 material IDs, CONTROL templates, and UNITS values."
         ),
     )
+    parser.add_argument(
+        "--hanger-miscel-default-profile-cii",
+        type=Path,
+        default=Path("Benchmarks")
+        / "INPUT XML to CII 2019"
+        / "NEW BM"
+        / "BM_CII_DEFAULTVALUES.CII",
+        help=(
+            "CII profile used only to complete missing/sentinel HANGER and MISCEL_1 "
+            "default values. Hangers are still detected from explicit InputXML "
+            "<HANGER/> records."
+        ),
+    )
     return parser
 
 
@@ -2754,6 +2772,14 @@ def main() -> int:
         coord_reconstruction_tolerance=args.coord_reconstruction_tolerance,
         layout_config=layout_config,
     )
+
+    if cii2019_hanger_miscel_control is not None:
+        cii_text = cii2019_hanger_miscel_control.enforce_hanger_miscel_control(
+            input_xml=args.input,
+            cii_text=cii_text,
+            default_profile_cii=args.hanger_miscel_default_profile_cii,
+        )
+
     args.output.write_text(cii_text, encoding="utf-8")
 
     print(
