@@ -124,7 +124,7 @@ export const state = {
     pcfxDefaults: _clone(DEFAULT_PCFX_DEFAULTS),
   },
 
-  engineMode: localStorage.getItem('pcfStudio.engineMode') || 'legacy',
+  engineMode: (typeof localStorage !== 'undefined' ? (typeof localStorage !== 'undefined' ? localStorage.getItem('pcfStudio.engineMode') : null) : null) || 'legacy',
   rawText: null,
   fileName: null,
   parsed: null,
