@@ -10,6 +10,9 @@ import {
   normalizeRvmPcfTopologyMode,
   topologyModeLabel,
 } from '../rvm-pcf-extract/RvmPcfTopologyModes.js';
+import {
+  renderRvmUxmlTopologyDiagnosticsHtml,
+} from '../rvm-pcf-extract/RvmUxmlTopologyDiagnosticsPanel.js';
 
 let _offExtractRequested = null;
 let _offStateChanged = null;
@@ -82,6 +85,21 @@ function _auditSummaryHtml(report) {
       ${kv.map(([k, v]) => `<div class="rvm-pcf-status-row"><span class="rvm-pcf-label">${_esc(k)}</span><span>${_esc(v)}</span></div>`).join('')}
     </div>
   `;
+}
+
+function _uxmlTopologyDiagnosticsSummaryHtml() {
+  const extractState = state.rvmPcfExtract || {};
+  const topologyMode = extractState.topologyMode || DEFAULT_RVM_PCF_TOPOLOGY_MODE;
+  const uxmlTopology = extractState.uxmlTopology || null;
+  const readinessGate = extractState.readinessGate || null;
+  const diagnostics = extractState.diagnostics || [];
+
+  return renderRvmUxmlTopologyDiagnosticsHtml({
+    topologyMode,
+    uxmlTopology,
+    readinessGate,
+    diagnostics,
+  });
 }
 
 function _topologyModeSettingsHtml(topologyMode) {
@@ -402,6 +420,7 @@ function _syncImportReadinessReport() {
       return s === 'ERROR' ? 'diag-error' : s === 'WARNING' ? 'diag-warn' : 'diag-info';
     };
     host.innerHTML = `
+      ${_uxmlTopologyDiagnosticsSummaryHtml()}
       ${_pcfReadinessAuditHierarchyHtml()}
       <div style="padding:8px;font-size:11px;color:#9aa9bd;">${diags.length} diagnostic(s)</div>
       <div class="rvm-pcf-diag-list">
