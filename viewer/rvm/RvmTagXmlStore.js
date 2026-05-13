@@ -71,7 +71,6 @@ function textAt(parent, path, fallback = '') {
 }
 
 function parseNumber(value, fallback = null) {
-  if (value === null || value === undefined || value === '') return fallback;
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
@@ -337,9 +336,6 @@ function normalizeTagInput(config = {}, bundleId, identityMap) {
     status: config.status || 'active',
     worldPosition: config.worldPosition || null,
     cameraState: config.cameraState || null,
-
-    // REQUIRED:
-    // Preserve original Navisworks Exchange evidence for export round-trip.
     navis: config.navis || null,
   };
 
@@ -393,11 +389,10 @@ function parseNavisCamera(viewpointEl) {
   if ([tx, ty, tz].every(Number.isFinite)) {
     cameraState.target = { x: tx, y: ty, z: tz };
   } else if (position && forward) {
-    const dist = Math.sqrt(3);
     cameraState.target = {
-      x: position.x + forward.x * dist,
-      y: position.y + forward.y * dist,
-      z: position.z + forward.z * dist,
+      x: position.x + forward.x,
+      y: position.y + forward.y,
+      z: position.z + forward.z,
     };
   }
 
@@ -418,15 +413,12 @@ function buildNavisMetadata(root, viewEl, rltagEl, commentEl, viewpointEl) {
 
   return {
     format: 'navisworks-exchange-12.0',
-
     rootAttrs: attrsToObject(root),
     viewAttrs: attrsToObject(viewEl),
     viewpointAttrs: attrsToObject(viewpointEl),
-
     cameraAttrs: attrsToObject(cameraEl),
     cameraPosition: parsePoint3f(firstByPath(cameraEl, 'position/pos3f')),
     cameraRotationQuaternion: parseQuaternion(firstByPath(cameraEl, 'rotation/quaternion')),
-
     upVector: parsePoint3f(upEl),
     viewerAttrs: attrsToObject(viewerEl),
     clipplanesetXml: serializeElement(clipplanesetEl),
@@ -556,46 +548,28 @@ function parseNavisExchange(root, store) {
     const viewGuid = viewEl.getAttribute('guid') || '';
     const viewName = viewEl.getAttribute('name') || '';
     const viewpointEl = directChild(viewEl, 'viewpoint');
-
     const commentsById = buildCommentsMap(viewEl);
     const rltags = allByPath(viewEl, 'redlines/rltag');
 
     for (let tagIndex = 0; tagIndex < rltags.length; tagIndex++) {
       const rltagEl = rltags[tagIndex];
-
-      const commentId =
-        rltagEl.getAttribute('commentid') ||
-        rltagEl.getAttribute('id') ||
-        '';
-
+      const commentId = rltagEl.getAttribute('commentid') || rltagEl.getAttribute('id') || '';
       const commentEl = commentsById.get(commentId) || null;
 
-      // REQUIRED:
-      // This preserves benchmark Navis XML structure/evidence for export.
-      const navis = buildNavisMetadata(
-        root,
-        viewEl,
-        rltagEl,
-        commentEl,
-        viewpointEl
-      );
-
+      const navis = buildNavisMetadata(root, viewEl, rltagEl, commentEl, viewpointEl);
       const worldPosition = navis.redline.pos3d || null;
       const cameraState = parseNavisCamera(viewpointEl);
 
       const rltagId = rltagEl.getAttribute('id') || String(tagIndex + 1);
-
-      const id =
+      const id = (
         rltagEl.getAttribute('tagid') ||
         rltagEl.getAttribute('guid') ||
-        (rltags.length === 1 && viewGuid
-          ? viewGuid
-          : `${viewGuid || `NAVIS-VIEW-${viewIndex + 1}`}:RL-${rltagId}`);
+        (rltags.length === 1 && viewGuid ? viewGuid : `${viewGuid || `NAVIS-VIEW-${viewIndex + 1}`}:RL-${rltagId}`)
+      );
 
       const canonicalObjectId = rltagEl.getAttribute('canonicalObjectId') || '';
       const sourceObjectId = rltagEl.getAttribute('sourceObjectId') || '';
       const xmlBundleId = rltagEl.getAttribute('bundleId') || store.bundleId;
-
       const text =
         rltagEl.getAttribute('text') ||
         navis.comment?.body ||
@@ -624,8 +598,6 @@ function parseNavisExchange(root, store) {
           severity,
           worldPosition,
           cameraState,
-
-          // REQUIRED:
           navis,
         },
         xmlBundleId,
@@ -696,7 +668,6 @@ function appendCamera(doc, viewpointEl, tag) {
     forwardEl.appendChild(vec);
     cameraEl.appendChild(forwardEl);
 
-    // Preserve enough information for exact app round-trip.
     cameraEl.setAttribute('target_x', formatNum(cameraState.target.x));
     cameraEl.setAttribute('target_y', formatNum(cameraState.target.y));
     cameraEl.setAttribute('target_z', formatNum(cameraState.target.z));
