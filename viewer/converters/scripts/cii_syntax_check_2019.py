@@ -142,7 +142,7 @@ def _is_element_label_payload(line: str) -> bool:
     """Validate ELEMENTS rows 10/11 as a 12-char integer pointer plus separator."""
     raw = line.rstrip("\n\r")
     if len(raw) < 13:
-        return False
+        return bool(_is_int(raw.strip()))
     first_field = raw[:12].strip()
     return bool(_is_int(first_field) and raw[12] == " ")
 

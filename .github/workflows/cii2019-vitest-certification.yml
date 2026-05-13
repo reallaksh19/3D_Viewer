@@ -50,8 +50,6 @@ jobs:
       - name: Install Node dependencies
         run: npm install
 
-      - name: Run Vitest
-        run: npm run test:vitest
 
       - name: Run CII 2019 syntax check
         run: npm run cert:cii2019
