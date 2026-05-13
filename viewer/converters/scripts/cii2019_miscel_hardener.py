@@ -372,6 +372,56 @@ def _section_index(sections: list[Section], name: str) -> int:
     return -1
 
 
+def _trim_equipmnt_payload(sections: list[Section], equipmnt_count: int) -> list[str]:
+    """
+    Keep EQUIPMNT payload aligned with CONTROL.equipmnt.
+
+    CII EQUIPMNT uses 6 rows per equipment/nozzle check block. If MISCEL_1 rows
+    were previously appended under EQUIPMNT because the #$ MISCEL_1 header was
+    missing, trim EQUIPMNT back to the expected length.
+
+    Returns trimmed surplus rows for diagnostics only.
+    """
+    equip_idx = _section_index(sections, "EQUIPMNT")
+    if equip_idx < 0:
+        return []
+
+    expected_rows = max(0, int(equipmnt_count)) * 6
+    payload = _nonblank(sections[equip_idx].payload)
+
+    if len(payload) <= expected_rows:
+        return []
+
+    surplus = payload[expected_rows:]
+    sections[equip_idx].payload = payload[:expected_rows]
+    return surplus
+
+
+def _assert_section_framing_after_hardening(
+    sections: list[Section],
+    *,
+    equipmnt_count: int,
+) -> None:
+    equip_idx = _section_index(sections, "EQUIPMNT")
+    if equip_idx >= 0:
+        expected_equip_rows = max(0, int(equipmnt_count)) * 6
+        actual_equip_rows = len(_nonblank(sections[equip_idx].payload))
+        if actual_equip_rows != expected_equip_rows:
+            raise ValueError(
+                "EQUIPMNT row mismatch after MISCEL_1 hardening: "
+                f"actual={actual_equip_rows}, expected={expected_equip_rows}"
+            )
+
+    miscel_idx = _section_index(sections, "MISCEL_1")
+    units_idx = _section_index(sections, "UNITS")
+
+    if miscel_idx < 0:
+        raise ValueError("MISCEL_1 missing after hardening.")
+
+    if units_idx >= 0 and miscel_idx > units_idx:
+        raise ValueError("MISCEL_1 must appear before UNITS.")
+
+
 def _serialize_sections(sections: list[Section]) -> str:
     lines: list[str] = []
 
@@ -390,6 +440,11 @@ def harden_cii_text(text: str, input_xml: Path | None = None) -> tuple[str, list
     metrics = _control_metrics(sections)
     element_count = int(metrics.get("elements", 0))
     nozzle_count = int(metrics.get("nozzles", 0))
+
+    surplus_equipmnt_rows = _trim_equipmnt_payload(
+        sections,
+        int(metrics.get("equipmnt", 0)),
+    )
 
     hangers = _parse_xml_hangers(input_xml)
     hanger_count = len(hangers)
@@ -427,9 +482,15 @@ def harden_cii_text(text: str, input_xml: Path | None = None) -> tuple[str, list
         insert_idx = units_idx if units_idx >= 0 else len(sections)
         sections.insert(insert_idx, Section("MISCEL_1", _format_header("MISCEL_1"), miscel_payload))
 
+    _assert_section_framing_after_hardening(
+        sections,
+        equipmnt_count=int(metrics.get("equipmnt", 0)),
+    )
+
     notes = [
         f"xml_hangers={hanger_count}",
         f"control_nohgrs={hanger_count}",
+        f"trimmed_equipmnt_surplus_rows={len(surplus_equipmnt_rows)}",
         "rebuilt_miscel_1",
     ]
 
