@@ -508,3 +508,145 @@
 .rvm-tree-node.is-indeterminate > .rvm-tree-label .rvm-tree-checkbox {
   opacity: 0.6;
 }
+
+/* ── RVM status strip ─────────────────────────────────────────────────── */
+
+.rvm-status-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: #171b22;
+  border-bottom: 1px solid var(--geo-border, #333);
+  color: #9fb0c8;
+  font-size: 11px;
+  line-height: 1.2;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: thin;
+}
+
+.rvm-status-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 2px 7px;
+  border: 1px solid rgba(116, 139, 171, 0.28);
+  border-radius: 999px;
+  background: rgba(38, 45, 56, 0.72);
+  color: #9fb0c8;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.rvm-status-chip.is-active {
+  color: #d9e7ff;
+  border-color: rgba(74, 158, 255, 0.42);
+  background: rgba(74, 158, 255, 0.16);
+}
+
+.rvm-status-chip.is-warn {
+  color: #ffd59a;
+  border-color: rgba(226, 153, 74, 0.65);
+  background: rgba(226, 153, 74, 0.16);
+}
+
+/* ── Empty states ─────────────────────────────────────────────────────── */
+
+.rvm-empty-state {
+  margin: 8px;
+  padding: 12px;
+  border: 1px dashed rgba(117, 139, 170, 0.32);
+  border-radius: 8px;
+  background: rgba(18, 23, 31, 0.72);
+  color: #9fb0c8;
+  text-align: center;
+  line-height: 1.35;
+}
+
+.rvm-empty-state[hidden] {
+  display: none !important;
+}
+
+.rvm-empty-state.is-compact {
+  margin: 6px;
+  padding: 8px;
+  font-size: 11px;
+}
+
+.rvm-empty-title {
+  color: #d9e7ff;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.rvm-empty-body {
+  color: #91a1ba;
+  font-size: 11px;
+}
+
+/* Empty states inside tree/list containers should not look like selectable rows. */
+.rvm-tree .rvm-empty-state,
+.rvm-tag-list .rvm-empty-state {
+  cursor: default;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: initial;
+}
+
+/* ── Tag panel actions ────────────────────────────────────────────────── */
+
+.rvm-tag-panel-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--geo-border, #333);
+  background: rgba(28, 34, 44, 0.94);
+  flex-shrink: 0;
+}
+
+.rvm-tag-panel-title {
+  color: #d9e7ff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.rvm-tag-panel-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.rvm-tag-panel-btn {
+  min-height: 24px;
+  padding: 3px 7px;
+  font-size: 10.5px;
+  line-height: 1.1;
+}
+
+.rvm-tag-panel-file {
+  cursor: pointer;
+}
+
+.rvm-tag-panel-btn:hover {
+  border-color: rgba(74, 158, 255, 0.62);
+}
+
+/* Make tag actions readable in narrow right panel. */
+@media (max-width: 1150px) {
+  .rvm-tag-panel-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .rvm-tag-panel-buttons {
+    justify-content: flex-start;
+  }
+}

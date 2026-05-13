@@ -14,6 +14,7 @@ let _resizeObserver = null;
 let _capabilitiesListenerOff = null;
 let _toolChangedHandler = null;
 let _tagEventsOff = null;
+let _fallbackTagXmlStore = null;
 
 // â”€â”€ Toolbar action labels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -268,6 +269,8 @@ function _disposeRvmViewer() {
     _tagEventsOff();
     _tagEventsOff = null;
   }
+
+  _fallbackTagXmlStore = null;
 }
 
 // â”€â”€ Capability banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -279,6 +282,483 @@ function _renderCapabilityBanner(container, caps) {
   const modeLabel = mode === 'assisted' ? 'Assisted (conversion enabled)' : 'Static (pre-converted bundles only)';
   banner.textContent = `Mode: ${modeLabel}`;
   banner.dataset.mode = mode;
+}
+
+// ── RVM UI status strip / empty states / tag panel actions ───────────────
+
+function _rvmUiEsc(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function _asArray(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (value instanceof Set) return Array.from(value);
+  if (value instanceof Map) return Array.from(value.values());
+  return [];
+}
+
+function _countMaybe(value) {
+  if (!value) return 0;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (Array.isArray(value)) return value.length;
+  if (value instanceof Set || value instanceof Map) return value.size;
+  if (typeof value.length === 'number') return value.length;
+  if (typeof value.size === 'number') return value.size;
+  return 0;
+}
+
+function _firstFiniteCount(...values) {
+  for (const value of values) {
+    const n = _countMaybe(value);
+    if (n > 0) return n;
+  }
+  return 0;
+}
+
+function _getRvmTagStore() {
+  const viewerStore =
+    _viewer?.tagStore ||
+    _viewer?.tagXmlStore ||
+    _viewer?.reviewTagStore ||
+    null;
+
+  if (
+    viewerStore &&
+    typeof viewerStore.importFromXml === 'function' &&
+    typeof viewerStore.exportToXml === 'function'
+  ) {
+    return viewerStore;
+  }
+
+  if (!_fallbackTagXmlStore) {
+    const identityMap =
+      _viewer?.identityMap ||
+      _viewer?.index?.identityMap ||
+      _viewer?.rvmIndex?.identityMap ||
+      null;
+
+    const bundleId =
+      _viewer?.bundleId ||
+      _viewer?.activeBundleId ||
+      state.rvm?.activeBundleId ||
+      state.rvm?.bundleId ||
+      state.rvm?.currentBundleId ||
+      'rvm-active-bundle';
+
+    _fallbackTagXmlStore = new RvmTagXmlStore(identityMap, bundleId);
+  }
+
+  return _fallbackTagXmlStore;
+}
+
+function _getRvmTags() {
+  const store = _getRvmTagStore();
+
+  if (store && typeof store.getAllTags === 'function') {
+    return store.getAllTags();
+  }
+
+  return Array.isArray(state.rvm?.tags) ? state.rvm.tags : [];
+}
+
+function _getRvmUiStats() {
+  const tags = _getRvmTags();
+  const unresolvedTags = tags.filter(tag => tag?.status === 'unresolved');
+
+  const searchIndex =
+    _viewer?.searchIndex ||
+    state.rvm?.searchIndex ||
+    null;
+
+  const nodeSources = [
+    _viewer?.nodes,
+    _viewer?.treeNodes,
+    _viewer?.rvmIndex?.nodes,
+    _viewer?.index?.nodes,
+    _viewer?.model?.nodes,
+    searchIndex?.items,
+    searchIndex?.records,
+    searchIndex?.nodes,
+    state.rvm?.nodes,
+    state.rvm?.treeNodes,
+    state.rvm?.index?.nodes,
+    state.rvm?.model?.nodes,
+    state.rvm?.bundle?.nodes,
+    state.rvm?.bundle?.index?.nodes,
+  ];
+
+  const visibleSources = [
+    _viewer?.visibleObjectIds,
+    _viewer?.visibleCanonicalIds,
+    _viewer?.visibleIds,
+    _viewer?.visibilitySet,
+    state.rvm?.visibleObjectIds,
+    state.rvm?.visibleCanonicalIds,
+  ];
+
+  const selectedSources = [
+    _viewer?.selectedObjectIds,
+    _viewer?.selectedCanonicalIds,
+    _viewer?.selection,
+    _viewer?.selectionSet,
+    state.rvm?.selectedObjectIds,
+    state.rvm?.selectedCanonicalIds,
+    state.rvm?.selection,
+  ];
+
+  const objectCount = _firstFiniteCount(...nodeSources);
+  const visibleCount = _firstFiniteCount(...visibleSources) || objectCount;
+  const selectedCount = _firstFiniteCount(...selectedSources);
+
+  return {
+    objects: objectCount,
+    visible: visibleCount,
+    selected: selectedCount,
+    tags: tags.length,
+    unresolved: unresolvedTags.length,
+  };
+}
+
+function _ensureRvmStatusStrip(container) {
+  if (container.querySelector('#rvm-status-strip')) return;
+
+  const banner = container.querySelector('#rvm-capability-banner');
+  if (!banner) return;
+
+  banner.insertAdjacentHTML(
+    'afterend',
+    `
+      <div id="rvm-status-strip" class="rvm-status-strip" aria-live="polite">
+        <span class="rvm-status-chip" data-rvm-status-chip="objects">Objects: 0</span>
+        <span class="rvm-status-chip" data-rvm-status-chip="visible">Visible: 0</span>
+        <span class="rvm-status-chip" data-rvm-status-chip="selected">Selected: 0</span>
+        <span class="rvm-status-chip" data-rvm-status-chip="tags">Tags: 0</span>
+        <span class="rvm-status-chip" data-rvm-status-chip="unresolved">Unresolved: 0</span>
+      </div>
+    `
+  );
+}
+
+function _setRvmStatusChip(container, key, label, value) {
+  const chip = container.querySelector(`[data-rvm-status-chip="${key}"]`);
+  if (!chip) return;
+
+  const n = Number(value || 0);
+  chip.textContent = `${label}: ${n.toLocaleString()}`;
+  chip.classList.toggle('is-warn', key === 'unresolved' && n > 0);
+  chip.classList.toggle('is-active', n > 0);
+}
+
+function _updateRvmStatusStrip(container) {
+  if (!container?.isConnected) return;
+
+  _ensureRvmStatusStrip(container);
+
+  const stats = _getRvmUiStats();
+
+  _setRvmStatusChip(container, 'objects', 'Objects', stats.objects);
+  _setRvmStatusChip(container, 'visible', 'Visible', stats.visible);
+  _setRvmStatusChip(container, 'selected', 'Selected', stats.selected);
+  _setRvmStatusChip(container, 'tags', 'Tags', stats.tags);
+  _setRvmStatusChip(container, 'unresolved', 'Unresolved', stats.unresolved);
+}
+
+function _insertEmptyStateOnce(host, id, html) {
+  if (!host || document.getElementById(id)) return;
+
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = html.trim();
+
+  const el = wrapper.firstElementChild;
+  if (el) host.prepend(el);
+}
+
+function _ensureRvmEmptyStates(container) {
+  const treeHost =
+    container.querySelector('.rvm-tree') ||
+    container.querySelector('#rvm-tree');
+
+  _insertEmptyStateOnce(
+    treeHost,
+    'rvm-hierarchy-empty',
+    `
+      <div id="rvm-hierarchy-empty" class="rvm-empty-state" data-rvm-empty-state="hierarchy">
+        <div class="rvm-empty-title">No hierarchy loaded</div>
+        <div class="rvm-empty-body">Load an RVM / REV / JSON / GLB dataset to view hierarchy.</div>
+      </div>
+    `
+  );
+
+  const attrHost =
+    container.querySelector('.rvm-attributes-panel') ||
+    container.querySelector('#rvm-attributes-panel');
+
+  _insertEmptyStateOnce(
+    attrHost,
+    'rvm-attributes-empty',
+    `
+      <div id="rvm-attributes-empty" class="rvm-empty-state" data-rvm-empty-state="attributes">
+        <div class="rvm-empty-title">No object selected</div>
+        <div class="rvm-empty-body">Select an object to inspect attributes.</div>
+      </div>
+    `
+  );
+
+  const tagHost =
+    container.querySelector('.rvm-tag-list') ||
+    container.querySelector('#rvm-tag-list');
+
+  _insertEmptyStateOnce(
+    tagHost,
+    'rvm-tags-empty',
+    `
+      <div id="rvm-tags-empty" class="rvm-empty-state" data-rvm-empty-state="tags">
+        <div class="rvm-empty-title">No tags yet</div>
+        <div class="rvm-empty-body">Create a tag or import Navisworks Tags XML.</div>
+      </div>
+    `
+  );
+
+  const searchHost =
+    container.querySelector('#rvm-search-results') ||
+    container.querySelector('.rvm-search-results');
+
+  _insertEmptyStateOnce(
+    searchHost,
+    'rvm-search-empty',
+    `
+      <div id="rvm-search-empty" class="rvm-empty-state is-compact" data-rvm-empty-state="search">
+        <div class="rvm-empty-body">Type to search loaded objects.</div>
+      </div>
+    `
+  );
+}
+
+function _hasRealChildren(host, ignoreSelector) {
+  if (!host) return false;
+
+  return Array.from(host.children || []).some(child => {
+    if (ignoreSelector && child.matches(ignoreSelector)) return false;
+    if (child.hidden) return false;
+    if (child.style?.display === 'none') return false;
+    return true;
+  });
+}
+
+function _refreshRvmEmptyStates(container) {
+  if (!container?.isConnected) return;
+
+  _ensureRvmEmptyStates(container);
+
+  const treeHost =
+    container.querySelector('.rvm-tree') ||
+    container.querySelector('#rvm-tree');
+
+  const attrHost =
+    container.querySelector('.rvm-attributes-panel') ||
+    container.querySelector('#rvm-attributes-panel');
+
+  const tagHost =
+    container.querySelector('.rvm-tag-list') ||
+    container.querySelector('#rvm-tag-list');
+
+  const searchHost =
+    container.querySelector('#rvm-search-results') ||
+    container.querySelector('.rvm-search-results');
+
+  const hierarchyEmpty = container.querySelector('#rvm-hierarchy-empty');
+  const attributesEmpty = container.querySelector('#rvm-attributes-empty');
+  const tagsEmpty = container.querySelector('#rvm-tags-empty');
+  const searchEmpty = container.querySelector('#rvm-search-empty');
+
+  const hasHierarchy = _hasRealChildren(treeHost, '#rvm-hierarchy-empty');
+  const hasAttributes = _hasRealChildren(attrHost, '#rvm-attributes-empty');
+
+  const tags = _getRvmTags();
+  const hasTags = tags.length > 0 || _hasRealChildren(tagHost, '#rvm-tags-empty');
+
+  const query = container.querySelector('#rvm-search-input')?.value?.trim() || '';
+  const hasSearchResults = _hasRealChildren(searchHost, '#rvm-search-empty');
+
+  if (hierarchyEmpty) hierarchyEmpty.hidden = hasHierarchy;
+  if (attributesEmpty) attributesEmpty.hidden = hasAttributes;
+  if (tagsEmpty) tagsEmpty.hidden = hasTags;
+  if (searchEmpty) searchEmpty.hidden = Boolean(query) || hasSearchResults;
+}
+
+function _ensureRvmTagPanelActions(container) {
+  if (container.querySelector('[data-rvm-tag-panel-actions]')) return;
+
+  const tagList =
+    container.querySelector('.rvm-tag-list') ||
+    container.querySelector('#rvm-tag-list');
+
+  if (!tagList) return;
+
+  const header = document.createElement('div');
+  header.className = 'rvm-tag-panel-actions';
+  header.dataset.rvmTagPanelActions = 'true';
+  header.innerHTML = `
+    <div class="rvm-tag-panel-title">Tags</div>
+    <div class="rvm-tag-panel-buttons">
+      <button class="rvm-btn rvm-tag-panel-btn" type="button" data-rvm-tag-action="add" title="Create review tag">
+        + Add
+      </button>
+
+      <label class="rvm-btn rvm-tag-panel-btn rvm-tag-panel-file" title="Import Navisworks / RVM Tags XML">
+        Import XML
+        <input
+          data-rvm-tag-xml-input
+          type="file"
+          accept=".xml,application/xml,text/xml"
+          style="display:none"
+        >
+      </label>
+
+      <button class="rvm-btn rvm-tag-panel-btn" type="button" data-rvm-tag-action="export" title="Export Tags XML">
+        Export XML
+      </button>
+    </div>
+  `;
+
+  tagList.parentElement?.insertBefore(header, tagList);
+}
+
+function _downloadRvmText(filename, content, mime = 'application/xml') {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  URL.revokeObjectURL(url);
+}
+
+function _openRvmTagCreateUi(container) {
+  const existingAddButton = container.querySelector('#rvm-add-tag-btn');
+
+  if (existingAddButton && typeof existingAddButton.click === 'function') {
+    existingAddButton.click();
+    return;
+  }
+
+  try {
+    _openTagModal(container);
+  } catch {
+    notify({
+      type: 'info',
+      message: 'Select an object before creating a tag.',
+    });
+  }
+}
+
+function _bindRvmTagPanelActions(container) {
+  if (container.dataset.rvmTagPanelActionsBound === 'true') return;
+  container.dataset.rvmTagPanelActionsBound = 'true';
+
+  container.addEventListener('click', (event) => {
+    const actionBtn = event.target.closest('[data-rvm-tag-action]');
+    if (!actionBtn || !container.contains(actionBtn)) return;
+
+    const action = actionBtn.dataset.rvmTagAction;
+
+    if (action === 'add') {
+      _openRvmTagCreateUi(container);
+      return;
+    }
+
+    if (action === 'export') {
+      const store = _getRvmTagStore();
+      const xml = store.exportToXml();
+
+      _downloadRvmText('rvm-review-tags.xml', xml, 'application/xml');
+
+      notify({
+        type: 'info',
+        message: 'Exported Tags XML as rvm-review-tags.xml.',
+      });
+
+      _refreshRvmUiStatus(container);
+    }
+  });
+
+  container.addEventListener('change', async (event) => {
+    const input = event.target.closest('[data-rvm-tag-xml-input]');
+    if (!input || !container.contains(input)) return;
+
+    const file = input.files?.[0] || null;
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const store = _getRvmTagStore();
+      const imported = store.importFromXml(text);
+
+      notify({
+        type: 'info',
+        message: `Imported ${imported.length} tag(s) from ${file.name}.`,
+      });
+
+      _refreshRvmUiStatus(container);
+    } catch (err) {
+      notify({
+        type: 'error',
+        message: `Failed to import Tags XML: ${err.message}`,
+      });
+    } finally {
+      input.value = '';
+    }
+  });
+}
+
+function _refreshRvmUiStatus(container) {
+  _updateRvmStatusStrip(container);
+  _refreshRvmEmptyStates(container);
+}
+
+function _ensureRvmUiEnhancements(container) {
+  _ensureRvmStatusStrip(container);
+  _ensureRvmEmptyStates(container);
+  _ensureRvmTagPanelActions(container);
+  _bindRvmTagPanelActions(container);
+  _refreshRvmUiStatus(container);
+}
+
+function _bindRvmUiStatusEvents(container) {
+  const refresh = () => {
+    if (!container.isConnected) return;
+    _refreshRvmUiStatus(container);
+  };
+
+  const delayedRefresh = () => {
+    setTimeout(refresh, 0);
+  };
+
+  const handlers = [
+    [RuntimeEvents.RVM_MODEL_LOADED, delayedRefresh],
+    [RuntimeEvents.MODEL_LOADED, delayedRefresh],
+    [RuntimeEvents.RVM_NODE_SELECTED, delayedRefresh],
+    [RuntimeEvents.COMPONENT_PICKED, delayedRefresh],
+    [RuntimeEvents.RVM_TAG_CREATED, delayedRefresh],
+    [RuntimeEvents.RVM_TAG_DELETED, delayedRefresh],
+    [RuntimeEvents.RVM_SEARCH_CHANGED, delayedRefresh],
+  ];
+
+  handlers.forEach(([eventName, handler]) => on(eventName, handler));
+
+  return () => {
+    handlers.forEach(([eventName, handler]) => off(eventName, handler));
+  };
 }
 
 // â”€â”€ Bundle file loader â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -887,6 +1367,8 @@ export function renderViewer3DRvm(container) {
   container.innerHTML = _buildHTML(caps);
 
   _renderCapabilityBanner(container, caps);
+  _ensureRvmUiEnhancements(container);
+
   _bindBundleLoader(container);
   _bindAttrSearch(container);
   _bindSearch(container);
@@ -897,6 +1379,12 @@ export function renderViewer3DRvm(container) {
   _bindShortcuts(container);
   _bindTabListener();
   _bindTags(container);
+
+  if (_tagEventsOff) {
+    _tagEventsOff();
+    _tagEventsOff = null;
+  }
+  _tagEventsOff = _bindRvmUiStatusEvents(container);
 
   // Initialize the actual RvmViewer3D instance inside the viewport container
   const viewport = container.querySelector('.rvm-viewport');
@@ -1027,10 +1515,6 @@ function _bindTags(container) {
       });
   }
 
-  if (_tagEventsOff) {
-    _tagEventsOff();
-    _tagEventsOff = null;
-  }
   const onCreated = () => {
     const filter = filterSelect ? filterSelect.value : 'all';
     _renderTagList(container, filter);
@@ -1041,7 +1525,10 @@ function _bindTags(container) {
   };
   on(RuntimeEvents.RVM_TAG_CREATED, onCreated);
   on(RuntimeEvents.RVM_TAG_DELETED, onDeleted);
+
+  const prevOff = _tagEventsOff;
   _tagEventsOff = () => {
+    if (prevOff) prevOff();
     off(RuntimeEvents.RVM_TAG_CREATED, onCreated);
     off(RuntimeEvents.RVM_TAG_DELETED, onDeleted);
   };
