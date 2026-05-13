@@ -238,3 +238,163 @@
   padding: 4px 0;
   border-bottom: 1px solid #2d3545;
 }
+
+.rvm-uxml-topo-card {
+  margin-bottom: 12px;
+  border-color: rgba(96, 165, 250, 0.32);
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.rvm-uxml-topo-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: #dbeafe;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.rvm-uxml-topo-mode {
+  border: 1px solid rgba(96, 165, 250, 0.34);
+  border-radius: 999px;
+  padding: 3px 9px;
+  color: #bfdbfe;
+  background: rgba(37, 99, 235, 0.2);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.rvm-uxml-topo-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.rvm-uxml-topo-pill {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #cbd5e1;
+  background: rgba(51, 65, 85, 0.28);
+}
+
+.rvm-uxml-topo-pill.ok {
+  color: #bbf7d0;
+  border-color: rgba(74, 222, 128, 0.28);
+  background: rgba(22, 163, 74, 0.18);
+}
+
+.rvm-uxml-topo-pill.warn {
+  color: #fef3c7;
+  border-color: rgba(250, 204, 21, 0.28);
+  background: rgba(202, 138, 4, 0.18);
+}
+
+.rvm-uxml-topo-pill.muted {
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.2);
+  background: rgba(71, 85, 105, 0.18);
+}
+
+.rvm-uxml-topo-note {
+  margin: 8px 0 12px;
+  padding: 9px 10px;
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  border-radius: 8px;
+  color: #bfdbfe;
+  background: rgba(30, 64, 175, 0.14);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.rvm-uxml-topo-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.rvm-uxml-topo-section {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(2, 6, 23, 0.34);
+}
+
+.rvm-uxml-topo-section h4 {
+  margin: 0 0 8px;
+  color: #dbeafe;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.rvm-uxml-topo-wide {
+  margin-top: 10px;
+}
+
+.rvm-uxml-topo-value-ok {
+  color: #7ddc9a;
+  font-family: monospace;
+}
+
+.rvm-uxml-topo-value-warn {
+  color: #facc15;
+  font-family: monospace;
+}
+
+.rvm-uxml-topo-table-wrap {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 8px;
+}
+
+.rvm-uxml-topo-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.rvm-uxml-topo-table th,
+.rvm-uxml-topo-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  text-align: left;
+  vertical-align: top;
+}
+
+.rvm-uxml-topo-table th {
+  position: sticky;
+  top: 0;
+  color: #cbd5e1;
+  background: #111827;
+  z-index: 1;
+}
+
+.rvm-uxml-topo-empty {
+  padding: 10px;
+  border: 1px dashed rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+  color: #93a4bd;
+  font-size: 12px;
+}
+
+@media (max-width: 1200px) {
+  .rvm-uxml-topo-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .rvm-uxml-topo-grid {
+    grid-template-columns: 1fr;
+  }
+}
