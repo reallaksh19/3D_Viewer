@@ -35,6 +35,7 @@ const REQUIRED_MODULES = Object.freeze([
   'viewer/rvm-pcf-extract/RvmUxmlTopologyBridge.js',
   'viewer/uxml/UxmlTopologyDecisionGate.js',
   'viewer/rvm-pcf-extract/RvmUxmlTopologyDiagnosticsPanel.js',
+  'viewer/rvm-pcf-extract/RvmPcfExportGuard.js',
 ]);
 
 const REQUIRED_TESTS = Object.freeze([
@@ -51,6 +52,7 @@ const REQUIRED_TESTS = Object.freeze([
   'viewer/tests/uxml-topology-decision-gate.test.js',
   'viewer/tests/rvm-pcf-uxml-topology-diagnostics-panel.test.js',
   'viewer/tests/rvm-pcf-uxml-topology-benchmark.test.js',
+  'viewer/tests/rvm-pcf-export-guard.test.js',
 ]);
 
 const REQUIRED_EXPORT_MARKERS = Object.freeze([
@@ -123,6 +125,14 @@ const REQUIRED_EXPORT_MARKERS = Object.freeze([
       'buildRvmUxmlTopologyDiagnosticsViewModel',
       'renderRvmUxmlTopologyDiagnosticsHtml',
       'createRvmUxmlTopologyDiagnosticsViewModel',
+    ],
+  },
+  {
+    file: 'viewer/rvm-pcf-extract/RvmPcfExportGuard.js',
+    markers: [
+      'evaluateRvmPcfExportGuard',
+      'assertRvmPcfExportAllowed',
+      'formatRvmPcfExportGuardMessage',
     ],
   },
 ]);
