@@ -24,20 +24,72 @@ const ACTION_LABELS = {
   MARQUEE_SELECT: 'Box Select',
   MEASURE_TOOL: 'Measure',
   VIEW_MARQUEE_ZOOM: 'Zoom',
-  NAV_PLAN_X: 'PlanX',
-  NAV_ROTATE_Y: 'RotY',
-  NAV_ROTATE_Z: 'RotZ',
+  NAV_PLAN_X: 'Plan X',
+  NAV_ROTATE_Y: 'Rotate Y',
+  NAV_ROTATE_Z: 'Rotate Z',
   VIEW_FIT_ALL: 'Reset',
   VIEW_FIT_SELECTION: 'FitSel',
   VIEW_TOGGLE_PROJECTION: 'Proj',
-  SNAP_ISO_NW: 'NW',
-  SNAP_ISO_NE: 'NE',
-  SNAP_ISO_SW: 'SW',
-  SNAP_ISO_SE: 'SE',
+  SNAP_ISO_NW: 'Iso NW',
+  SNAP_ISO_NE: 'Iso NE',
+  SNAP_ISO_SW: 'Iso SW',
+  SNAP_ISO_SE: 'Iso SE',
   SECTION_BOX: 'SecBox',
   SECTION_PLANE_UP: 'SecUp',
   SECTION_DISABLE: 'SecOff',
 };
+
+const ICON_ONLY_ACTIONS = new Set([
+  'NAV_PLAN_X',
+  'NAV_ROTATE_Y',
+  'NAV_ROTATE_Z',
+  'SNAP_ISO_NW',
+  'SNAP_ISO_NE',
+  'SNAP_ISO_SW',
+  'SNAP_ISO_SE',
+]);
+
+const PERSISTENT_BLUE_ACTIONS = new Set([
+  'NAV_ORBIT',
+  'NAV_PAN',
+  'NAV_SELECT',
+  'MARQUEE_SELECT',
+  'MEASURE_TOOL',
+  'VIEW_MARQUEE_ZOOM',
+  'NAV_PLAN_X',
+  'NAV_ROTATE_Y',
+  'NAV_ROTATE_Z',
+  'SNAP_ISO_NW',
+  'SNAP_ISO_NE',
+  'SNAP_ISO_SW',
+  'SNAP_ISO_SE',
+  'VIEW_TOGGLE_PROJECTION',
+  'SECTION_BOX',
+  'SECTION_PLANE_UP',
+  'SECTION_DISABLE',
+]);
+
+function _actionTooltip(id) {
+  return ACTION_LABELS[id] || id;
+}
+
+function _renderToolButton(id, icon) {
+  const label = ACTION_LABELS[id] || id;
+  const iconOnly = ICON_ONLY_ACTIONS.has(id);
+
+  return `
+    <button
+      class="rvm-tool-btn ${id === 'NAV_ORBIT' ? 'is-active' : ''} ${iconOnly ? 'is-icon-only' : ''}"
+      data-action="${id}"
+      title="${escapeHtml(label)}"
+      aria-label="${escapeHtml(label)}"
+      type="button"
+    >
+      ${icon}
+      ${iconOnly ? '' : `<span>${escapeHtml(label)}</span>`}
+    </button>
+  `;
+}
 
 const ACTION_ICONS = {
   NAV_SELECT: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/></svg>',
@@ -52,13 +104,84 @@ const ACTION_ICONS = {
   SECTION_DISABLE: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>',
   MEASURE_TOOL: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="8" rx="2" ry="2"/><path d="M6 8v4"/><path d="M10 8v4"/><path d="M14 8v4"/><path d="M18 8v4"/></svg>',
   VIEW_MARQUEE_ZOOM: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="12" height="12" rx="1" stroke-dasharray="3 2"/><circle cx="17" cy="17" r="3"/><path d="m21 21-2.15-2.15"/></svg>',
-  NAV_PLAN_X: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>',
-  NAV_ROTATE_Y: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>',
-  NAV_ROTATE_Z: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>',
-  SNAP_ISO_NW: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="4"/><path d="M7 7h4"/><path d="M7 11v-4"/></svg>',
-  SNAP_ISO_NE: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="4"/><path d="M17 7h-4"/><path d="M17 11v-4"/></svg>',
-  SNAP_ISO_SW: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="4"/><path d="M7 17h4"/><path d="M7 13v4"/></svg>',
-  SNAP_ISO_SE: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="4"/><path d="M17 17h-4"/><path d="M17 13v4"/></svg>',
+  NAV_PLAN_X: `
+    <svg class="rvm-svg-view rvm-svg-plan-x" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path class="rvm-svg-soft" d="M5 15.5 12 19l7-3.5-7-3.5-7 3.5Z"/>
+      <path d="M12 12V4"/>
+      <path d="m8.8 7.2 3.2-3.2 3.2 3.2"/>
+      <path d="M5 15.5V9l7-3.5L19 9v6.5"/>
+      <path d="M5 9 12 12.5 19 9"/>
+      <path d="M12 12.5v6.5"/>
+    </svg>
+  `,
+
+  NAV_ROTATE_Y: `
+    <svg class="rvm-svg-view rvm-svg-rotate-y" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path class="rvm-svg-soft" d="M8 7.5 12 5l4 2.5v5L12 15l-4-2.5v-5Z"/>
+      <path d="M12 3v18"/>
+      <path d="M5.5 8.2C3.9 9.1 3 10.4 3 12c0 3 4 5.4 9 5.4s9-2.4 9-5.4c0-1.6-.9-2.9-2.5-3.8"/>
+      <path d="m17.7 6.1 1.4 2.6-2.9.5"/>
+    </svg>
+  `,
+
+  NAV_ROTATE_Z: `
+    <svg class="rvm-svg-view rvm-svg-rotate-z" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path class="rvm-svg-soft" d="M7 14.5 12 17l5-2.5L12 12l-5 2.5Z"/>
+      <path d="M12 12V4"/>
+      <path d="m9.3 6.7 2.7-2.7 2.7 2.7"/>
+      <path d="M4.5 12a7.5 7.5 0 0 1 12.7-5.4"/>
+      <path d="M19.5 12a7.5 7.5 0 0 1-12.7 5.4"/>
+      <path d="m16.2 4.5 1.1 3-3.1.2"/>
+    </svg>
+  `,
+
+  SNAP_ISO_NW: `
+    <svg class="rvm-svg-view rvm-svg-iso" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path class="rvm-svg-soft" d="M12 3.5 19 7.5v8L12 20.5 5 16.5v-8L12 3.5Z"/>
+      <path d="M12 3.5v8"/>
+      <path d="M5 8.5 12 12l7-4.5"/>
+      <path d="M12 12v8.5"/>
+      <path d="M8 6.2 4.5 4.5 6.2 8"/>
+      <path d="M4.5 4.5 9 9"/>
+      <circle cx="7.2" cy="7.2" r="1.4"/>
+    </svg>
+  `,
+
+  SNAP_ISO_NE: `
+    <svg class="rvm-svg-view rvm-svg-iso" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path class="rvm-svg-soft" d="M12 3.5 19 7.5v8L12 20.5 5 16.5v-8L12 3.5Z"/>
+      <path d="M12 3.5v8"/>
+      <path d="M5 8.5 12 12l7-4.5"/>
+      <path d="M12 12v8.5"/>
+      <path d="M16 6.2 19.5 4.5 17.8 8"/>
+      <path d="M19.5 4.5 15 9"/>
+      <circle cx="16.8" cy="7.2" r="1.4"/>
+    </svg>
+  `,
+
+  SNAP_ISO_SW: `
+    <svg class="rvm-svg-view rvm-svg-iso" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path class="rvm-svg-soft" d="M12 3.5 19 7.5v8L12 20.5 5 16.5v-8L12 3.5Z"/>
+      <path d="M12 3.5v8"/>
+      <path d="M5 8.5 12 12l7-4.5"/>
+      <path d="M12 12v8.5"/>
+      <path d="M8 17.8 4.5 19.5 6.2 16"/>
+      <path d="M4.5 19.5 9 15"/>
+      <circle cx="7.2" cy="16.8" r="1.4"/>
+    </svg>
+  `,
+
+  SNAP_ISO_SE: `
+    <svg class="rvm-svg-view rvm-svg-iso" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path class="rvm-svg-soft" d="M12 3.5 19 7.5v8L12 20.5 5 16.5v-8L12 3.5Z"/>
+      <path d="M12 3.5v8"/>
+      <path d="M5 8.5 12 12l7-4.5"/>
+      <path d="M12 12v8.5"/>
+      <path d="M16 17.8 19.5 19.5 17.8 16"/>
+      <path d="M19.5 19.5 15 15"/>
+      <circle cx="16.8" cy="16.8" r="1.4"/>
+    </svg>
+  `,
 };
 
 const UPLOAD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><rect x="4" y="16" width="16" height="4" rx="1.5"/></svg>';
@@ -76,6 +199,31 @@ function _setActiveToolButton(container, action) {
   buttons.forEach((btn) => {
     btn.classList.toggle('is-active', btn.dataset.action === action);
   });
+}
+
+function _applyToolbarClickedState(container, action, btn) {
+  if (!action || !btn) return;
+
+  if (PERSISTENT_BLUE_ACTIONS.has(action)) {
+    _setActiveToolButton(container, action);
+    return;
+  }
+
+  _pulseButton(btn);
+}
+
+function _bindToolbarClickedState(container) {
+  container.addEventListener(
+    'click',
+    (event) => {
+      const btn = event.target.closest('.rvm-tool-btn[data-action], .rvm-btn[data-action]');
+      if (!btn || !container.contains(btn)) return;
+
+      const action = btn.dataset.action || '';
+      _applyToolbarClickedState(container, action, btn);
+    },
+    true
+  );
 }
 
 function _pulseButton(btn) {
@@ -97,7 +245,7 @@ function _createViewerStub(container) {
 
 function _disposeRvmViewer() {
   if (_shortcutHandler) {
-    window.removeEventListener('keydown', _shortcutHandler);
+    window.removeEventListener('keydown', _shortcutHandler, true);
     _shortcutHandler = null;
   }
   if (_viewer) {
@@ -265,25 +413,82 @@ function _bindSearch(container) {
 // â”€â”€ Keyboard shortcuts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
+function _closeTransientRvmUi(container) {
+  try {
+    _closeTagModal(container);
+  } catch {
+    // Keep ESC safe even if modal code changes.
+  }
+
+  const active = document.activeElement;
+  if (active && container.contains(active)) {
+    const tag = active.tagName?.toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || active.isContentEditable) {
+      active.blur();
+    }
+  }
+
+  const openEls = container.querySelectorAll(
+    '.is-open, .is-menu-open, .rvm-context-menu, .rvm-import-menu, [data-rvm-popover]'
+  );
+
+  openEls.forEach((el) => {
+    el.classList.remove('is-open');
+    el.classList.remove('is-menu-open');
+
+    if (el.tagName?.toLowerCase() === 'details') {
+      el.open = false;
+    }
+
+    if (el.classList.contains('rvm-context-menu') || el.classList.contains('rvm-import-menu')) {
+      el.style.display = 'none';
+    }
+  });
+}
+
+function _resetRvmInteractionToOrbit(container) {
+  _viewer?.cancelMarquee?.();
+  _viewer?.cancelMeasure?.();
+  _viewer?.clearMeasurePreview?.();
+  _viewer?.clearSelection?.();
+  _viewer?.setNavMode?.('orbit');
+
+  _setActiveToolButton(container, 'NAV_ORBIT');
+
+  emit(RuntimeEvents.RVM_TOOL_CHANGED, {
+    tool: 'orbit',
+    source: 'rvm-escape',
+  });
+}
+
 function _bindShortcuts(container) {
   if (_shortcutHandler) {
-    window.removeEventListener('keydown', _shortcutHandler);
+    window.removeEventListener('keydown', _shortcutHandler, true);
     _shortcutHandler = null;
   }
+
   _shortcutHandler = (e) => {
     if (!container.isConnected) return;
+
     if (e.key === 'Escape') {
-        _closeTagModal(container);
-        _viewer?.clearSelection?.();
-        _viewer?.setNavMode?.('orbit');
-        _setActiveToolButton(container, 'NAV_ORBIT');
-        return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      _closeTransientRvmUi(container);
+      _resetRvmInteractionToOrbit(container);
+
+      return;
     }
+
     const tag = document.activeElement?.tagName?.toLowerCase();
-    if (tag === 'input' || tag === 'textarea') return;
-    if (e.key === 'f' || e.key === 'F') { _viewer?.fitAll?.(); }
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
+    if (e.key === 'f' || e.key === 'F') {
+      _viewer?.fitAll?.();
+    }
   };
-  window.addEventListener('keydown', _shortcutHandler);
+
+  window.addEventListener('keydown', _shortcutHandler, true);
 }
 
 
@@ -306,11 +511,7 @@ function _buildHTML(caps) {
       </button>
     </div>
     <div class="rvm-ribbon-section rvm-ribbon-nav">
-      ${Object.entries(ACTION_ICONS).map(([id, icon]) => `
-        <button class="rvm-tool-btn ${id === 'NAV_ORBIT' ? 'is-active' : ''}" data-action="${id}" title="${ACTION_LABELS[id] || id}">
-          ${icon}<span>${ACTION_LABELS[id] || id}</span>
-        </button>
-      `).join('')}
+      ${Object.entries(ACTION_ICONS).map(([id, icon]) => _renderToolButton(id, icon)).join('')}
     </div>
     <div class="rvm-ribbon-section rvm-ribbon-search">
       <input type="search" id="rvm-search-input" placeholder="Search objects..." autocomplete="off">
@@ -376,10 +577,10 @@ function _buildHTML(caps) {
       </div>
       <div style="display:flex;gap:5px;padding:5px;">
         <label class="rvm-btn" style="flex:1;text-align:center;cursor:pointer;" title="Import Tags from XML">
-          Import
+          Import Tags XML
           <input type="file" id="rvm-import-tags-input" accept=".xml" style="display:none">
         </label>
-        <button class="rvm-btn" id="rvm-export-tags-btn" style="flex:1;" disabled title="Export Tags to XML">Export</button>
+        <button class="rvm-btn" id="rvm-export-tags-btn" style="flex:1;" disabled title="Export Tags to XML">Export Tags XML</button>
       </div>
       <div id="rvm-tag-list" class="rvm-tag-list"></div>
       <button class="rvm-btn" id="rvm-add-tag-btn" disabled>+ Add Tag</button>
@@ -689,6 +890,7 @@ export function renderViewer3DRvm(container) {
   _bindBundleLoader(container);
   _bindAttrSearch(container);
   _bindSearch(container);
+  _bindToolbarClickedState(container);
   _bindToolbarActions(container);
   _bindResize(container);
   _bindToolStateBridge(container);
@@ -851,7 +1053,7 @@ function _bindTags(container) {
     exportBtn.addEventListener('click', () => {
       if (!_viewer || !_viewer.tagStore) return;
       const xmlString = _viewer.tagStore.exportToXml();
-      downloadText(xmlString, 'tags.xml', 'application/xml');
+      downloadText(xmlString, 'rvm-review-tags.xml', 'application/xml');
     });
   }
 
