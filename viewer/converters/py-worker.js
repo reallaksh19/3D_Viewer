@@ -151,7 +151,7 @@ function _contractSourceKind(converterId) {
   return 'auto';
 }
 
-async function _runInputXml2019CiiHardener(pyodide, converterId, outputPath, stdout, stderr) {
+async function _runInputXml2019CiiHardener(pyodide, converterId, sourcePath, outputPath, stdout, stderr) {
   if (converterId !== 'inputxml_to_cii2019') return null;
 
   const argv = [
@@ -160,6 +160,8 @@ async function _runInputXml2019CiiHardener(pyodide, converterId, outputPath, std
     outputPath,
     '--output',
     outputPath,
+    '--input-xml',
+    sourcePath,
     '--strict',
   ];
 
@@ -222,9 +224,13 @@ async function _runJob(message) {
 
   await _runPythonScript(pyodide, invocation.scriptPath, invocation.argv, stdout, stderr);
 
+  const sourcePathForHardener =
+    invocation.argv[invocation.argv.indexOf('--input') + 1] || primaryPath;
+
   const hardenerResult = await _runInputXml2019CiiHardener(
     pyodide,
     converterId,
+    sourcePathForHardener,
     invocation.outputPath,
     stdout,
     stderr,
