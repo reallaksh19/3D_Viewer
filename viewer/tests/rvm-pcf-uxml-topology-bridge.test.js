@@ -187,4 +187,27 @@ describe('RVM PCF UXML topology bridge Agent 10', () => {
     expect(diagnostic.pipelineRef).toBe('/P1');
     expect(diagnostic._source).toBe('uxml-topology');
   });
+
+  it('runs topology decision gate before allowing legacy PCF route to continue', () => {
+    const rows = [
+      pipeRow(10, 'PIPE-1', '0,0,0', '1000,0,0'),
+      valveRow(20, 'VALVE-1', '1000,0,0', '1200,0,0'),
+      pipeRow(30, 'PIPE-2', '1200,0,0', '2000,0,0'),
+    ];
+
+    const result = runUxmlTopologyForRvmRows(rows, {
+      allowPartialExport: false,
+    });
+
+    expect(result.topologyDecision).toBeTruthy();
+    expect(result.topologyDecision.schema).toBe('uxml-topology-decision-gate/v1');
+
+    expect(result.readinessGate.topologyDecision).toBeTruthy();
+    expect(result.readinessGate.summary.outputBridgeReady).toBe(true);
+    expect(result.readinessGate.summary.acceptedConnectionCount).toBeGreaterThan(0);
+
+    expect(result.readinessGate.summary.legacyRoutingContinues).toBe(true);
+    expect(result.readinessGate.summary.mastersDeferredToLegacyRoute).toBe(true);
+    expect(result.readinessGate.summary.pcfEmitterDeferredToLegacyRoute).toBe(true);
+  });
 });

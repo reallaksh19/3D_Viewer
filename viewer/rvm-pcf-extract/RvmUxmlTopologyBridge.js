@@ -22,6 +22,7 @@ import { buildUxmlFaceModel } from '../uxml/UxmlFaceModelBuilder.js';
 import { buildUxmlUniversalTopoGraph } from '../uxml/UxmlUniversalTopoGraphBuilder.js';
 import { buildUxmlRayTopoGraph } from '../uxml/UxmlRayTopoGraphBuilder.js';
 import { compareUxmlTopoGraphs } from '../uxml/UxmlTopoGraphComparator.js';
+import { decideUxmlTopologyAcceptance } from '../uxml/UxmlTopologyDecisionGate.js';
 
 const BRIDGE_SCHEMA = 'rvm-pcf-uxml-topology-bridge/v1';
 
@@ -78,6 +79,7 @@ function flattenDiagnostics({
   universalGraph,
   rayGraph,
   comparison,
+  topologyDecision,
   rowIdentityByComponentId,
 }) {
   const diagnostics = [
@@ -87,6 +89,7 @@ function flattenDiagnostics({
     ...(universalGraph?.diagnostics || []),
     ...(rayGraph?.diagnostics || []),
     ...(comparison?.diagnostics || []),
+    ...(topologyDecision?.diagnostics || []),
   ];
 
   return diagnostics.map(d => enrichDiagnostic(d, rowIdentityByComponentId));
@@ -99,6 +102,7 @@ function makeLegacyReadinessReport(result, options) {
   const universalSummary = result.universalGraph?.summary || {};
   const raySummary = result.rayGraph?.summary || {};
   const comparisonSummary = result.comparison?.summary || {};
+  const decisionSummary = result.topologyDecision?.summary || {};
 
   const unresolved =
     comparisonSummary.unresolvedUniversalDisconnectedCount ??
@@ -126,16 +130,14 @@ function makeLegacyReadinessReport(result, options) {
 
   const blockedFixPlanCount = manualReviewCount + blockedRows;
 
-  const pass =
-    options.allowPartialExport === true
-      ? diagnostics.every(d => clean(d.severity).toUpperCase() !== 'FATAL')
-      : blockedRows === 0 && blockedFixPlanCount === 0 && (severity.ERROR || 0) === 0;
+  const pass = result.topologyDecision?.exportAllowed === true;
 
   return {
     schema: 'rvm-pcf-readiness-gate/uxml-bridge-compat/v1',
     topologyMode: RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY,
     pass,
     ok: pass,
+    topologyDecision: result.topologyDecision,
     graph: result.universalGraph,
     uxml: result.uxml,
     faceModel: result.faceModel,
@@ -159,19 +161,28 @@ function makeLegacyReadinessReport(result, options) {
       blockedRows,
       safeFixPlanCount,
       blockedFixPlanCount,
+      acceptedConnectionCount: decisionSummary.acceptedConnectionCount || 0,
+      exportAllowed: result.topologyDecision?.exportAllowed === true,
+      outputBridgeReady: result.topologyDecision?.outputBridgeReady === true,
       legacyRoutingContinues: true,
       mastersDeferredToLegacyRoute: true,
       pcfEmitterDeferredToLegacyRoute: true,
     },
     report: {
-      allowPcfExport: pass || options.allowPartialExport === true,
-      exportBlockReason: pass ? '' : 'UXML topology has unresolved disconnected/manual review items.',
+      allowPcfExport: result.topologyDecision?.exportAllowed === true,
+      exportBlockReason: result.topologyDecision?.exportAllowed
+        ? ''
+        : 'UXML topology decision gate did not allow export.',
       summary: {
         topologyMode: RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY,
         rowCount: result.rows?.length || 0,
         blockedRows,
         safeFixPlanCount,
         blockedFixPlanCount,
+        acceptedConnectionCount: decisionSummary.acceptedConnectionCount || 0,
+        manualReviewCount: decisionSummary.manualReviewCount || 0,
+        unresolvedCount: decisionSummary.unresolvedCount || 0,
+        rejectedCount: decisionSummary.rejectedCount || 0,
       },
     },
   };
@@ -301,6 +312,16 @@ export function runUxmlTopologyForRvmRows(rows = [], options = {}) {
     allowBlockedGraphs: true,
   });
 
+  const topologyDecision = decideUxmlTopologyAcceptance(uxml, {
+    comparison,
+    allowPartialExport: normalizedOptions.allowPartialExport,
+    acceptUniversalOnly: true,
+    allowSafeRayPromotions: true,
+    allowFaceProximityPromotions: false,
+    maxPromotionDistanceAlongRayMm: normalizedOptions.maxRayLengthMm,
+    maxPromotionPerpendicularMissMm: normalizedOptions.tubeToleranceMm,
+  });
+
   const diagnostics = flattenDiagnostics({
     adapter,
     validation,
@@ -308,6 +329,7 @@ export function runUxmlTopologyForRvmRows(rows = [], options = {}) {
     universalGraph,
     rayGraph,
     comparison,
+    topologyDecision,
     rowIdentityByComponentId: adapter.rowIdentityByComponentId,
   });
 
@@ -324,6 +346,7 @@ export function runUxmlTopologyForRvmRows(rows = [], options = {}) {
     universalGraph,
     rayGraph,
     comparison,
+    topologyDecision,
     diagnostics,
     legacyRows: [],
     readinessGate: null,

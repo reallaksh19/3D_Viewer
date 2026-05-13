@@ -27,6 +27,7 @@ const REQUIRED_MODULES = Object.freeze([
   'viewer/rvm-pcf-extract/RvmPcfTopologyModes.js',
   'viewer/rvm-pcf-extract/RvmRowsToUxmlAdapter.js',
   'viewer/rvm-pcf-extract/RvmUxmlTopologyBridge.js',
+  'viewer/uxml/UxmlTopologyDecisionGate.js',
 ]);
 
 const REQUIRED_TESTS = Object.freeze([
@@ -40,6 +41,7 @@ const REQUIRED_TESTS = Object.freeze([
     'viewer/tests/uxml-topo-graph-comparator.test.js',
   'viewer/tests/universal-xml-converter-tab.test.js',
   'viewer/tests/rvm-pcf-uxml-topology-bridge.test.js',
+  'viewer/tests/uxml-topology-decision-gate.test.js',
 ]);
 
 const REQUIRED_EXPORT_MARKERS = Object.freeze([
@@ -96,6 +98,14 @@ const REQUIRED_EXPORT_MARKERS = Object.freeze([
       'runUxmlTopologyForRvmRows',
       'pushUxmlTopologyBackToLegacyRows',
       'buildRvmPcfUxmlTopology',
+    ],
+  },
+  {
+    file: 'viewer/uxml/UxmlTopologyDecisionGate.js',
+    markers: [
+      'decideUxmlTopologyAcceptance',
+      'runUxmlTopologyDecisionGate',
+      'buildUxmlAcceptedTopology',
     ],
   },
 ]);
