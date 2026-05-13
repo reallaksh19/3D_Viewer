@@ -13,6 +13,11 @@ import {
 import {
   renderRvmUxmlTopologyDiagnosticsHtml,
 } from '../rvm-pcf-extract/RvmUxmlTopologyDiagnosticsPanel.js';
+import {
+  assertRvmPcfExportAllowed,
+  evaluateRvmPcfExportGuard,
+  formatRvmPcfExportGuardMessage,
+} from '../rvm-pcf-extract/RvmPcfExportGuard.js';
 
 let _offExtractRequested = null;
 let _offStateChanged = null;
@@ -348,6 +353,90 @@ function _masterResolutionSummaryHtml() {
       </div>
     </div>
   `;
+}
+
+function _pcfExportGuardSummaryHtml() {
+  const guard = state.rvmPcfExtract?.exportGuard || _getCurrentPcfExportGuard();
+
+  if (!guard) return '';
+
+  const pill = guard.allowed
+    ? '<span style="color:#7ddc9a;font-weight:800;">ALLOWED</span>'
+    : '<span style="color:#facc15;font-weight:800;">BLOCKED</span>';
+
+  return `
+    <div class="rvm-pcf-extract-status-card" style="margin-bottom:12px;">
+      <div class="rvm-pcf-status-row">
+        <span class="rvm-pcf-label">PCF export guard</span>
+        <span>${pill}</span>
+      </div>
+      <div class="rvm-pcf-status-row">
+        <span class="rvm-pcf-label">Topology mode</span>
+        <span>${guard.topologyModeLabel}</span>
+      </div>
+      <div class="rvm-pcf-status-row">
+        <span class="rvm-pcf-label">Output bridge ready</span>
+        <span>${guard.outputBridgeReady ? 'YES' : 'NO'}</span>
+      </div>
+      <div class="rvm-pcf-status-row">
+        <span class="rvm-pcf-label">Decision export allowed</span>
+        <span>${guard.exportAllowedByDecision ? 'YES' : 'NO'}</span>
+      </div>
+      <div class="rvm-pcf-status-row">
+        <span class="rvm-pcf-label">Readiness export allowed</span>
+        <span>${guard.exportAllowedByReadiness ? 'YES' : 'NO'}</span>
+      </div>
+      <div class="rvm-pcf-status-row">
+        <span class="rvm-pcf-label">Accepted topology</span>
+        <span>${guard.acceptedConnectionCount}</span>
+      </div>
+      <div class="rvm-pcf-status-row">
+        <span class="rvm-pcf-label">Manual / rejected / unresolved</span>
+        <span>${guard.manualReviewCount} / ${guard.rejectedCount} / ${guard.unresolvedCount}</span>
+      </div>
+      ${guard.reason ? \`<div class="rvm-pcf-extract-status" style="margin-top:8px;">\${guard.reason}</div>\` : ''}
+    </div>
+  `;
+}
+
+function _getCurrentPcfExportGuard() {
+  const extractState = state.rvmPcfExtract || {};
+  const topologyMode = extractState.topologyMode || DEFAULT_RVM_PCF_TOPOLOGY_MODE;
+
+  return evaluateRvmPcfExportGuard({
+    topologyMode,
+    rows: extractState.rows || [],
+    readinessGate: extractState.readinessGate || null,
+    allowPartialExport: extractState.allowPartialExport === true,
+  });
+}
+
+function _assertPcfExportAllowedOrShow(container) {
+  const extractState = state.rvmPcfExtract || {};
+  const topologyMode = extractState.topologyMode || DEFAULT_RVM_PCF_TOPOLOGY_MODE;
+
+  try {
+    const guard = assertRvmPcfExportAllowed({
+      topologyMode,
+      rows: extractState.rows || [],
+      readinessGate: extractState.readinessGate || null,
+      allowPartialExport: extractState.allowPartialExport === true,
+    });
+
+    _setStatus(container, formatRvmPcfExportGuardMessage(guard), false);
+    return guard;
+  } catch (err) {
+    const guard = err.guard || _getCurrentPcfExportGuard();
+
+    updateRvmPcfExtractState({
+      exportGuard: guard,
+    }, 'pcf-export-guard-blocked');
+
+    _setStatus(container, formatRvmPcfExportGuardMessage(guard), true);
+    _showPanel(container, 'diagnostics');
+
+    return null;
+  }
 }
 
 function _pcfReadinessAuditHierarchyHtml() {
@@ -1163,6 +1252,9 @@ async function _runDownloadCsv(container) {
 }
 
 async function _runDownloadPcf(container) {
+  const exportGuard = _assertPcfExportAllowedOrShow(container);
+  if (!exportGuard) return;
+
   const byRef = state.rvmPcfExtract?.pcfTextByPipelineRef || {};
   if (!Object.keys(byRef).length) {
     const ok = await _runGeneratePcf(container);
