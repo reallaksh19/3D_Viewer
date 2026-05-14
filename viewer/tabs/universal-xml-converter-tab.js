@@ -19,6 +19,15 @@ import { buildUxmlFaceModel } from '../uxml/UxmlFaceModelBuilder.js';
 import { buildUxmlUniversalTopoGraph } from '../uxml/UxmlUniversalTopoGraphBuilder.js';
 import { buildUxmlRayTopoGraph } from '../uxml/UxmlRayTopoGraphBuilder.js';
 import { compareUxmlTopoGraphs } from '../uxml/UxmlTopoGraphComparator.js';
+import {
+  decideUxmlTopologyAcceptance,
+} from '../uxml/UxmlTopologyDecisionGate.js';
+
+import {
+  UXML_ROUTE_TARGETS,
+  createUxmlRouteHandoffPayload,
+  summarizeUxmlRouteHandoff,
+} from '../uxml/UxmlRouteHandoffPolicy.js';
 
 const SOURCE_TYPES = [
   { value: 'AUTO', label: 'Auto detect' },
@@ -74,14 +83,24 @@ const PIPELINE_STAGES = [
     description: 'Compare UniversalTopoGraph and RayTopoGraph evidence.',
   },
   {
+    id: 'decision-gate',
+    title: '9. Decision Gate',
+    description: 'Convert comparator evidence into accepted/manual/rejected topology decisions.',
+  },
+  {
+    id: 'route-handoff',
+    title: '10. Route Handoff Policy',
+    description: 'Decide what downstream route may receive accepted topology evidence.',
+  },
+  {
     id: 'outputs',
-    title: '9. Route Handoff',
-    description: 'Hand off accepted UXML topology to a target route such as Extract PCF, GLB, 2D, InputXML or CII.',
+    title: '11. Route Targets',
+    description: 'Target routes such as Extract PCF, GLB, 2D, InputXML or CII.',
     deferred: false,
   },
   {
     id: 'masters',
-    title: '10. Masters by Target Route',
+    title: '12. Masters by Target Route',
     description: 'Masters are handled by the downstream route. JSON/RVM → PCF uses the existing legacy master route.',
     deferred: false,
   },
@@ -164,6 +183,8 @@ function createInitialState() {
       universalGraph: null,
       rayGraph: null,
       comparison: null,
+      topologyDecision: null,
+      routeHandoff: null,
     },
     reports: {
       source: null,
@@ -463,6 +484,59 @@ export function runPipelineAction(state, action) {
     return comparison;
   }
 
+  if (action === 'run-decision-gate') {
+    if (!state.pipeline.comparison) runPipelineAction(state, 'compare-topology');
+
+    const topologyDecision = decideUxmlTopologyAcceptance(state.pipeline.uxml, {
+      comparison: state.pipeline.comparison,
+      allowPartialExport: true,
+      acceptUniversalOnly: true,
+      allowSafeRayPromotions: true,
+      allowFaceProximityPromotions: false,
+      maxPromotionDistanceAlongRayMm: 500,
+      maxPromotionPerpendicularMissMm: 12,
+    });
+
+    state.pipeline.topologyDecision = topologyDecision;
+    state.reports['decision-gate'] = stageReport('decision-gate', topologyDecision);
+
+    state.status = topologyDecision.outputBridgeReady
+      ? {
+          kind: topologyDecision.exportAllowed ? 'ok' : 'warn',
+          message: `Decision gate complete. Accepted=${safeCount(topologyDecision.summary?.acceptedConnectionCount)}, Manual=${safeCount(topologyDecision.summary?.manualReviewCount)}, Unresolved=${safeCount(topologyDecision.summary?.unresolvedCount)}.`,
+        }
+      : {
+          kind: 'warn',
+          message: 'Decision gate complete, but output bridge is not ready.',
+        };
+
+    return topologyDecision;
+  }
+
+  if (action === 'run-route-handoff') {
+    if (!state.pipeline.topologyDecision) runPipelineAction(state, 'run-decision-gate');
+
+    const routeHandoff = createUxmlRouteHandoffPayload({
+      targetRoute: UXML_ROUTE_TARGETS.DIAGNOSTICS_ONLY,
+      uxml: state.pipeline.uxml,
+      topologyDecision: state.pipeline.topologyDecision,
+      acceptedTopologyHandoff: null,
+      diagnostics: state.pipeline.uxml?.diagnostics || [],
+      lossContract: state.pipeline.uxml?.lossContract || [],
+      allowPartialExport: true,
+    });
+
+    state.pipeline.routeHandoff = routeHandoff;
+    state.reports['route-handoff'] = stageReport('route-handoff', routeHandoff.policy);
+
+    state.status = {
+      kind: routeHandoff.allowed ? 'ok' : 'warn',
+      message: summarizeUxmlRouteHandoff(routeHandoff.policy),
+    };
+
+    return routeHandoff;
+  }
+
   if (action === 'run-full-pipeline') {
     runPipelineAction(state, 'detect-profile');
     runPipelineAction(state, 'convert-uxml');
@@ -470,7 +544,9 @@ export function runPipelineAction(state, action) {
     runPipelineAction(state, 'build-face-model');
     runPipelineAction(state, 'build-universal-topology');
     runPipelineAction(state, 'build-ray-topology');
-    return runPipelineAction(state, 'compare-topology');
+    runPipelineAction(state, 'compare-topology');
+    runPipelineAction(state, 'run-decision-gate');
+    return runPipelineAction(state, 'run-route-handoff');
   }
 
   throw new Error(`Unknown UXML action: ${action}`);
@@ -682,6 +758,81 @@ Route handoff
     `;
   }
 
+  if (panel === 'decision-gate') {
+    const decision = state.pipeline.topologyDecision;
+
+    return `
+      <section class="uxml-panel-section">
+        <h3>Decision Gate</h3>
+        <p>
+          Converts UniversalTopoGraph/RayTopoGraph comparison evidence into accepted,
+          manual-review, rejected and unresolved topology decisions.
+        </p>
+
+        ${decision ? `
+          <div class="uxml-kv-grid">
+            <div><b>Schema</b><span>${esc(decision.schema)}</span></div>
+            <div><b>Output bridge ready</b><span>${decision.outputBridgeReady ? 'YES' : 'NO'}</span></div>
+            <div><b>Export allowed</b><span>${decision.exportAllowed ? 'YES' : 'NO'}</span></div>
+            <div><b>Accepted</b><span>${safeCount(decision.summary?.acceptedConnectionCount)}</span></div>
+            <div><b>Manual review</b><span>${safeCount(decision.summary?.manualReviewCount)}</span></div>
+            <div><b>Rejected</b><span>${safeCount(decision.summary?.rejectedCount)}</span></div>
+            <div><b>Unresolved</b><span>${safeCount(decision.summary?.unresolvedCount)}</span></div>
+          </div>
+
+          <div class="uxml-placeholder" style="margin-top:12px;">
+            UXML does not move coordinates or apply topology fixes here.
+            This stage only prepares route-handoff decisions.
+          </div>
+        ` : `
+          <div class="uxml-placeholder">Run comparator, then run decision gate.</div>
+        `}
+      </section>
+    `;
+  }
+
+  if (panel === 'route-handoff') {
+    const handoff = state.pipeline.routeHandoff;
+    const policy = handoff?.policy || null;
+
+    return `
+      <section class="uxml-panel-section">
+        <h3>Route Handoff Policy</h3>
+        <p>
+          Decides which downstream route may consume accepted topology evidence.
+          Exporters and masters remain owned by the target route.
+        </p>
+
+        ${policy ? `
+          <div class="uxml-kv-grid">
+            <div><b>Target route</b><span>${esc(policy.targetRouteLabel)}</span></div>
+            <div><b>Allowed</b><span>${policy.allowed ? 'YES' : 'NO'}</span></div>
+            <div><b>Master owner</b><span>${esc(policy.masterOwner)}</span></div>
+            <div><b>Accepted</b><span>${safeCount(policy.decisionSummary?.acceptedConnectionCount)}</span></div>
+            <div><b>Manual</b><span>${safeCount(policy.decisionSummary?.manualReviewCount)}</span></div>
+            <div><b>Rejected</b><span>${safeCount(policy.decisionSummary?.rejectedCount)}</span></div>
+            <div><b>Unresolved</b><span>${safeCount(policy.decisionSummary?.unresolvedCount)}</span></div>
+          </div>
+
+          ${policy.blockedReason ? `
+            <div class="uxml-placeholder" style="margin-top:12px;">
+              <b>Blocked reason:</b><br>${esc(policy.blockedReason)}
+            </div>
+          ` : ''}
+
+          <div class="uxml-placeholder" style="margin-top:12px;">
+            <b>Route contract:</b><br>
+            UXML emits no PCF directly: ${policy.routeContract.uxmlEmitsPcfDirectly ? 'NO' : 'YES'}<br>
+            UXML mutates coordinates: ${policy.routeContract.uxmlMutatesCoordinates ? 'YES' : 'NO'}<br>
+            UXML applies fixes: ${policy.routeContract.uxmlAppliesFixes ? 'YES' : 'NO'}
+          </div>
+        ` : `
+          <div class="uxml-placeholder">Run decision gate, then run route handoff.</div>
+        `}
+      </section>
+    `;
+  }
+
   if (panel === 'outputs') {
     return `
       <section class="uxml-panel-section">
@@ -767,6 +918,8 @@ function render(container, state) {
         <button data-uxml-action="build-universal-topology" type="button" ${state.pipeline.faceModel ? '' : 'disabled'}>Build UniversalTopoGraph</button>
         <button data-uxml-action="build-ray-topology" type="button" ${state.pipeline.faceModel ? '' : 'disabled'}>Build RayTopoGraph</button>
         <button data-uxml-action="compare-topology" type="button" ${state.pipeline.universalGraph && state.pipeline.rayGraph ? '' : 'disabled'}>Compare</button>
+        <button data-uxml-action="run-decision-gate" type="button" ${state.pipeline.comparison ? '' : 'disabled'}>Run decision gate</button>
+        <button data-uxml-action="run-route-handoff" type="button" ${state.pipeline.topologyDecision ? '' : 'disabled'}>Run route handoff</button>
         <button data-uxml-action="run-full-pipeline" type="button" ${xmlReady ? '' : 'disabled'}>Run Full Pipeline</button>
         <button data-uxml-action="export-summary" type="button">Export Summary JSON</button>
       </section>
@@ -931,7 +1084,9 @@ function bindEvents(container, state) {
         if (action === 'build-face-model') state.activePanel = 'face-model';
         if (action === 'build-universal-topology') state.activePanel = 'universal-topology';
         if (action === 'build-ray-topology') state.activePanel = 'ray-topology';
-        if (action === 'compare-topology' || action === 'run-full-pipeline') state.activePanel = 'comparison';
+        if (action === 'compare-topology') state.activePanel = 'comparison';
+        if (action === 'run-decision-gate') state.activePanel = 'decision-gate';
+        if (action === 'run-route-handoff' || action === 'run-full-pipeline') state.activePanel = 'route-handoff';
       }
     } catch (error) {
       state.status = {
@@ -960,4 +1115,5 @@ export const _test = Object.freeze({
   summarizeReport,
   buildSummary,
   canRunXmlActions,
+  PIPELINE_STAGES,
 });
