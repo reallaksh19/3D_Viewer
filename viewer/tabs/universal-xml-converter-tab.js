@@ -75,15 +75,15 @@ const PIPELINE_STAGES = [
   },
   {
     id: 'outputs',
-    title: '9. Output Bridges',
-    description: 'Prepare PCF / GLB / 2D / InputXML / CII outputs from accepted topology.',
-    deferred: true,
+    title: '9. Route Handoff',
+    description: 'Hand off accepted UXML topology to a target route such as Extract PCF, GLB, 2D, InputXML or CII.',
+    deferred: false,
   },
   {
     id: 'masters',
-    title: '10. Final Master Links',
-    description: 'Line list / piping class / weight master enrichment. Deferred until final phase.',
-    deferred: true,
+    title: '10. Masters by Target Route',
+    description: 'Masters are handled by the downstream route. JSON/RVM → PCF uses the existing legacy master route.',
+    deferred: false,
   },
 ];
 
@@ -203,10 +203,18 @@ function extensionFallbackSourceType(fileName = '', text = '') {
 }
 
 export function detectSourceType(fileName = '', text = '') {
-  const profile = detectXmlProfile(text);
+  const name = String(fileName || '').toLowerCase();
+
+  const profile = detectXmlProfile(text, {
+    fileName,
+  });
 
   if (profile.isKnownProfile) {
     return sourceTypeFromProfile(profile.profile);
+  }
+
+  if (name.includes('input') && name.endsWith('.xml')) {
+    return 'INPUT_XML';
   }
 
   return extensionFallbackSourceType(fileName, text);
@@ -271,7 +279,10 @@ export function runUniversalXmlPipelineFromText(text, options = {}) {
 
 export function runPipelineAction(state, action) {
   if (action === 'detect-profile') {
-    const profileReport = detectXmlProfile(state.sourceText);
+    const profileReport = detectXmlProfile(state.sourceText, {
+      fileName: state.sourceFile?.name || '',
+      selectedSourceType: state.selectedSourceType,
+    });
 
     state.pipeline.profileReport = profileReport;
     state.detectedSourceType = profileReport.isKnownProfile
@@ -306,6 +317,8 @@ export function runPipelineAction(state, action) {
 
     const result = normalizeXmlToUxml(state.sourceText, {
       name: state.sourceFile?.name || '',
+      fileName: state.sourceFile?.name || '',
+      selectedSourceType: state.selectedSourceType,
       profileReport,
     });
 
@@ -552,7 +565,7 @@ function panelHtml(state) {
     return `
       <section class="uxml-panel-section">
         <h3>Source Intake</h3>
-        <p>Load XML/InputXML/UXML directly. PDF / REV / JSON / TXT / PCF must first go through the existing converter route.</p>
+        <p>Load XML, InputXML, or UXML directly. For JSON/RVM → PCF, use the RVM / JSON → PCF Extract tab and select UXML topology mode.</p>
         ${sourceSummaryHtml(state)}
         ${reportSummaryHtml(p.profileReport, 'Profile Detection')}
         <div class="uxml-preview-block">
@@ -566,45 +579,38 @@ function panelHtml(state) {
   if (panel === 'existing-converter') {
     return `
       <section class="uxml-panel-section">
-        <h3>Existing Converter Output / PCF Extract Bridge</h3>
+        <h3>Existing Converter / Route Bridge</h3>
 
         <p>
-          This Universal XML Converter tab is a standalone XML-first workbench.
-          It directly accepts XML, InputXML, and UXML only.
+          This tab is a standalone XML/InputXML/UXML topology workbench.
+          It does not own the JSON/RVM → PCF production export workflow.
         </p>
 
         <div class="uxml-placeholder">
-          <b>For JSON/RVM → PCF extraction:</b><br>
-          Use the existing <b>RVM / JSON → PCF Extract</b> tab and select:
-          <br><br>
-          <code>Topology mode = UXML topology</code>
-          <br><br>
-          That route converts extracted rows to UXML only for topology generation/checking,
-          then pushes topology evidence back into the existing legacy PCF route.
+          <b>JSON/RVM → PCF production path:</b><br>
+          Open <b>RVM / JSON → PCF Extract</b>, then select
+          <code>Topology mode = UXML topology</code>.
+          That route uses UXML only for topology generation/checking, then continues through
+          the existing master resolution and existing PCF emitter.
         </div>
 
         <div class="uxml-placeholder" style="margin-top:12px;">
-          <b>Routing contract:</b>
+          <b>Standalone XML path in this tab:</b>
           <pre style="white-space:pre-wrap;margin:8px 0 0;">
-JSON/RVM rows
+XML / InputXML / UXML
   ↓
-Existing 2D CSV / row builder
+UXML normalization
   ↓
-Topology mode selector
-  ├─ Legacy topology → existing readiness/topology
-  └─ UXML topology → rows → UXML → FaceModel → UniversalTopoGraph → RayTopoGraph → Comparison
-          ↓
-      Push topology evidence back to rows/readinessGate
-          ↓
-Existing master resolution
-          ↓
-Existing PCF generation/export
+Validation
+  ↓
+FaceModel
+  ↓
+UniversalTopoGraph + RayTopoGraph
+  ↓
+Comparison / diagnostics
+  ↓
+Route handoff
           </pre>
-        </div>
-
-        <div class="uxml-placeholder" style="margin-top:12px;">
-          Raw PDF / REV / JSON / TXT / PCF parsing is intentionally not implemented inside this tab.
-          Those formats must use their existing/planned converters first.
         </div>
       </section>
     `;
@@ -679,9 +685,14 @@ Existing PCF generation/export
   if (panel === 'outputs') {
     return `
       <section class="uxml-panel-section">
-        <h3>Output Bridges</h3>
-        <p>Deferred. Output bridges will consume accepted topology only; no PCF/GLB/InputXML/CII emission is performed in Agent 09.</p>
-        <div class="uxml-placeholder">Output bridge placeholders only.</div>
+        <h3>Route Handoff</h3>
+        <p>
+          This workbench prepares accepted topology evidence. Actual export is owned by the target route.
+          For JSON/RVM → PCF, the existing Extract PCF route consumes UXML topology mode and continues through legacy masters/PCF export.
+        </p>
+        <div class="uxml-placeholder">
+          Route handoff targets: Extract PCF, GLB, 2D, InputXML, CII.
+        </div>
       </section>
     `;
   }
@@ -689,12 +700,15 @@ Existing PCF generation/export
   if (panel === 'masters') {
     return `
       <section class="uxml-panel-section">
-        <h3>Final Master Links</h3>
-        <p>Deferred. Line list, piping class master and weight master are linked after UXML, UniversalTopoGraph, RayGraph and comparator are stable.</p>
+        <h3>Masters by Target Route</h3>
+        <p>
+          Masters are not resolved in this standalone topology workbench.
+          They are resolved by the downstream route that performs export.
+        </p>
         <div class="uxml-master-placeholder-grid">
-          <div class="uxml-master-card"><h4>Line List</h4><div>Status: Deferred</div></div>
-          <div class="uxml-master-card"><h4>Piping Class Master</h4><div>Status: Deferred</div></div>
-          <div class="uxml-master-card"><h4>Weight Master</h4><div>Status: Deferred</div></div>
+          <div class="uxml-master-card"><h4>JSON/RVM → PCF</h4><div>Status: Existing legacy master route</div></div>
+          <div class="uxml-master-card"><h4>Standalone XML topology</h4><div>Status: Topology diagnostics only</div></div>
+          <div class="uxml-master-card"><h4>Future routes</h4><div>Status: Route-specific master policy</div></div>
         </div>
       </section>
     `;
@@ -724,12 +738,12 @@ function render(container, state) {
       <header class="uxml-header">
         <div>
           <h2>Universal XML Converter</h2>
-          <p>XML-first topology workbench: source → UXML → validation → face model → UniversalTopoGraph + RayTopoGraph comparison → output placeholders.</p>
+          <p>XML/InputXML/UXML topology workbench: source → UXML → validation → face model → UniversalTopoGraph + RayTopoGraph comparison → route handoff.</p>
         </div>
         <div class="uxml-header-badges">
           <span class="uxml-badge">Agent 09</span>
           <span class="uxml-badge">Integrated Pipeline</span>
-          <span class="uxml-badge muted">Masters deferred</span>
+          <span class="uxml-badge muted">Masters by target route</span>
         </div>
       </header>
 
