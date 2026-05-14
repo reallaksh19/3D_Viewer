@@ -33,24 +33,35 @@ function isLikelySupport(raw, pathText) {
 }
 
 function extractSegmentFromObject(obj, pathText, index) {
-  const ep1 = toPoint(obj?.ep1)
+  let ep1 = toPoint(obj?.ep1)
     || toPoint(obj?.start)
     || toPoint(obj?.from)
     || toPoint(obj?.p1)
     || (Array.isArray(obj?.points) ? toPoint(obj.points[0]) : null)
     || pointFromBBox(obj, false);
 
-  const ep2 = toPoint(obj?.ep2)
+  let ep2 = toPoint(obj?.ep2)
     || toPoint(obj?.end)
     || toPoint(obj?.to)
     || toPoint(obj?.p2)
     || (Array.isArray(obj?.points) && obj.points.length > 1 ? toPoint(obj.points[1]) : null)
     || pointFromBBox(obj, true);
 
-  if (!ep1 || !ep2) return null;
-
   const cp = toPoint(obj?.cp || obj?.center || obj?.centre || obj?.controlPoint);
   const bp = toPoint(obj?.bp || obj?.branch || obj?.branchPoint);
+
+  // For OLET-type components, cp (header tap) and bp (branch outlet) are the primary
+  // connectivity points. Use them as ep1/ep2 fallbacks before the null guard so that
+  // OLETs specified with only cp/bp are not silently dropped.
+  const typeText = String(obj?.type || obj?.kind || obj?.componentType || 'PIPE').toUpperCase();
+  const isOletType = typeText === 'OLET' || typeText === 'WELDOLET' || typeText === 'SOCKOLET';
+  if (isOletType) {
+    if (!ep1 && cp) ep1 = { x: cp.x, y: cp.y, z: cp.z };
+    if (!ep2 && bp) ep2 = { x: bp.x, y: bp.y, z: bp.z };
+  }
+
+  if (!ep1 || !ep2) return null;
+
   const supportCoord = toPoint(obj?.supportCoord || obj?.coOrds || obj?.coord || obj?.position || obj?.origin);
 
   const raw = {
@@ -59,7 +70,6 @@ function extractSegmentFromObject(obj, pathText, index) {
     SKEY: obj?.sKey || obj?.SKEY || obj?.type || 'PIPE',
   };
 
-  const typeText = String(obj?.type || obj?.kind || obj?.componentType || 'PIPE').toUpperCase();
   const support = isLikelySupport(raw, pathText) || typeText === 'SUPPORT';
 
   return {

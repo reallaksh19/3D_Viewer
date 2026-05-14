@@ -1,3 +1,5 @@
+import { auditCaUnits } from './RvmLineListUnitDetector.js';
+
 const NPS_TO_MM = {
   '1/2': 15,
   '3/4': 20,
@@ -331,6 +333,8 @@ export class RvmExtractHardening {
     const diagnostics = [];
     const pcfRefs = Object.keys(pcfTextByPipelineRef || {});
 
+    const unitAudit = auditCaUnits(rows);
+
     const summary = {
       rowCount: rows.length,
       includedRows: 0,
@@ -346,6 +350,17 @@ export class RvmExtractHardening {
       pcfFilenames: pcfRefs.map(_safePcfFilename),
       generatedOriginCoordinateLines: 0,
       generatedComponentAttributeLines: 0,
+      masterResolutionPending: 0,
+      masterResolutionExact: 0,
+      masterResolutionFuzzy: 0,
+      masterResolutionManual: 0,
+      weightCa8Matched: 0,
+      weightCa8Ambiguous: 0,
+      weightCa8NoMatch: 0,
+      lineListManual: 0,
+      lineListNoMatch: 0,
+      pipingClassFuzzy: 0,
+      pipingClassNoMatch: 0,
     };
 
     const push = (severity, code, message, row = {}, extra = {}) => {
@@ -440,6 +455,61 @@ export class RvmExtractHardening {
           );
         }
       }
+
+      const rowDiagnostics = Array.isArray(row.diagnostics) ? row.diagnostics : [];
+
+      if (rowDiagnostics.some(d => String(d).includes('EXACT-MATCH'))) {
+        summary.masterResolutionExact += 1;
+      }
+
+      if (rowDiagnostics.some(d => String(d).includes('FUZZY-MATCH'))) {
+        summary.masterResolutionFuzzy += 1;
+      }
+
+      if (rowDiagnostics.some(d => String(d).includes('MANUAL'))) {
+        summary.masterResolutionManual += 1;
+      }
+
+      if (rowDiagnostics.some(d => String(d).includes('USER-RESOLVED'))) {
+        summary.masterResolutionManual += 1;
+      }
+
+      if (rowDiagnostics.includes('WM-WEIGHT-CA8-MATCH')) {
+        summary.weightCa8Matched += 1;
+      }
+
+      if (rowDiagnostics.includes('WM-WEIGHT-CA8-AMBIGUOUS')) {
+        summary.weightCa8Ambiguous += 1;
+      }
+
+      if (rowDiagnostics.includes('WM-WEIGHT-CA8-NO-MATCH')) {
+        summary.weightCa8NoMatch += 1;
+      }
+
+      if (rowDiagnostics.includes('LINELIST-MANUAL')) {
+        summary.lineListManual += 1;
+      }
+
+      if (rowDiagnostics.some(d => String(d).includes('LINELIST') && String(d).includes('NO_MATCH'))) {
+        summary.lineListNoMatch += 1;
+      }
+
+      if (rowDiagnostics.includes('PCF-CLASS-FUZZY-MATCH')) {
+        summary.pipingClassFuzzy += 1;
+      }
+
+      if (rowDiagnostics.some(d => String(d).includes('PCF-CLASS') && String(d).includes('NO_MATCH'))) {
+        summary.pipingClassNoMatch += 1;
+      }
+
+      if (
+        rowDiagnostics.includes('WM-WEIGHT-CA8-AMBIGUOUS') ||
+        rowDiagnostics.includes('WM-WEIGHT-CA8-NO-MATCH') ||
+        rowDiagnostics.some(d => String(d).includes('LINELIST') && String(d).includes('NO_MATCH')) ||
+        rowDiagnostics.some(d => String(d).includes('PCF-CLASS') && String(d).includes('NO_MATCH'))
+      ) {
+        summary.masterResolutionPending += 1;
+      }
     }
 
     for (const [ref, text] of Object.entries(pcfTextByPipelineRef || {})) {
@@ -475,10 +545,16 @@ export class RvmExtractHardening {
       schema: 'pcf-extract-audit/v1',
       sourceLabel,
       generatedAt: new Date().toISOString(),
-      pass: !bySeverity.ERROR,
+      pass: !bySeverity.ERROR && unitAudit.pass,
       bySeverity,
-      summary,
-      diagnostics,
+      summary: {
+        ...summary,
+        ...unitAudit.summary
+      },
+      diagnostics: [
+        ...diagnostics,
+        ...unitAudit.diagnostics.map(d => ({ ...d, _source: 'unit-audit' }))
+      ],
     };
   }
 

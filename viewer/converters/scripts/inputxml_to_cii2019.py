@@ -35,6 +35,16 @@ from pathlib import Path
 from typing import Final
 import xml.etree.ElementTree as ET
 
+try:
+    import cii2019_section_rules
+except ImportError:
+    cii2019_section_rules = None
+
+try:
+    import cii2019_hanger_miscel_control
+except ImportError:
+    cii2019_hanger_miscel_control = None
+
 
 SENTINEL_MISSING: Final[float] = -1.0101
 VERSION_PAYLOAD_LINES: Final[int] = 61
@@ -2492,9 +2502,45 @@ def _build_cii_text(
         has_override=bool(raw_payload_overrides),
     )
 
+    if cii2019_section_rules is not None:
+        payload_map = {
+            "ELEMENTS": elements_payload,
+            "BEND": bend_payload,
+            "RIGID": rigid_payload,
+            "EXPJT": [],
+            "RESTRANT": restraint_payload,
+            "DISPLMNT": displmnt_payload,
+            "FORCMNT": [],
+            "UNIFORM": [],
+            "WIND": [],
+            "OFFSETS": [],
+            "ALLOWBLS": allowbls_payload,
+            "SIF&TEES": sif_payload,
+            "REDUCERS": reducer_payload,
+            "FLANGES": [],
+            "EQUIPMNT": equipmnt_payload,
+            "MISCEL_1": miscel_payload,
+            "UNITS": units_payload,
+        }
+        if raw_payload_overrides:
+            for k, v in raw_payload_overrides.items():
+                payload_map[k] = v
+
+        derived_control = cii2019_section_rules.build_control_from_sections(
+            payload_map,
+            numelt=metrics["elements"],
+            numnoz=metrics["nozzles"],
+            nohgrs=metrics["hangers"],
+            nonam=metrics["nonam"],
+            izup=0,
+        )
+        control_payload = cii2019_section_rules.format_control_rows(derived_control)
+    else:
+        control_payload = [control_line_1, control_line_2, control_line_3, control_line_4]
+
     payload_model = _build_section_payload_model(
         version=version_payload,
-        control=[control_line_1, control_line_2, control_line_3, control_line_4],
+        control=control_payload,
         elements=elements_payload,
         nodename=nodename_payload,
         bend=bend_payload,
@@ -2525,6 +2571,11 @@ def _build_cii_text(
         lines.append(_section_header(name, header_suffixes))
         lines.extend(payload)
 
+    cii_text = "\n".join(lines) + "\n"
+
+    if cii2019_section_rules is not None:
+        cii2019_section_rules.assert_cii2019_sections_valid(cii_text)
+
     stats = {
         "elements": len(elements),
         "bends": len(bend_payload) // 3,
@@ -2534,7 +2585,7 @@ def _build_cii_text(
         "reducers": len(reducer_payload),
         "coords": len(coords_payload) - 1,
     }
-    return "\n".join(lines) + "\n", stats
+    return cii_text, stats
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -2646,6 +2697,19 @@ def _build_parser() -> argparse.ArgumentParser:
             "LINE labels, NODENAME payload, MISCEL_1 material IDs, CONTROL templates, and UNITS values."
         ),
     )
+    parser.add_argument(
+        "--hanger-miscel-default-profile-cii",
+        type=Path,
+        default=Path("Benchmarks")
+        / "INPUT XML to CII 2019"
+        / "NEW BM"
+        / "BM_CII_DEFAULTVALUES.CII",
+        help=(
+            "CII profile used only to complete missing/sentinel HANGER and MISCEL_1 "
+            "default values. Hangers are still detected from explicit InputXML "
+            "<HANGER/> records."
+        ),
+    )
     return parser
 
 
@@ -2708,6 +2772,14 @@ def main() -> int:
         coord_reconstruction_tolerance=args.coord_reconstruction_tolerance,
         layout_config=layout_config,
     )
+
+    if cii2019_hanger_miscel_control is not None:
+        cii_text = cii2019_hanger_miscel_control.enforce_hanger_miscel_control(
+            input_xml=args.input,
+            cii_text=cii_text,
+            default_profile_cii=args.hanger_miscel_default_profile_cii,
+        )
+
     args.output.write_text(cii_text, encoding="utf-8")
 
     print(

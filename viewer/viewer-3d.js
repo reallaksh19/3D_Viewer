@@ -1,5 +1,5 @@
 /**
- * viewer-3d.js — Three.js 3D visualization of PCF components (vanilla JS)
+ * viewer-3d.js Ã¢â‚¬â€ Three.js 3D visualization of PCF components (vanilla JS)
  * Ported from 3Dmodelgeneratorforpcf_Viewer.jsx (React/R3F) to raw Three.js.
  *
  * Exports:
@@ -26,7 +26,7 @@ function _verticalComponent(parts) {
     return CURRENT_VERTICAL_AXIS === 'Z' ? parts[2] : parts[1];
 }
 
-// ── Color palette ──────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Color palette Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 const COLORS = {
     PIPE: 0x1e90ff,  // Dodger Blue
     FLANGE: 0xff4500,  // Orange Red
@@ -41,7 +41,7 @@ const COLORS = {
     UNKNOWN: 0xd3d3d3,  // Light Grey
 };
 
-// ── Coordinate mapping (PCF → Three.js) ────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Coordinate mapping (PCF Ã¢â€ â€™ Three.js) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // PCF: X=East, Y=North, Z=Up
 // Three: X=right, Y=up, Z=towards viewer
 const mapCoord = (p) => {
@@ -63,7 +63,7 @@ const OVERLAY_LAYER_IDS = Object.freeze({
     SPARE_2: 'spare2',
 });
 
-// ── Cylinder helper ────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Cylinder helper Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 function createCylinder(startVec, endVec, radius, color, materialOverride = null) {
     const diff = new THREE.Vector3().subVectors(endVec, startVec);
     const length = diff.length();
@@ -81,7 +81,7 @@ function createCylinder(startVec, endVec, radius, color, materialOverride = null
     return mesh;
 }
 
-// ── Disc (flat cylinder) helper ────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Disc (flat cylinder) helper Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 function createDisc(pos, normal, outerRadius, thickness, color, materialOverride = null) {
     const geo = new THREE.CylinderGeometry(outerRadius, outerRadius, thickness, 20);
     const mat = materialOverride || new THREE.MeshStandardMaterial({ color, roughness: 0.3, metalness: 0.15 });
@@ -107,7 +107,7 @@ function createTubeFromCurve(curve, radius, color, tubularSegments = 24, radialS
     return new THREE.Mesh(geo, mat);
 }
 
-// ── Box (for fixed support) helper ─────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Box (for fixed support) helper Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 function createBox(pos, hw, color, wireframe = false, materialOverride = null) {
     const geo = new THREE.BoxGeometry(hw, hw, hw);
     const mat = materialOverride || (wireframe
@@ -322,7 +322,7 @@ function _buildSupportFrame(pipeAxis, supportAxis) {
     if (supportAxis && Math.abs(supportAxis.dot(vertical)) < 0.95) {
         lateral = supportAxis.clone().normalize();
 
-        // ── VISUAL GEOMETRY FIX ──
+        // Ã¢â€â‚¬Ã¢â€â‚¬ VISUAL GEOMETRY FIX Ã¢â€â‚¬Ã¢â€â‚¬
         // If the restriction axis is parallel to the pipe (e.g., an axial stop),
         // projecting the lateral geometry along this axis embeds arrows radially
         // inside the pipe cylinder mesh. We force it orthogonal to expose the arrows.
@@ -350,11 +350,11 @@ function _buildSupportFrame(pipeAxis, supportAxis) {
     return { vertical, lateral, pipe: pipeOrtho };
 }
 
-// ── Main class ─────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Main class Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 export class PcfViewer3D {
     /**
-     * @param {HTMLElement} containerEl — DOM element to render into
+     * @param {HTMLElement} containerEl Ã¢â‚¬â€ DOM element to render into
      */
     constructor(containerEl, options = {}) {
         this.container = containerEl;
@@ -420,7 +420,7 @@ export class PcfViewer3D {
             : new THREE.Color(this.viewerConfig?.scene?.background);
         this.scene.background = background;
 
-        // Camera — Orthographic
+        // Camera Ã¢â‚¬â€ Orthographic
         const aspect = w / h;
         const frustum = Number(this.viewerConfig?.camera?.orthographicFrustum || 5000);
         this._orthoCamera = new THREE.OrthographicCamera(
@@ -564,7 +564,7 @@ export class PcfViewer3D {
         this._syncAxisGizmo();
     }
 
-    /** @private — Build HTML ViewCube overlay in top-right */
+    /** @private Ã¢â‚¬â€ Build HTML ViewCube overlay in top-right */
     _buildViewCube() {
         const size = Number(this.viewerConfig?.overlay?.viewCubeSize || 90);
         const posStyles = {
@@ -657,7 +657,7 @@ export class PcfViewer3D {
         this.container.appendChild(cube);
     }
 
-    /** Re-centre camera on geometry — public, called by UI Centre button */
+    /** Re-centre camera on geometry Ã¢â‚¬â€ public, called by UI Centre button */
     fitCamera() { this._fitCamera(); }
     fitAll() { this._fitCamera(); }
 
@@ -783,7 +783,7 @@ export class PcfViewer3D {
             this.container.style.cursor = 'crosshair';
             this._attachMarqueeHandlers();
         } else {
-            // orbit and other modes — standard left=rotate, middle/right=pan
+            // orbit and other modes Ã¢â‚¬â€ standard left=rotate, middle/right=pan
             this.controls.enableRotate = true;
             this.controls.enablePan = true;
             this.controls.enableZoom = true;
@@ -993,8 +993,8 @@ export class PcfViewer3D {
     nudgeSectionPlane(delta) {
         if (this._sectionMode !== 'PLANE_UP') return;
         if (!this._clipPlanes || this._clipPlanes.length === 0) return;
-        // Plane equation: normal·x + constant = 0
-        // For Z-up: normal=(0,0,-1), constant=cut  → plane is at z=cut
+        // Plane equation: normalÃ‚Â·x + constant = 0
+        // For Z-up: normal=(0,0,-1), constant=cut  Ã¢â€ â€™ plane is at z=cut
         // Increasing cut moves the plane up (shows less of the model)
         this._clipPlanes[0].constant += delta;
         this._applyCurrentSectionClipping();
@@ -1114,7 +1114,7 @@ export class PcfViewer3D {
         });
     }
 
-    /** @private — Snap camera to axis-aligned view */
+    /** @private Ã¢â‚¬â€ Snap camera to axis-aligned view */
     _snapCamera([cx, cy, cz], [ux, uy, uz]) {
         if (!this.controls) return;
         const box = new THREE.Box3();
@@ -1135,7 +1135,7 @@ export class PcfViewer3D {
         this._emitTrace('camera-snap', { cx, cy, cz, ux, uy, uz });
     }
 
-    /** @private — Sync ViewCube rotation with camera */
+    /** @private Ã¢â‚¬â€ Sync ViewCube rotation with camera */
     _syncViewCube() {
         if (!this._viewCubeInner || !this.camera) return;
         const q = this.camera.quaternion.clone().invert();
@@ -1151,7 +1151,7 @@ export class PcfViewer3D {
         this._viewCubeInner.style.transform = `translateZ(-220px) matrix3d(${cssMat.join(',')})`;
     }
 
-    /** @private — Build axis gizmo in bottom-right */
+    /** @private Ã¢â‚¬â€ Build axis gizmo in bottom-right */
     _buildAxisGizmo() {
         const container = document.createElement('div');
         container.id = 'pcf-axis-gizmo';
@@ -1176,7 +1176,7 @@ export class PcfViewer3D {
         this._axisGizmoCtx = canvas.getContext('2d');
     }
 
-    /** @private — Redraw axis gizmo every frame */
+    /** @private Ã¢â‚¬â€ Redraw axis gizmo every frame */
     _syncAxisGizmo() {
         const ctx = this._axisGizmoCtx;
         if (!ctx || !this.camera) return;
@@ -1208,7 +1208,7 @@ export class PcfViewer3D {
 
     /** @private */
     _wireFullscreen() {
-        // Fullscreen is now handled by viewer-tab.js — kept for backward compatibility
+        // Fullscreen is now handled by viewer-tab.js Ã¢â‚¬â€ kept for backward compatibility
     }
 
     /**
@@ -1506,8 +1506,28 @@ export class PcfViewer3D {
     }
 
     /**
+     * Public refresh hook used when length-related UI changes without a full geometry rerender.
+     * Rebuilds the cached length label rows from the latest component set and keeps the overlay layer visible state in sync.
+     * @param {object[]|null} components
+     */
+    refreshLengthLabels(components = null) {
+        const source = Array.isArray(components)
+            ? components
+            : Array.isArray(this._lastComponentsCache)
+                ? this._lastComponentsCache
+                : [];
+
+        this._rebuildLengthLabels(source);
+        this.setOverlayLayerVisibility(OVERLAY_LAYER_IDS.LENGTH, !!this.viewerConfig?.lengthLabels?.enabled);
+        this.rebuildOverlayLayers();
+        this._emitTrace('length-labels-refresh', {
+            enabled: !!this.viewerConfig?.lengthLabels?.enabled,
+            sourceCount: source.length,
+        });
+    }
+    /**
      * Clear old components and render new ones.
-     * @param {object[]} components — from stitcher output
+     * @param {object[]} components Ã¢â‚¬â€ from stitcher output
      */
     render(components) {
         this._emitTrace('render-start', { components: Array.isArray(components) ? components.length : 0 });
@@ -1685,7 +1705,7 @@ export class PcfViewer3D {
 
         const arcRadius = Math.min(v1.length(), v2.length());
         if (arcRadius < radius * 0.5) {
-            // Arc radius too small to form a visible curve — render as straight line
+            // Arc radius too small to form a visible curve Ã¢â‚¬â€ render as straight line
             const cyl = createCylinder(p1, p2, radius, color);
             return cyl ? [cyl] : [];
         }
@@ -1694,8 +1714,8 @@ export class PcfViewer3D {
         const arcStart = c.clone().addScaledVector(d1, arcRadius);
         const arcEnd   = c.clone().addScaledVector(d2, arcRadius);
 
-        // Cubic Bezier arc approximation for a circular arc of sweep angle θ:
-        //   alpha = (4/3) * tan(θ/4)
+        // Cubic Bezier arc approximation for a circular arc of sweep angle ÃŽÂ¸:
+        //   alpha = (4/3) * tan(ÃŽÂ¸/4)
         // This is the established formula for circle-quadrant Bezier approximation.
         // sweepAngle is the interior bend angle seen at the elbow centreline.
         const sweepAngle = Math.PI - angle;   // supplement of the angle between leg directions
@@ -1743,7 +1763,7 @@ export class PcfViewer3D {
 
 
 
-    /** @private — OLET: centre point with a single branch leg */
+    /** @private Ã¢â‚¬â€ OLET: centre point with a single branch leg */
     _buildOlet(points, centrePoint, branch1Point, radius, color, comp) {
         const c = centrePoint ? mapCoord(centrePoint) : null;
         const b = branch1Point ? mapCoord(branch1Point) : null;
@@ -1807,7 +1827,7 @@ export class PcfViewer3D {
             const tipSphere = createSphere(branch, branchRadius * 0.8, color);
             meshes.push(tipSphere);
         } else {
-            // Unresolved branch — show red marker sphere
+            // Unresolved branch Ã¢â‚¬â€ show red marker sphere
             meshes.push(createSphere(base, runRadius * 0.9, 0xff0000));
         }
 
@@ -1817,7 +1837,7 @@ export class PcfViewer3D {
         return meshes;
     }
 
-    /** @private — Reducer: tapered cone between EP1 (large bore) and EP2 (small bore) */
+    /** @private Ã¢â‚¬â€ Reducer: tapered cone between EP1 (large bore) and EP2 (small bore) */
     _buildReducer(points, bore, color, comp) {
         if (!points || points.length < 2) return this._buildGeneric(points, bore / 2 || 25, color, 'REDUCER');
         const s = mapCoord(points[0]);
@@ -1833,7 +1853,7 @@ export class PcfViewer3D {
         const rLarge = Math.max(r1, r2);
         const rSmall = Math.min(r1, r2);
 
-        // If the bores are essentially the same it degenerates to a pipe — guard against it
+        // If the bores are essentially the same it degenerates to a pipe Ã¢â‚¬â€ guard against it
         const radiusRatio = rSmall / rLarge;
         const isTapered = radiusRatio < 0.98;
 
@@ -1850,7 +1870,7 @@ export class PcfViewer3D {
                 r2,    // top radius (small end)
                 r1,    // bottom radius (large end)
                 len,
-                20,    // radial segments — smooth
+                20,    // radial segments Ã¢â‚¬â€ smooth
                 1,     // height segments
                 false  // open ended
             );
@@ -1860,7 +1880,7 @@ export class PcfViewer3D {
             mesh.quaternion.copy(quat);
             meshes.push(mesh);
 
-            // End caps — flat discs to close the cone
+            // End caps Ã¢â‚¬â€ flat discs to close the cone
             const capMat = new THREE.MeshStandardMaterial({ color, roughness: 0.3, metalness: 0.1 });
             const capLarge = new THREE.Mesh(new THREE.CircleGeometry(r1, 20), capMat);
             capLarge.position.copy(s);
@@ -1879,7 +1899,7 @@ export class PcfViewer3D {
         return meshes;
     }
 
-    /** @private — Flange: two thick discs + thin web between EP1 and EP2 */
+    /** @private Ã¢â‚¬â€ Flange: two thick discs + thin web between EP1 and EP2 */
     _buildFlange(points, radius, color) {
         if (!points || points.length < 2) return [];
         const s = mapCoord(points[0]);
@@ -1890,7 +1910,7 @@ export class PcfViewer3D {
         const normal = diff.clone().normalize();
         const discR = radius * 2.0;    // flange rim wider than pipe
         // Disc thickness: fixed visual size (half-bore), capped so discs never exceed 40% of span.
-        // This prevents stretched-disc artefacts when EP1→EP2 span is large (e.g. pass-0 raw data).
+        // This prevents stretched-disc artefacts when EP1Ã¢â€ â€™EP2 span is large (e.g. pass-0 raw data).
         const discT = Math.min(radius * 0.5, len * 0.4);
         const webT  = Math.max(len - discT * 2, radius * 0.1); // web fills remaining gap
         const mid = new THREE.Vector3().addVectors(s, e).multiplyScalar(0.5);
@@ -1904,7 +1924,7 @@ export class PcfViewer3D {
         return meshes.filter(Boolean);
     }
 
-    /** @private — Valve: two flanges + central sphere (ball valve silhouette) */
+    /** @private Ã¢â‚¬â€ Valve: two flanges + central sphere (ball valve silhouette) */
     _buildValve(points, radius, color) {
         if (!points || points.length < 2) return [];
         const s = mapCoord(points[0]);
@@ -1924,7 +1944,7 @@ export class PcfViewer3D {
         ].filter(Boolean);
     }
 
-    /** @private — Support graphic based on subtype */
+    /** @private Ã¢â‚¬â€ Support graphic based on subtype */
     _buildSupport(pos, radius, comp) {
         const supportScale = Number(this.viewerConfig?.supportGeometry?.symbolScale || 2);
         const r = radius * (Number.isFinite(supportScale) ? supportScale : 2);
@@ -2228,7 +2248,7 @@ export class PcfViewer3D {
         return cyl ? [cyl] : [];
     }
 
-    /** @private — auto-fit camera to scene bounds */
+    /** @private Ã¢â‚¬â€ auto-fit camera to scene bounds */
     _fitCamera() {
         const box = new THREE.Box3().setFromObject(this._componentGroup);
         if (box.isEmpty()) return;
@@ -3009,7 +3029,7 @@ export class PcfViewer3D {
             const idx = Math.min(bucketCount - 1, Math.max(0, Math.floor(((value - min) / span) * bucketCount)));
             const start = min + (span * idx) / bucketCount;
             const end = min + (span * (idx + 1)) / bucketCount;
-            return `${metric} ${start.toFixed(1)}–${end.toFixed(1)}`;
+            return `${metric} ${start.toFixed(1)}Ã¢â‚¬â€œ${end.toFixed(1)}`;
         }
         return null;
     }
@@ -3257,7 +3277,7 @@ export class PcfViewer3D {
             if (!uniqueBuckets.has(idx)) uniqueBuckets.set(idx, { color: palette[Math.min(idx, palette.length - 1)], sample: v });
         }
         uniqueBuckets.forEach((entry, idx) => {
-            const label = bucketCount === 1 ? `${metric} ${entry.sample.toFixed(2)}` : `${metric} ≈ ${entry.sample.toFixed(2)}`;
+            const label = bucketCount === 1 ? `${metric} ${entry.sample.toFixed(2)}` : `${metric} Ã¢â€°Ë† ${entry.sample.toFixed(2)}`;
             rows.push(`<div style="display:flex;align-items:center;gap:8px;margin:2px 0;">
               <span style="width:14px;height:14px;background:${entry.color};display:inline-block;border:1px solid #ffffff55;border-radius:2px;"></span>
               <span style="font-variant-numeric:tabular-nums;">${label}</span>
@@ -3292,7 +3312,7 @@ export class PcfViewer3D {
         this.setOverlayLayerData(OVERLAY_LAYER_IDS.MESSAGE_SQUARE, rows);
     }
 
-    /** Tear down — clean up all resources */
+    /** Tear down Ã¢â‚¬â€ clean up all resources */
     dispose() {
         if (this._animId) cancelAnimationFrame(this._animId);
         if (this._overlayRaf) cancelAnimationFrame(this._overlayRaf);

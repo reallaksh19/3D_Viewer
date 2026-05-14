@@ -7,6 +7,13 @@ import { RvmViewer3D } from '../rvm-viewer/RvmViewer3D.js';
 import { parseRmssAttributes } from '../converters/rmss-attribute-parser.js';
 import { RvmSearchIndex } from '../rvm/RvmSearchIndex.js';
 import { RvmTagXmlStore } from '../rvm/RvmTagXmlStore.js';
+import {
+  applyRvmSupportSymbolSettings,
+  getRvmSupportSymbolSettings,
+  normalizeRvmSupportSymbolScale,
+  saveRvmSupportSymbolSettings,
+} from '../rvm-viewer/RvmSupportSymbols.js';
+
 
 let _viewer = null;
 let _shortcutHandler = null;
@@ -14,6 +21,7 @@ let _resizeObserver = null;
 let _capabilitiesListenerOff = null;
 let _toolChangedHandler = null;
 let _tagEventsOff = null;
+let _fallbackTagXmlStore = null;
 
 // â”€â”€ Toolbar action labels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -24,20 +32,72 @@ const ACTION_LABELS = {
   MARQUEE_SELECT: 'Box Select',
   MEASURE_TOOL: 'Measure',
   VIEW_MARQUEE_ZOOM: 'Zoom',
-  NAV_PLAN_X: 'PlanX',
-  NAV_ROTATE_Y: 'RotY',
-  NAV_ROTATE_Z: 'RotZ',
+  NAV_PLAN_X: 'Plan X',
+  NAV_ROTATE_Y: 'Rotate Y',
+  NAV_ROTATE_Z: 'Rotate Z',
   VIEW_FIT_ALL: 'Reset',
   VIEW_FIT_SELECTION: 'FitSel',
   VIEW_TOGGLE_PROJECTION: 'Proj',
-  SNAP_ISO_NW: 'NW',
-  SNAP_ISO_NE: 'NE',
-  SNAP_ISO_SW: 'SW',
-  SNAP_ISO_SE: 'SE',
+  SNAP_ISO_NW: 'Iso NW',
+  SNAP_ISO_NE: 'Iso NE',
+  SNAP_ISO_SW: 'Iso SW',
+  SNAP_ISO_SE: 'Iso SE',
   SECTION_BOX: 'SecBox',
   SECTION_PLANE_UP: 'SecUp',
   SECTION_DISABLE: 'SecOff',
 };
+
+const ICON_ONLY_ACTIONS = new Set([
+  'NAV_PLAN_X',
+  'NAV_ROTATE_Y',
+  'NAV_ROTATE_Z',
+  'SNAP_ISO_NW',
+  'SNAP_ISO_NE',
+  'SNAP_ISO_SW',
+  'SNAP_ISO_SE',
+]);
+
+const PERSISTENT_BLUE_ACTIONS = new Set([
+  'NAV_ORBIT',
+  'NAV_PAN',
+  'NAV_SELECT',
+  'MARQUEE_SELECT',
+  'MEASURE_TOOL',
+  'VIEW_MARQUEE_ZOOM',
+  'NAV_PLAN_X',
+  'NAV_ROTATE_Y',
+  'NAV_ROTATE_Z',
+  'SNAP_ISO_NW',
+  'SNAP_ISO_NE',
+  'SNAP_ISO_SW',
+  'SNAP_ISO_SE',
+  'VIEW_TOGGLE_PROJECTION',
+  'SECTION_BOX',
+  'SECTION_PLANE_UP',
+  'SECTION_DISABLE',
+]);
+
+function _actionTooltip(id) {
+  return ACTION_LABELS[id] || id;
+}
+
+function _renderToolButton(id, icon) {
+  const label = ACTION_LABELS[id] || id;
+  const iconOnly = ICON_ONLY_ACTIONS.has(id);
+
+  return `
+    <button
+      class="rvm-tool-btn ${id === 'NAV_ORBIT' ? 'is-active' : ''} ${iconOnly ? 'is-icon-only' : ''}"
+      data-action="${id}"
+      title="${escapeHtml(label)}"
+      aria-label="${escapeHtml(label)}"
+      type="button"
+    >
+      ${icon}
+      ${iconOnly ? '' : `<span>${escapeHtml(label)}</span>`}
+    </button>
+  `;
+}
 
 const ACTION_ICONS = {
   NAV_SELECT: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/></svg>',
@@ -52,13 +112,84 @@ const ACTION_ICONS = {
   SECTION_DISABLE: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>',
   MEASURE_TOOL: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="8" rx="2" ry="2"/><path d="M6 8v4"/><path d="M10 8v4"/><path d="M14 8v4"/><path d="M18 8v4"/></svg>',
   VIEW_MARQUEE_ZOOM: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="12" height="12" rx="1" stroke-dasharray="3 2"/><circle cx="17" cy="17" r="3"/><path d="m21 21-2.15-2.15"/></svg>',
-  NAV_PLAN_X: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>',
-  NAV_ROTATE_Y: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>',
-  NAV_ROTATE_Z: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>',
-  SNAP_ISO_NW: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="4"/><path d="M7 7h4"/><path d="M7 11v-4"/></svg>',
-  SNAP_ISO_NE: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="4"/><path d="M17 7h-4"/><path d="M17 11v-4"/></svg>',
-  SNAP_ISO_SW: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="4"/><path d="M7 17h4"/><path d="M7 13v4"/></svg>',
-  SNAP_ISO_SE: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="4"/><path d="M17 17h-4"/><path d="M17 13v4"/></svg>',
+  NAV_PLAN_X: `
+    <svg class="rvm-svg-view rvm-svg-plan-x" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path class="rvm-svg-soft" d="M5 15.5 12 19l7-3.5-7-3.5-7 3.5Z"/>
+      <path d="M12 12V4"/>
+      <path d="m8.8 7.2 3.2-3.2 3.2 3.2"/>
+      <path d="M5 15.5V9l7-3.5L19 9v6.5"/>
+      <path d="M5 9 12 12.5 19 9"/>
+      <path d="M12 12.5v6.5"/>
+    </svg>
+  `,
+
+  NAV_ROTATE_Y: `
+    <svg class="rvm-svg-view rvm-svg-rotate-y" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path class="rvm-svg-soft" d="M8 7.5 12 5l4 2.5v5L12 15l-4-2.5v-5Z"/>
+      <path d="M12 3v18"/>
+      <path d="M5.5 8.2C3.9 9.1 3 10.4 3 12c0 3 4 5.4 9 5.4s9-2.4 9-5.4c0-1.6-.9-2.9-2.5-3.8"/>
+      <path d="m17.7 6.1 1.4 2.6-2.9.5"/>
+    </svg>
+  `,
+
+  NAV_ROTATE_Z: `
+    <svg class="rvm-svg-view rvm-svg-rotate-z" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path class="rvm-svg-soft" d="M7 14.5 12 17l5-2.5L12 12l-5 2.5Z"/>
+      <path d="M12 12V4"/>
+      <path d="m9.3 6.7 2.7-2.7 2.7 2.7"/>
+      <path d="M4.5 12a7.5 7.5 0 0 1 12.7-5.4"/>
+      <path d="M19.5 12a7.5 7.5 0 0 1-12.7 5.4"/>
+      <path d="m16.2 4.5 1.1 3-3.1.2"/>
+    </svg>
+  `,
+
+  SNAP_ISO_NW: `
+    <svg class="rvm-svg-view rvm-svg-iso" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path class="rvm-svg-soft" d="M12 3.5 19 7.5v8L12 20.5 5 16.5v-8L12 3.5Z"/>
+      <path d="M12 3.5v8"/>
+      <path d="M5 8.5 12 12l7-4.5"/>
+      <path d="M12 12v8.5"/>
+      <path d="M8 6.2 4.5 4.5 6.2 8"/>
+      <path d="M4.5 4.5 9 9"/>
+      <circle cx="7.2" cy="7.2" r="1.4"/>
+    </svg>
+  `,
+
+  SNAP_ISO_NE: `
+    <svg class="rvm-svg-view rvm-svg-iso" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path class="rvm-svg-soft" d="M12 3.5 19 7.5v8L12 20.5 5 16.5v-8L12 3.5Z"/>
+      <path d="M12 3.5v8"/>
+      <path d="M5 8.5 12 12l7-4.5"/>
+      <path d="M12 12v8.5"/>
+      <path d="M16 6.2 19.5 4.5 17.8 8"/>
+      <path d="M19.5 4.5 15 9"/>
+      <circle cx="16.8" cy="7.2" r="1.4"/>
+    </svg>
+  `,
+
+  SNAP_ISO_SW: `
+    <svg class="rvm-svg-view rvm-svg-iso" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path class="rvm-svg-soft" d="M12 3.5 19 7.5v8L12 20.5 5 16.5v-8L12 3.5Z"/>
+      <path d="M12 3.5v8"/>
+      <path d="M5 8.5 12 12l7-4.5"/>
+      <path d="M12 12v8.5"/>
+      <path d="M8 17.8 4.5 19.5 6.2 16"/>
+      <path d="M4.5 19.5 9 15"/>
+      <circle cx="7.2" cy="16.8" r="1.4"/>
+    </svg>
+  `,
+
+  SNAP_ISO_SE: `
+    <svg class="rvm-svg-view rvm-svg-iso" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path class="rvm-svg-soft" d="M12 3.5 19 7.5v8L12 20.5 5 16.5v-8L12 3.5Z"/>
+      <path d="M12 3.5v8"/>
+      <path d="M5 8.5 12 12l7-4.5"/>
+      <path d="M12 12v8.5"/>
+      <path d="M16 17.8 19.5 19.5 17.8 16"/>
+      <path d="M19.5 19.5 15 15"/>
+      <circle cx="16.8" cy="16.8" r="1.4"/>
+    </svg>
+  `,
 };
 
 const UPLOAD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><rect x="4" y="16" width="16" height="4" rx="1.5"/></svg>';
@@ -76,6 +207,31 @@ function _setActiveToolButton(container, action) {
   buttons.forEach((btn) => {
     btn.classList.toggle('is-active', btn.dataset.action === action);
   });
+}
+
+function _applyToolbarClickedState(container, action, btn) {
+  if (!action || !btn) return;
+
+  if (PERSISTENT_BLUE_ACTIONS.has(action)) {
+    _setActiveToolButton(container, action);
+    return;
+  }
+
+  _pulseButton(btn);
+}
+
+function _bindToolbarClickedState(container) {
+  container.addEventListener(
+    'click',
+    (event) => {
+      const btn = event.target.closest('.rvm-tool-btn[data-action], .rvm-btn[data-action]');
+      if (!btn || !container.contains(btn)) return;
+
+      const action = btn.dataset.action || '';
+      _applyToolbarClickedState(container, action, btn);
+    },
+    true
+  );
 }
 
 function _pulseButton(btn) {
@@ -97,7 +253,7 @@ function _createViewerStub(container) {
 
 function _disposeRvmViewer() {
   if (_shortcutHandler) {
-    window.removeEventListener('keydown', _shortcutHandler);
+    window.removeEventListener('keydown', _shortcutHandler, true);
     _shortcutHandler = null;
   }
   if (_viewer) {
@@ -120,6 +276,8 @@ function _disposeRvmViewer() {
     _tagEventsOff();
     _tagEventsOff = null;
   }
+
+  _fallbackTagXmlStore = null;
 }
 
 // â”€â”€ Capability banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -131,6 +289,668 @@ function _renderCapabilityBanner(container, caps) {
   const modeLabel = mode === 'assisted' ? 'Assisted (conversion enabled)' : 'Static (pre-converted bundles only)';
   banner.textContent = `Mode: ${modeLabel}`;
   banner.dataset.mode = mode;
+}
+
+// ── RVM UI status strip / empty states / tag panel actions ───────────────
+
+function _rvmUiEsc(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function _asArray(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (value instanceof Set) return Array.from(value);
+  if (value instanceof Map) return Array.from(value.values());
+  return [];
+}
+
+function _countMaybe(value) {
+  if (!value) return 0;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (Array.isArray(value)) return value.length;
+  if (value instanceof Set || value instanceof Map) return value.size;
+  if (typeof value.length === 'number') return value.length;
+  if (typeof value.size === 'number') return value.size;
+  return 0;
+}
+
+function _firstFiniteCount(...values) {
+  for (const value of values) {
+    const n = _countMaybe(value);
+    if (n > 0) return n;
+  }
+  return 0;
+}
+
+function _getRvmTagStore() {
+  const viewerStore =
+    _viewer?.tagStore ||
+    _viewer?.tagXmlStore ||
+    _viewer?.reviewTagStore ||
+    null;
+
+  if (
+    viewerStore &&
+    typeof viewerStore.importFromXml === 'function' &&
+    typeof viewerStore.exportToXml === 'function'
+  ) {
+    return viewerStore;
+  }
+
+  if (!_fallbackTagXmlStore) {
+    const identityMap =
+      _viewer?.identityMap ||
+      _viewer?.index?.identityMap ||
+      _viewer?.rvmIndex?.identityMap ||
+      null;
+
+    const bundleId =
+      _viewer?.bundleId ||
+      _viewer?.activeBundleId ||
+      state.rvm?.activeBundleId ||
+      state.rvm?.bundleId ||
+      state.rvm?.currentBundleId ||
+      'rvm-active-bundle';
+
+    _fallbackTagXmlStore = new RvmTagXmlStore(identityMap, bundleId);
+  }
+
+  return _fallbackTagXmlStore;
+}
+
+function _getRvmTags() {
+  const store = _getRvmTagStore();
+
+  if (store && typeof store.getAllTags === 'function') {
+    return store.getAllTags();
+  }
+
+  return Array.isArray(state.rvm?.tags) ? state.rvm.tags : [];
+}
+
+function _getRvmUiStats() {
+  const tags = _getRvmTags();
+  const unresolvedTags = tags.filter(tag => tag?.status === 'unresolved');
+
+  const searchIndex =
+    _viewer?.searchIndex ||
+    state.rvm?.searchIndex ||
+    null;
+
+  const nodeSources = [
+    _viewer?.nodes,
+    _viewer?.treeNodes,
+    _viewer?.rvmIndex?.nodes,
+    _viewer?.index?.nodes,
+    _viewer?.model?.nodes,
+    searchIndex?.items,
+    searchIndex?.records,
+    searchIndex?.nodes,
+    state.rvm?.nodes,
+    state.rvm?.treeNodes,
+    state.rvm?.index?.nodes,
+    state.rvm?.model?.nodes,
+    state.rvm?.bundle?.nodes,
+    state.rvm?.bundle?.index?.nodes,
+  ];
+
+  const visibleSources = [
+    _viewer?.visibleObjectIds,
+    _viewer?.visibleCanonicalIds,
+    _viewer?.visibleIds,
+    _viewer?.visibilitySet,
+    state.rvm?.visibleObjectIds,
+    state.rvm?.visibleCanonicalIds,
+  ];
+
+  const selectedSources = [
+    _viewer?.selectedObjectIds,
+    _viewer?.selectedCanonicalIds,
+    _viewer?.selection,
+    _viewer?.selectionSet,
+    state.rvm?.selectedObjectIds,
+    state.rvm?.selectedCanonicalIds,
+    state.rvm?.selection,
+  ];
+
+  const objectCount = _firstFiniteCount(...nodeSources);
+  const visibleCount = _firstFiniteCount(...visibleSources) || objectCount;
+  const selectedCount = _firstFiniteCount(...selectedSources);
+
+  return {
+    objects: objectCount,
+    visible: visibleCount,
+    selected: selectedCount,
+    tags: tags.length,
+    unresolved: unresolvedTags.length,
+  };
+}
+
+function _ensureRvmStatusStrip(container) {
+  if (container.querySelector('#rvm-status-strip')) return;
+
+  const banner = container.querySelector('#rvm-capability-banner');
+  if (!banner) return;
+
+  banner.insertAdjacentHTML(
+    'afterend',
+    `
+      <div id="rvm-status-strip" class="rvm-status-strip" aria-live="polite">
+        <span class="rvm-status-chip" data-rvm-status-chip="objects">Objects: 0</span>
+        <span class="rvm-status-chip" data-rvm-status-chip="visible">Visible: 0</span>
+        <span class="rvm-status-chip" data-rvm-status-chip="selected">Selected: 0</span>
+        <span class="rvm-status-chip" data-rvm-status-chip="tags">Tags: 0</span>
+        <span class="rvm-status-chip" data-rvm-status-chip="unresolved">Unresolved: 0</span>
+      </div>
+    `
+  );
+}
+
+function _setRvmStatusChip(container, key, label, value) {
+  const chip = container.querySelector(`[data-rvm-status-chip="${key}"]`);
+  if (!chip) return;
+
+  const n = Number(value || 0);
+  chip.textContent = `${label}: ${n.toLocaleString()}`;
+  chip.classList.toggle('is-warn', key === 'unresolved' && n > 0);
+  chip.classList.toggle('is-active', n > 0);
+}
+
+function _updateRvmStatusStrip(container) {
+  if (!container?.isConnected) return;
+
+  _ensureRvmStatusStrip(container);
+
+  const stats = _getRvmUiStats();
+
+  _setRvmStatusChip(container, 'objects', 'Objects', stats.objects);
+  _setRvmStatusChip(container, 'visible', 'Visible', stats.visible);
+  _setRvmStatusChip(container, 'selected', 'Selected', stats.selected);
+  _setRvmStatusChip(container, 'tags', 'Tags', stats.tags);
+  _setRvmStatusChip(container, 'unresolved', 'Unresolved', stats.unresolved);
+}
+
+function _insertEmptyStateOnce(host, id, html) {
+  if (!host || document.getElementById(id)) return;
+
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = html.trim();
+
+  const el = wrapper.firstElementChild;
+  if (el) host.prepend(el);
+}
+
+function _ensureRvmEmptyStates(container) {
+  const treeHost =
+    container.querySelector('.rvm-tree') ||
+    container.querySelector('#rvm-tree');
+
+  _insertEmptyStateOnce(
+    treeHost,
+    'rvm-hierarchy-empty',
+    `
+      <div id="rvm-hierarchy-empty" class="rvm-empty-state" data-rvm-empty-state="hierarchy">
+        <div class="rvm-empty-title">No hierarchy loaded</div>
+        <div class="rvm-empty-body">Load an RVM / REV / JSON / GLB dataset to view hierarchy.</div>
+      </div>
+    `
+  );
+
+  const attrHost =
+    container.querySelector('.rvm-attributes-panel') ||
+    container.querySelector('#rvm-attributes-panel');
+
+  _insertEmptyStateOnce(
+    attrHost,
+    'rvm-attributes-empty',
+    `
+      <div id="rvm-attributes-empty" class="rvm-empty-state" data-rvm-empty-state="attributes">
+        <div class="rvm-empty-title">No object selected</div>
+        <div class="rvm-empty-body">Select an object to inspect attributes.</div>
+      </div>
+    `
+  );
+
+  const tagHost =
+    container.querySelector('.rvm-tag-list') ||
+    container.querySelector('#rvm-tag-list');
+
+  _insertEmptyStateOnce(
+    tagHost,
+    'rvm-tags-empty',
+    `
+      <div id="rvm-tags-empty" class="rvm-empty-state" data-rvm-empty-state="tags">
+        <div class="rvm-empty-title">No tags yet</div>
+        <div class="rvm-empty-body">Create a tag or import Navisworks Tags XML.</div>
+      </div>
+    `
+  );
+
+  const searchHost =
+    container.querySelector('#rvm-search-results') ||
+    container.querySelector('.rvm-search-results');
+
+  _insertEmptyStateOnce(
+    searchHost,
+    'rvm-search-empty',
+    `
+      <div id="rvm-search-empty" class="rvm-empty-state is-compact" data-rvm-empty-state="search">
+        <div class="rvm-empty-body">Type to search loaded objects.</div>
+      </div>
+    `
+  );
+}
+
+function _hasRealChildren(host, ignoreSelector) {
+  if (!host) return false;
+
+  return Array.from(host.children || []).some(child => {
+    if (ignoreSelector && child.matches(ignoreSelector)) return false;
+    if (child.hidden) return false;
+    if (child.style?.display === 'none') return false;
+    return true;
+  });
+}
+
+function _refreshRvmEmptyStates(container) {
+  if (!container?.isConnected) return;
+
+  _ensureRvmEmptyStates(container);
+
+  const treeHost =
+    container.querySelector('.rvm-tree') ||
+    container.querySelector('#rvm-tree');
+
+  const attrHost =
+    container.querySelector('.rvm-attributes-panel') ||
+    container.querySelector('#rvm-attributes-panel');
+
+  const tagHost =
+    container.querySelector('.rvm-tag-list') ||
+    container.querySelector('#rvm-tag-list');
+
+  const searchHost =
+    container.querySelector('#rvm-search-results') ||
+    container.querySelector('.rvm-search-results');
+
+  const hierarchyEmpty = container.querySelector('#rvm-hierarchy-empty');
+  const attributesEmpty = container.querySelector('#rvm-attributes-empty');
+  const tagsEmpty = container.querySelector('#rvm-tags-empty');
+  const searchEmpty = container.querySelector('#rvm-search-empty');
+
+  const hasHierarchy = _hasRealChildren(treeHost, '#rvm-hierarchy-empty');
+  const hasAttributes = _hasRealChildren(attrHost, '#rvm-attributes-empty');
+
+  const tags = _getRvmTags();
+  const hasTags = tags.length > 0 || _hasRealChildren(tagHost, '#rvm-tags-empty');
+
+  const query = container.querySelector('#rvm-search-input')?.value?.trim() || '';
+  const hasSearchResults = _hasRealChildren(searchHost, '#rvm-search-empty');
+
+  if (hierarchyEmpty) hierarchyEmpty.hidden = hasHierarchy;
+  if (attributesEmpty) attributesEmpty.hidden = hasAttributes;
+  if (tagsEmpty) tagsEmpty.hidden = hasTags;
+  if (searchEmpty) searchEmpty.hidden = Boolean(query) || hasSearchResults;
+}
+
+function _ensureRvmTagPanelActions(container) {
+  if (container.querySelector('[data-rvm-tag-panel-actions]')) return;
+
+  const tagList =
+    container.querySelector('.rvm-tag-list') ||
+    container.querySelector('#rvm-tag-list');
+
+  if (!tagList) return;
+
+  const header = document.createElement('div');
+  header.className = 'rvm-tag-panel-actions';
+  header.dataset.rvmTagPanelActions = 'true';
+  header.innerHTML = `
+    <div class="rvm-tag-panel-title">Tags</div>
+    <div class="rvm-tag-panel-buttons">
+      <button class="rvm-btn rvm-tag-panel-btn" type="button" data-rvm-tag-action="add" title="Create review tag">
+        + Add
+      </button>
+
+      <label class="rvm-btn rvm-tag-panel-btn rvm-tag-panel-file" title="Import Navisworks / RVM Tags XML">
+        Import XML
+        <input
+          data-rvm-tag-xml-input
+          type="file"
+          accept=".xml,application/xml,text/xml"
+          style="display:none"
+        >
+      </label>
+
+      <button class="rvm-btn rvm-tag-panel-btn" type="button" data-rvm-tag-action="export" title="Export Tags XML">
+        Export XML
+      </button>
+    </div>
+  `;
+
+  tagList.parentElement?.insertBefore(header, tagList);
+}
+
+function _downloadRvmText(filename, content, mime = 'application/xml') {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  URL.revokeObjectURL(url);
+}
+
+function _openRvmTagCreateUi(container) {
+  const existingAddButton = container.querySelector('#rvm-add-tag-btn');
+
+  if (existingAddButton && typeof existingAddButton.click === 'function') {
+    existingAddButton.click();
+    return;
+  }
+
+  try {
+    _openTagModal(container);
+  } catch {
+    notify({
+      type: 'info',
+      message: 'Select an object before creating a tag.',
+    });
+  }
+}
+
+function _bindRvmTagPanelActions(container) {
+  if (container.dataset.rvmTagPanelActionsBound === 'true') return;
+  container.dataset.rvmTagPanelActionsBound = 'true';
+
+  container.addEventListener('click', (event) => {
+    const actionBtn = event.target.closest('[data-rvm-tag-action]');
+    if (!actionBtn || !container.contains(actionBtn)) return;
+
+    const action = actionBtn.dataset.rvmTagAction;
+
+    if (action === 'add') {
+      _openRvmTagCreateUi(container);
+      return;
+    }
+
+    if (action === 'export') {
+      const store = _getRvmTagStore();
+      const xml = store.exportToXml();
+
+      _downloadRvmText('rvm-review-tags.xml', xml, 'application/xml');
+
+      notify({
+        type: 'info',
+        message: 'Exported Tags XML as rvm-review-tags.xml.',
+      });
+
+      _refreshRvmUiStatus(container);
+    }
+  });
+
+  container.addEventListener('change', async (event) => {
+    const input = event.target.closest('[data-rvm-tag-xml-input]');
+    if (!input || !container.contains(input)) return;
+
+    const file = input.files?.[0] || null;
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const store = _getRvmTagStore();
+      const imported = store.importFromXml(text);
+
+      notify({
+        type: 'info',
+        message: `Imported ${imported.length} tag(s) from ${file.name}.`,
+      });
+
+      _refreshRvmUiStatus(container);
+    } catch (err) {
+      notify({
+        type: 'error',
+        message: `Failed to import Tags XML: ${err.message}`,
+      });
+    } finally {
+      input.value = '';
+    }
+  });
+}
+
+function _refreshRvmUiStatus(container) {
+  _updateRvmStatusStrip(container);
+  _refreshRvmEmptyStates(container);
+}
+
+// ── RVM support symbol settings ─────────────────────────────────────────
+
+function _formatSupportScale(value) {
+  return normalizeRvmSupportSymbolScale(value).toFixed(2);
+}
+
+function _ensureRvmSupportSymbolSettings(container) {
+  if (container.querySelector('[data-rvm-support-settings]')) return;
+
+  const rightPanel = container.querySelector('.rvm-right-panel');
+  if (!rightPanel) return;
+
+  const settings = getRvmSupportSymbolSettings();
+  const scale = _formatSupportScale(settings.scaleMultiplier);
+
+  const card = document.createElement('div');
+  card.className = 'rvm-support-settings-card';
+  card.dataset.rvmSupportSettings = 'true';
+
+  card.innerHTML = `
+    <div class="rvm-support-settings-title">Viewer Settings</div>
+
+    <div class="rvm-support-scale-row">
+      <label for="rvm-support-symbol-scale">Support symbol scale</label>
+
+      <div class="rvm-support-scale-controls">
+        <input
+          id="rvm-support-symbol-scale"
+          data-rvm-support-symbol-scale
+          type="range"
+          min="0.25"
+          max="4"
+          step="0.05"
+          value="${_rvmUiEsc(scale)}"
+          title="Scale support symbols"
+        >
+
+        <input
+          data-rvm-support-symbol-scale-number
+          type="number"
+          min="0.25"
+          max="4"
+          step="0.05"
+          value="${_rvmUiEsc(scale)}"
+          title="Support symbol scale multiplier"
+        >
+
+        <button
+          class="rvm-btn rvm-support-scale-reset"
+          type="button"
+          data-rvm-support-symbol-scale-reset
+          title="Reset support symbol scale"
+        >
+          Reset
+        </button>
+      </div>
+
+      <div class="rvm-support-scale-hint">
+        Current multiplier: <b data-rvm-support-symbol-scale-value>${_rvmUiEsc(scale)}×</b>
+      </div>
+    </div>
+  `;
+
+  const firstHeader = rightPanel.querySelector('.rvm-panel-header');
+  if (firstHeader) {
+    firstHeader.insertAdjacentElement('afterend', card);
+  } else {
+    rightPanel.prepend(card);
+  }
+}
+
+function _syncRvmSupportScaleControls(container, scale) {
+  const value = _formatSupportScale(scale);
+
+  const range = container.querySelector('[data-rvm-support-symbol-scale]');
+  const number = container.querySelector('[data-rvm-support-symbol-scale-number]');
+  const display = container.querySelector('[data-rvm-support-symbol-scale-value]');
+
+  if (range) range.value = value;
+  if (number) number.value = value;
+  if (display) display.textContent = `${value}×`;
+}
+
+function _applyRvmSupportScale(
+  container,
+  rawValue,
+  source = 'support-scale-settings',
+  options = {}
+) {
+  const notifyUser = options.notifyUser === true;
+
+  const scaleMultiplier = normalizeRvmSupportSymbolScale(rawValue);
+  const settings = saveRvmSupportSymbolSettings({ scaleMultiplier });
+
+  _syncRvmSupportScaleControls(container, settings.scaleMultiplier);
+
+  const result =
+    _viewer?.setSupportSymbolOptions?.({
+      scaleMultiplier: settings.scaleMultiplier,
+    }) ||
+    applyRvmSupportSymbolSettings(_viewer, {
+      scaleMultiplier: settings.scaleMultiplier,
+    });
+
+  try {
+    _viewer?.scene?.updateMatrixWorld?.(true);
+    if (_viewer?.renderer && _viewer?.camera && _viewer?.scene) {
+      _viewer.renderer.render(_viewer.scene, _viewer.camera);
+      _viewer._css2dRenderer?.render(_viewer.scene, _viewer.camera);
+    }
+  } catch (err) {
+    console.warn('[RVM] Failed to force support symbol refresh:', err);
+  }
+
+  if (notifyUser) {
+    notify({
+      type: 'info',
+      message: `Support symbol scale set to ${settings.scaleMultiplier.toFixed(2)}×.`,
+    });
+  }
+
+  try {
+    emit(RuntimeEvents.RVM_CONFIG_CHANGED, {
+      key: 'supportSymbolScale',
+      source,
+      scaleMultiplier: settings.scaleMultiplier,
+      result,
+    });
+  } catch (err) {
+    console.warn('[RVM] Failed to emit support symbol scale change:', err);
+  }
+
+  return result;
+}
+
+function _previewRvmSupportScaleControls(container, rawValue) {
+  const scaleMultiplier = normalizeRvmSupportSymbolScale(rawValue);
+  _syncRvmSupportScaleControls(container, scaleMultiplier);
+}
+
+function _bindRvmSupportSymbolSettings(container) {
+  if (container.dataset.rvmSupportSymbolSettingsBound === 'true') return;
+  container.dataset.rvmSupportSymbolSettingsBound = 'true';
+
+  container.addEventListener('input', (event) => {
+    const range = event.target.closest('[data-rvm-support-symbol-scale]');
+    const number = event.target.closest('[data-rvm-support-symbol-scale-number]');
+
+    if (!range && !number) return;
+    if (!container.contains(event.target)) return;
+
+    // Preview only. Do not rebuild symbols continuously while dragging.
+    // Continuous rebuild can remove existing symbols if a transient scan finds 0 supports.
+    _previewRvmSupportScaleControls(container, event.target.value);
+  });
+
+  container.addEventListener('change', (event) => {
+    const range = event.target.closest('[data-rvm-support-symbol-scale]');
+    const number = event.target.closest('[data-rvm-support-symbol-scale-number]');
+
+    if (!range && !number) return;
+    if (!container.contains(event.target)) return;
+
+    // Commit once after slider release / number edit.
+    _applyRvmSupportScale(container, event.target.value, 'support-scale-change', {
+      notifyUser: true,
+    });
+  });
+
+  container.addEventListener('click', (event) => {
+    const reset = event.target.closest('[data-rvm-support-symbol-scale-reset]');
+    if (!reset || !container.contains(reset)) return;
+
+    _applyRvmSupportScale(container, 3.0, 'support-scale-reset', {
+      notifyUser: true,
+    });
+  });
+}
+
+function _ensureRvmSupportSettings(container) {
+  _ensureRvmSupportSymbolSettings(container);
+  _bindRvmSupportSymbolSettings(container);
+  _syncRvmSupportScaleControls(container, getRvmSupportSymbolSettings().scaleMultiplier);
+}
+
+function _ensureRvmUiEnhancements(container) {
+  _ensureRvmStatusStrip(container);
+  _ensureRvmEmptyStates(container);
+  _ensureRvmTagPanelActions(container);
+  _bindRvmTagPanelActions(container);
+  _refreshRvmUiStatus(container);
+}
+
+function _bindRvmUiStatusEvents(container) {
+  const refresh = () => {
+    if (!container.isConnected) return;
+    _refreshRvmUiStatus(container);
+  };
+
+  const delayedRefresh = () => {
+    setTimeout(refresh, 0);
+  };
+
+  const handlers = [
+    [RuntimeEvents.RVM_MODEL_LOADED, delayedRefresh],
+    [RuntimeEvents.MODEL_LOADED, delayedRefresh],
+    [RuntimeEvents.RVM_NODE_SELECTED, delayedRefresh],
+    [RuntimeEvents.COMPONENT_PICKED, delayedRefresh],
+    [RuntimeEvents.RVM_TAG_CREATED, delayedRefresh],
+    [RuntimeEvents.RVM_TAG_DELETED, delayedRefresh],
+    [RuntimeEvents.RVM_SEARCH_CHANGED, delayedRefresh],
+  ];
+
+  handlers.forEach(([eventName, handler]) => on(eventName, handler));
+
+  return () => {
+    handlers.forEach(([eventName, handler]) => off(eventName, handler));
+  };
 }
 
 // â”€â”€ Bundle file loader â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -265,25 +1085,87 @@ function _bindSearch(container) {
 // â”€â”€ Keyboard shortcuts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
+function _closeTransientRvmUi(container) {
+  try {
+    _closeTagModal(container);
+  } catch {
+    // Keep ESC safe even if modal code changes.
+  }
+
+  const active = document.activeElement;
+  if (active && container.contains(active)) {
+    const tag = active.tagName?.toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || active.isContentEditable) {
+      active.blur();
+    }
+  }
+
+  const openEls = container.querySelectorAll(
+    '.is-open, .is-menu-open, .rvm-context-menu, .rvm-import-menu, [data-rvm-popover]'
+  );
+
+  openEls.forEach((el) => {
+    el.classList.remove('is-open');
+    el.classList.remove('is-menu-open');
+
+    if (el.tagName?.toLowerCase() === 'details') {
+      el.open = false;
+    }
+
+    if (el.classList.contains('rvm-context-menu') || el.classList.contains('rvm-import-menu')) {
+      el.style.display = 'none';
+    }
+  });
+}
+
+function _resetRvmInteractionToOrbit(container) {
+  _viewer?.cancelMarquee?.();
+  _viewer?.cancelMeasure?.();
+  _viewer?.clearMeasurePreview?.();
+  _viewer?.clearSelection?.();
+  _viewer?.setNavMode?.('orbit');
+
+  _setActiveToolButton(container, 'NAV_ORBIT');
+
+  try {
+    emit(RuntimeEvents.RVM_CONFIG_CHANGED, {
+      key: 'activeTool',
+      tool: 'orbit',
+      source: 'rvm-escape',
+    });
+  } catch (err) {
+    console.warn('[RVM] Failed to emit tool change:', err);
+  }
+}
+
 function _bindShortcuts(container) {
   if (_shortcutHandler) {
-    window.removeEventListener('keydown', _shortcutHandler);
+    window.removeEventListener('keydown', _shortcutHandler, true);
     _shortcutHandler = null;
   }
+
   _shortcutHandler = (e) => {
     if (!container.isConnected) return;
+
     if (e.key === 'Escape') {
-        _closeTagModal(container);
-        _viewer?.clearSelection?.();
-        _viewer?.setNavMode?.('orbit');
-        _setActiveToolButton(container, 'NAV_ORBIT');
-        return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      _closeTransientRvmUi(container);
+      _resetRvmInteractionToOrbit(container);
+
+      return;
     }
+
     const tag = document.activeElement?.tagName?.toLowerCase();
-    if (tag === 'input' || tag === 'textarea') return;
-    if (e.key === 'f' || e.key === 'F') { _viewer?.fitAll?.(); }
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
+    if (e.key === 'f' || e.key === 'F') {
+      _viewer?.fitAll?.();
+    }
   };
-  window.addEventListener('keydown', _shortcutHandler);
+
+  window.addEventListener('keydown', _shortcutHandler, true);
 }
 
 
@@ -306,11 +1188,7 @@ function _buildHTML(caps) {
       </button>
     </div>
     <div class="rvm-ribbon-section rvm-ribbon-nav">
-      ${Object.entries(ACTION_ICONS).map(([id, icon]) => `
-        <button class="rvm-tool-btn ${id === 'NAV_ORBIT' ? 'is-active' : ''}" data-action="${id}" title="${ACTION_LABELS[id] || id}">
-          ${icon}<span>${ACTION_LABELS[id] || id}</span>
-        </button>
-      `).join('')}
+      ${Object.entries(ACTION_ICONS).map(([id, icon]) => _renderToolButton(id, icon)).join('')}
     </div>
     <div class="rvm-ribbon-section rvm-ribbon-search">
       <input type="search" id="rvm-search-input" placeholder="Search objects..." autocomplete="off">
@@ -376,10 +1254,10 @@ function _buildHTML(caps) {
       </div>
       <div style="display:flex;gap:5px;padding:5px;">
         <label class="rvm-btn" style="flex:1;text-align:center;cursor:pointer;" title="Import Tags from XML">
-          Import
+          Import Tags XML
           <input type="file" id="rvm-import-tags-input" accept=".xml" style="display:none">
         </label>
-        <button class="rvm-btn" id="rvm-export-tags-btn" style="flex:1;" disabled title="Export Tags to XML">Export</button>
+        <button class="rvm-btn" id="rvm-export-tags-btn" style="flex:1;" disabled title="Export Tags to XML">Export Tags XML</button>
       </div>
       <div id="rvm-tag-list" class="rvm-tag-list"></div>
       <button class="rvm-btn" id="rvm-add-tag-btn" disabled>+ Add Tag</button>
@@ -686,15 +1564,25 @@ export function renderViewer3DRvm(container) {
   container.innerHTML = _buildHTML(caps);
 
   _renderCapabilityBanner(container, caps);
+  _ensureRvmUiEnhancements(container);
+  _ensureRvmSupportSettings(container);
+
   _bindBundleLoader(container);
   _bindAttrSearch(container);
   _bindSearch(container);
+  _bindToolbarClickedState(container);
   _bindToolbarActions(container);
   _bindResize(container);
   _bindToolStateBridge(container);
   _bindShortcuts(container);
   _bindTabListener();
   _bindTags(container);
+
+  if (_tagEventsOff) {
+    _tagEventsOff();
+    _tagEventsOff = null;
+  }
+  _tagEventsOff = _bindRvmUiStatusEvents(container);
 
   // Initialize the actual RvmViewer3D instance inside the viewport container
   const viewport = container.querySelector('.rvm-viewport');
@@ -825,10 +1713,6 @@ function _bindTags(container) {
       });
   }
 
-  if (_tagEventsOff) {
-    _tagEventsOff();
-    _tagEventsOff = null;
-  }
   const onCreated = () => {
     const filter = filterSelect ? filterSelect.value : 'all';
     _renderTagList(container, filter);
@@ -839,7 +1723,10 @@ function _bindTags(container) {
   };
   on(RuntimeEvents.RVM_TAG_CREATED, onCreated);
   on(RuntimeEvents.RVM_TAG_DELETED, onDeleted);
+
+  const prevOff = _tagEventsOff;
   _tagEventsOff = () => {
+    if (prevOff) prevOff();
     off(RuntimeEvents.RVM_TAG_CREATED, onCreated);
     off(RuntimeEvents.RVM_TAG_DELETED, onDeleted);
   };
@@ -851,7 +1738,7 @@ function _bindTags(container) {
     exportBtn.addEventListener('click', () => {
       if (!_viewer || !_viewer.tagStore) return;
       const xmlString = _viewer.tagStore.exportToXml();
-      downloadText(xmlString, 'tags.xml', 'application/xml');
+      downloadText(xmlString, 'rvm-review-tags.xml', 'application/xml');
     });
   }
 

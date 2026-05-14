@@ -24,7 +24,16 @@ const BLOCK_STARTS = new Set([
   'MESSAGE-SQUARE',
 ]);
 
-const GEOMETRY_KEYS = new Set(['END-POINT', 'CO-ORDS', 'CENTRE-POINT', 'BRANCH1-POINT']);
+const GEOMETRY_KEYS = new Set([
+  'END-POINT',
+  'CO-ORDS',
+  'CENTRE-POINT',
+  'CENTER-POINT',
+  'BRANCH1-POINT',
+  'BRANCH-POINT',
+  'BRANCH_POINT',
+  'BRANCH1_POINT',
+]);
 
 function toText(value) {
   if (value === undefined || value === null) return '';
@@ -72,6 +81,89 @@ function parsePointValue(value, includeBore) {
     if (bore !== null) point.bore = bore;
   }
   return point;
+}
+
+function dist3(a, b) {
+  if (!a || !b) return Number.POSITIVE_INFINITY;
+  return Math.sqrt(
+    ((Number(a.x) || 0) - (Number(b.x) || 0)) ** 2 +
+    ((Number(a.y) || 0) - (Number(b.y) || 0)) ** 2 +
+    ((Number(a.z) || 0) - (Number(b.z) || 0)) ** 2
+  );
+}
+
+function isBranchComponentType(type) {
+  const t = toText(type).toUpperCase();
+  return t === 'TEE' || t === 'OLET' || t.includes('TEE') || t.includes('OLET');
+}
+
+function choosePcfMainAndBranch(type, endPoints, explicitBp, cp) {
+  const points = Array.isArray(endPoints) ? endPoints.filter(Boolean) : [];
+  const branchType = isBranchComponentType(type);
+
+  if (!branchType) {
+    return {
+      ep1: points[0] || null,
+      ep2: points[1] || null,
+      bp: explicitBp || null,
+    };
+  }
+
+  if (explicitBp) {
+    return {
+      ep1: points[0] || null,
+      ep2: points[1] || null,
+      bp: explicitBp,
+    };
+  }
+
+  // TEE/OLET blocks may carry three END-POINT rows and no explicit BRANCH1-POINT.
+  // Use the farthest pair as the main run and the remaining point as the branch.
+  if (points.length >= 3) {
+    let best = { i: 0, j: 1, d: -1 };
+
+    for (let i = 0; i < points.length; i += 1) {
+      for (let j = i + 1; j < points.length; j += 1) {
+        const d = dist3(points[i], points[j]);
+        if (d > best.d) best = { i, j, d };
+      }
+    }
+
+    const branch = points.find((_, idx) => idx !== best.i && idx !== best.j) || null;
+
+    return {
+      ep1: points[best.i] || null,
+      ep2: points[best.j] || null,
+      bp: branch ? { ...branch, bore: Number.isFinite(Number(branch.bore)) ? Number(branch.bore) : 0 } : null,
+    };
+  }
+
+  if (toText(type).toUpperCase().includes('OLET') && cp && points.length >= 1) {
+    let branch = points[0];
+    let bestD = dist3(cp, branch);
+
+    for (const point of points) {
+      const d = dist3(cp, point);
+      if (d > bestD) {
+        branch = point;
+        bestD = d;
+      }
+    }
+
+    const main = points.filter((point) => point !== branch);
+
+    return {
+      ep1: main[0] || points[0] || null,
+      ep2: main[1] || points[1] || null,
+      bp: branch ? { ...branch, bore: Number.isFinite(Number(branch.bore)) ? Number(branch.bore) : 0 } : null,
+    };
+  }
+
+  return {
+    ep1: points[0] || null,
+    ep2: points[1] || null,
+    bp: null,
+  };
 }
 
 function parseHeaderAttrs(text) {
@@ -166,12 +258,22 @@ function canonicalItemFromBlock(block, index, headerAttrs, defaults) {
       if (point) ep.push(point);
     } else if (parsed.key === 'CO-ORDS') {
       supportCoord = parsePointValue(parsed.value, false);
-    } else if (parsed.key === 'CENTRE-POINT') {
+    } else if (parsed.key === 'CENTRE-POINT' || parsed.key === 'CENTER-POINT') {
       cp = parsePointValue(parsed.value, false);
-    } else if (parsed.key === 'BRANCH1-POINT') {
+    } else if (
+      parsed.key === 'BRANCH1-POINT' ||
+      parsed.key === 'BRANCH-POINT' ||
+      parsed.key === 'BRANCH_POINT' ||
+      parsed.key === 'BRANCH1_POINT'
+    ) {
       bp = parsePointValue(parsed.value, true);
     }
   });
+
+  const resolvedGeometry = choosePcfMainAndBranch(type, ep, bp, cp);
+  const resolvedEp1 = resolvedGeometry.ep1;
+  const resolvedEp2 = resolvedGeometry.ep2;
+  const resolvedBp = resolvedGeometry.bp;
 
   const refNo = toText(rawAttrs['COMPONENT-IDENTIFIER'] || rawAttrs['COMPONENT-ATTRIBUTE97'] || buildGeneratedRef(index, defaults));
   const seqNo = toText(rawAttrs['COMPONENT-ATTRIBUTE98'] || buildGeneratedSeq(index, defaults));
@@ -191,13 +293,14 @@ function canonicalItemFromBlock(block, index, headerAttrs, defaults) {
     seqNo,
     pipelineRef: toText(rawAttrs['PIPELINE-REFERENCE'] || headerAttrs['PIPELINE-REFERENCE'] || defaults.defaultPipelineRef || ''),
     lineNoKey: toText(rawAttrs['LINE-NO-KEY'] || rawAttrs['LINE-NUMBER'] || defaults.defaultLineNoKey || ''),
-    ep1: ep[0] || null,
-    ep2: ep[1] || null,
+    ep1: resolvedEp1,
+    ep2: resolvedEp2,
     cp,
-    bp,
+    bp: resolvedBp,
+    branchPoint: resolvedBp ? cloneJson(resolvedBp) : null,
     supportCoord,
-    bore: ep[0] && Number.isFinite(Number(ep[0].bore)) ? Number(ep[0].bore) : toFiniteNumber(rawAttrs.BORE),
-    branchBore: bp && Number.isFinite(Number(bp.bore)) ? Number(bp.bore) : null,
+    bore: resolvedEp1 && Number.isFinite(Number(resolvedEp1.bore)) ? Number(resolvedEp1.bore) : toFiniteNumber(rawAttrs.BORE),
+    branchBore: resolvedBp && Number.isFinite(Number(resolvedBp.bore)) ? Number(resolvedBp.bore) : null,
     wall: toFiniteNumber(rawAttrs['WALL-THICKNESS'] || rawAttrs.WALL_THICK || rawAttrs.WALL),
     corr: toFiniteNumber(rawAttrs['CORROSION-ALLOWANCE'] || rawAttrs.CORR),
     material: toText(rawAttrs.MATERIAL || defaults.defaultMaterial || ''),
@@ -312,6 +415,7 @@ function toSerializerComponent(item) {
   if (normalized.ep2) component.points.push({ ...normalized.ep2, bore: Number.isFinite(normalized.ep2.bore) ? normalized.ep2.bore : normalized.bore || 0 });
   if (normalized.cp) component.centrePoint = cloneJson(normalized.cp);
   if (normalized.bp) component.branch1Point = cloneJson(normalized.bp);
+  if (normalized.branchPoint) component.branchPoint = cloneJson(normalized.branchPoint);
   if (normalized.supportCoord) component.coOrds = cloneJson(normalized.supportCoord);
 
   return component;
