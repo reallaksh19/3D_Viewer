@@ -24,6 +24,8 @@ const REQUIRED_MODULES = Object.freeze([
   'viewer/uxml/UxmlConstants.js',
   'viewer/uxml/UxmlTypes.js',
   'viewer/uxml/UxmlProfileDetector.js',
+  'viewer/uxml/UxmlInputXmlSchemaMapper.js',
+  'viewer/uxml/UxmlStandardXmlSchemaMapper.js',
   'viewer/uxml/UxmlNormalizer.js',
   'viewer/uxml/UxmlValidationGate.js',
   'viewer/uxml/UxmlFaceModelBuilder.js',
@@ -37,13 +39,15 @@ const REQUIRED_MODULES = Object.freeze([
   'viewer/rvm-pcf-extract/RvmUxmlTopologyDiagnosticsPanel.js',
   'viewer/rvm-pcf-extract/RvmPcfExportGuard.js',
   'viewer/rvm-pcf-extract/RvmPcfAcceptedTopologyHandoff.js',
+  'viewer/uxml/UxmlRouteHandoffPolicy.js',
 ]);
 
 const REQUIRED_TESTS = Object.freeze([
   'viewer/tests/uxml-contracts.test.js',
   'viewer/tests/uxml-profile-detector.test.js',
   'viewer/tests/uxml-normalizer.test.js',
-  'viewer/tests/uxml-real-inputxml-schema-audit.test.js',
+  'viewer/tests/uxml-inputxml-schema-mapper.test.js',
+  'viewer/tests/uxml-standard-xml-schema-mapper.test.js',
   'viewer/tests/uxml-validation-gate.test.js',
   'viewer/tests/uxml-face-model-builder.test.js',
   'viewer/tests/uxml-universal-topo-graph-builder.test.js',
@@ -57,12 +61,29 @@ const REQUIRED_TESTS = Object.freeze([
   'viewer/tests/rvm-pcf-export-guard.test.js',
   'viewer/tests/rvm-pcf-accepted-topology-handoff.test.js',
   'viewer/tests/rvm-pcf-uxml-mode-e2e-smoke.test.js',
+  'viewer/tests/uxml-route-handoff-policy.test.js',
 ]);
 
 const REQUIRED_EXPORT_MARKERS = Object.freeze([
   {
     file: 'viewer/uxml/UxmlProfileDetector.js',
     markers: ['detectUxmlProfile', 'detectXmlProfile'],
+  },
+  {
+    file: 'viewer/uxml/UxmlInputXmlSchemaMapper.js',
+    markers: [
+      'mapInputXmlToUxml',
+      'mapInputXmlSchemaToUxml',
+      'UXML_INPUTXML_SCHEMA_MAPPER_SCHEMA',
+    ],
+  },
+  {
+    file: 'viewer/uxml/UxmlStandardXmlSchemaMapper.js',
+    markers: [
+      'mapStandardXmlToUxml',
+      'mapGenericXmlToUxml',
+      'UXML_STANDARD_XML_SCHEMA_MAPPER_SCHEMA',
+    ],
   },
   {
     file: 'viewer/uxml/UxmlNormalizer.js',
@@ -145,6 +166,14 @@ const REQUIRED_EXPORT_MARKERS = Object.freeze([
       'buildRvmPcfAcceptedTopologyHandoff',
       'annotateRowsWithAcceptedTopologyHandoff',
       'createRvmPcfAcceptedTopologyHandoff',
+    ],
+  },
+  {
+    file: 'viewer/uxml/UxmlRouteHandoffPolicy.js',
+    markers: [
+      'evaluateUxmlRouteHandoffPolicy',
+      'createUxmlRouteHandoffPayload',
+      'summarizeUxmlRouteHandoff',
     ],
   },
 ]);

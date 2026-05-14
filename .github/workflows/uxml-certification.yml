@@ -49,7 +49,7 @@ jobs:
             pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
           else
             echo "package.json not found. Installing Vitest as temporary CI dependency."
-            npm install --no-save vitest
+            npm install --no-save vitest jsdom
           fi
 
       - name: Run UXML static certification
@@ -64,8 +64,9 @@ jobs:
             pnpm vitest run \
               viewer/tests/uxml-contracts.test.js \
               viewer/tests/uxml-profile-detector.test.js \
-                            viewer/tests/uxml-normalizer.test.js \
-              viewer/tests/uxml-real-inputxml-schema-audit.test.js \
+              viewer/tests/uxml-normalizer.test.js \
+              viewer/tests/uxml-inputxml-schema-mapper.test.js \
+              viewer/tests/uxml-standard-xml-schema-mapper.test.js \
               viewer/tests/uxml-validation-gate.test.js \
               viewer/tests/uxml-face-model-builder.test.js \
               viewer/tests/uxml-universal-topo-graph-builder.test.js \
@@ -78,13 +79,15 @@ jobs:
             viewer/tests/rvm-pcf-uxml-topology-benchmark.test.js \
             viewer/tests/rvm-pcf-export-guard.test.js \
             viewer/tests/rvm-pcf-accepted-topology-handoff.test.js \
-            viewer/tests/rvm-pcf-uxml-mode-e2e-smoke.test.js
+            viewer/tests/rvm-pcf-uxml-mode-e2e-smoke.test.js \
+            viewer/tests/uxml-route-handoff-policy.test.js
           else
             npx vitest run \
               viewer/tests/uxml-contracts.test.js \
               viewer/tests/uxml-profile-detector.test.js \
-                            viewer/tests/uxml-normalizer.test.js \
-              viewer/tests/uxml-real-inputxml-schema-audit.test.js \
+              viewer/tests/uxml-normalizer.test.js \
+              viewer/tests/uxml-inputxml-schema-mapper.test.js \
+              viewer/tests/uxml-standard-xml-schema-mapper.test.js \
               viewer/tests/uxml-validation-gate.test.js \
               viewer/tests/uxml-face-model-builder.test.js \
               viewer/tests/uxml-universal-topo-graph-builder.test.js \
@@ -97,7 +100,8 @@ jobs:
             viewer/tests/rvm-pcf-uxml-topology-benchmark.test.js \
             viewer/tests/rvm-pcf-export-guard.test.js \
             viewer/tests/rvm-pcf-accepted-topology-handoff.test.js \
-            viewer/tests/rvm-pcf-uxml-mode-e2e-smoke.test.js
+            viewer/tests/rvm-pcf-uxml-mode-e2e-smoke.test.js \
+            viewer/tests/uxml-route-handoff-policy.test.js
           fi
 
       - name: Write certification summary
@@ -117,8 +121,8 @@ jobs:
             echo '```text'
             echo "Summary"
             echo "Certification: ✅ PASS"
-            echo "Required modules: ✅ 13 / 13"
-            echo "Required tests: ✅ 11 / 11"
+            echo "Required modules: ✅ 18 / 18"
+            echo "Required tests: ✅ 19 / 19"
             echo "Vitest: ✅ PASS"
             echo "Other: 0 skip expected"
             echo "Annotations: 0 errors and 0 warnings"

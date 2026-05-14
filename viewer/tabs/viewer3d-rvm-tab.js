@@ -7,6 +7,13 @@ import { RvmViewer3D } from '../rvm-viewer/RvmViewer3D.js';
 import { parseRmssAttributes } from '../converters/rmss-attribute-parser.js';
 import { RvmSearchIndex } from '../rvm/RvmSearchIndex.js';
 import { RvmTagXmlStore } from '../rvm/RvmTagXmlStore.js';
+import {
+  applyRvmSupportSymbolSettings,
+  getRvmSupportSymbolSettings,
+  normalizeRvmSupportSymbolScale,
+  saveRvmSupportSymbolSettings,
+} from '../rvm-viewer/RvmSupportSymbols.js';
+
 
 let _viewer = null;
 let _shortcutHandler = null;
@@ -726,6 +733,144 @@ function _refreshRvmUiStatus(container) {
   _refreshRvmEmptyStates(container);
 }
 
+// ── RVM support symbol settings ─────────────────────────────────────────
+
+function _formatSupportScale(value) {
+  return normalizeRvmSupportSymbolScale(value).toFixed(2);
+}
+
+function _ensureRvmSupportSymbolSettings(container) {
+  if (container.querySelector('[data-rvm-support-settings]')) return;
+
+  const rightPanel = container.querySelector('.rvm-right-panel');
+  if (!rightPanel) return;
+
+  const settings = getRvmSupportSymbolSettings();
+  const scale = _formatSupportScale(settings.scaleMultiplier);
+
+  const card = document.createElement('div');
+  card.className = 'rvm-support-settings-card';
+  card.dataset.rvmSupportSettings = 'true';
+
+  card.innerHTML = `
+    <div class="rvm-support-settings-title">Viewer Settings</div>
+
+    <div class="rvm-support-scale-row">
+      <label for="rvm-support-symbol-scale">Support symbol scale</label>
+
+      <div class="rvm-support-scale-controls">
+        <input
+          id="rvm-support-symbol-scale"
+          data-rvm-support-symbol-scale
+          type="range"
+          min="0.25"
+          max="4"
+          step="0.05"
+          value="${_rvmUiEsc(scale)}"
+          title="Scale support symbols"
+        >
+
+        <input
+          data-rvm-support-symbol-scale-number
+          type="number"
+          min="0.25"
+          max="4"
+          step="0.05"
+          value="${_rvmUiEsc(scale)}"
+          title="Support symbol scale multiplier"
+        >
+
+        <button
+          class="rvm-btn rvm-support-scale-reset"
+          type="button"
+          data-rvm-support-symbol-scale-reset
+          title="Reset support symbol scale"
+        >
+          Reset
+        </button>
+      </div>
+
+      <div class="rvm-support-scale-hint">
+        Current multiplier: <b data-rvm-support-symbol-scale-value>${_rvmUiEsc(scale)}×</b>
+      </div>
+    </div>
+  `;
+
+  const firstHeader = rightPanel.querySelector('.rvm-panel-header');
+  if (firstHeader) {
+    firstHeader.insertAdjacentElement('afterend', card);
+  } else {
+    rightPanel.prepend(card);
+  }
+}
+
+function _syncRvmSupportScaleControls(container, scale) {
+  const value = _formatSupportScale(scale);
+
+  const range = container.querySelector('[data-rvm-support-symbol-scale]');
+  const number = container.querySelector('[data-rvm-support-symbol-scale-number]');
+  const display = container.querySelector('[data-rvm-support-symbol-scale-value]');
+
+  if (range) range.value = value;
+  if (number) number.value = value;
+  if (display) display.textContent = `${value}×`;
+}
+
+function _applyRvmSupportScale(container, rawValue, source = 'support-scale-settings') {
+  const scaleMultiplier = normalizeRvmSupportSymbolScale(rawValue);
+  const settings = saveRvmSupportSymbolSettings({ scaleMultiplier });
+
+  _syncRvmSupportScaleControls(container, settings.scaleMultiplier);
+
+  const result =
+    _viewer?.setSupportSymbolOptions?.({
+      scaleMultiplier: settings.scaleMultiplier,
+    }) ||
+    applyRvmSupportSymbolSettings(_viewer, {
+      scaleMultiplier: settings.scaleMultiplier,
+    });
+
+  notify({
+    type: 'info',
+    message: `Support symbol scale set to ${settings.scaleMultiplier.toFixed(2)}×.`,
+  });
+
+  emit(RuntimeEvents.RVM_TOOL_CHANGED, {
+    tool: 'support-symbol-scale',
+    source,
+    scaleMultiplier: settings.scaleMultiplier,
+    result,
+  });
+}
+
+function _bindRvmSupportSymbolSettings(container) {
+  if (container.dataset.rvmSupportSymbolSettingsBound === 'true') return;
+  container.dataset.rvmSupportSymbolSettingsBound = 'true';
+
+  container.addEventListener('input', (event) => {
+    const range = event.target.closest('[data-rvm-support-symbol-scale]');
+    const number = event.target.closest('[data-rvm-support-symbol-scale-number]');
+
+    if (!range && !number) return;
+    if (!container.contains(event.target)) return;
+
+    _applyRvmSupportScale(container, event.target.value, 'support-scale-input');
+  });
+
+  container.addEventListener('click', (event) => {
+    const reset = event.target.closest('[data-rvm-support-symbol-scale-reset]');
+    if (!reset || !container.contains(reset)) return;
+
+    _applyRvmSupportScale(container, 3.0, 'support-scale-reset');
+  });
+}
+
+function _ensureRvmSupportSettings(container) {
+  _ensureRvmSupportSymbolSettings(container);
+  _bindRvmSupportSymbolSettings(container);
+  _syncRvmSupportScaleControls(container, getRvmSupportSymbolSettings().scaleMultiplier);
+}
+
 function _ensureRvmUiEnhancements(container) {
   _ensureRvmStatusStrip(container);
   _ensureRvmEmptyStates(container);
@@ -1368,6 +1513,7 @@ export function renderViewer3DRvm(container) {
 
   _renderCapabilityBanner(container, caps);
   _ensureRvmUiEnhancements(container);
+  _ensureRvmSupportSettings(container);
 
   _bindBundleLoader(container);
   _bindAttrSearch(container);

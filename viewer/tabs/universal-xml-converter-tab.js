@@ -19,6 +19,15 @@ import { buildUxmlFaceModel } from '../uxml/UxmlFaceModelBuilder.js';
 import { buildUxmlUniversalTopoGraph } from '../uxml/UxmlUniversalTopoGraphBuilder.js';
 import { buildUxmlRayTopoGraph } from '../uxml/UxmlRayTopoGraphBuilder.js';
 import { compareUxmlTopoGraphs } from '../uxml/UxmlTopoGraphComparator.js';
+import {
+  decideUxmlTopologyAcceptance,
+} from '../uxml/UxmlTopologyDecisionGate.js';
+
+import {
+  UXML_ROUTE_TARGETS,
+  createUxmlRouteHandoffPayload,
+  summarizeUxmlRouteHandoff,
+} from '../uxml/UxmlRouteHandoffPolicy.js';
 
 const SOURCE_TYPES = [
   { value: 'AUTO', label: 'Auto detect' },
@@ -74,16 +83,26 @@ const PIPELINE_STAGES = [
     description: 'Compare UniversalTopoGraph and RayTopoGraph evidence.',
   },
   {
+    id: 'decision-gate',
+    title: '9. Decision Gate',
+    description: 'Convert comparator evidence into accepted/manual/rejected topology decisions.',
+  },
+  {
+    id: 'route-handoff',
+    title: '10. Route Handoff Policy',
+    description: 'Decide what downstream route may receive accepted topology evidence.',
+  },
+  {
     id: 'outputs',
-    title: '9. Output Bridges',
-    description: 'Prepare PCF / GLB / 2D / InputXML / CII outputs from accepted topology.',
-    deferred: true,
+    title: '11. Route Targets',
+    description: 'Target routes such as Extract PCF, GLB, 2D, InputXML or CII.',
+    deferred: false,
   },
   {
     id: 'masters',
-    title: '10. Final Master Links',
-    description: 'Line list / piping class / weight master enrichment. Deferred until final phase.',
-    deferred: true,
+    title: '12. Masters by Target Route',
+    description: 'Masters are handled by the downstream route. JSON/RVM → PCF uses the existing legacy master route.',
+    deferred: false,
   },
 ];
 
@@ -164,6 +183,8 @@ function createInitialState() {
       universalGraph: null,
       rayGraph: null,
       comparison: null,
+      topologyDecision: null,
+      routeHandoff: null,
     },
     reports: {
       source: null,
@@ -203,10 +224,18 @@ function extensionFallbackSourceType(fileName = '', text = '') {
 }
 
 export function detectSourceType(fileName = '', text = '') {
-  const profile = detectXmlProfile(text);
+  const name = String(fileName || '').toLowerCase();
+
+  const profile = detectXmlProfile(text, {
+    fileName,
+  });
 
   if (profile.isKnownProfile) {
     return sourceTypeFromProfile(profile.profile);
+  }
+
+  if (name.includes('input') && name.endsWith('.xml')) {
+    return 'INPUT_XML';
   }
 
   return extensionFallbackSourceType(fileName, text);
@@ -271,7 +300,10 @@ export function runUniversalXmlPipelineFromText(text, options = {}) {
 
 export function runPipelineAction(state, action) {
   if (action === 'detect-profile') {
-    const profileReport = detectXmlProfile(state.sourceText);
+    const profileReport = detectXmlProfile(state.sourceText, {
+      fileName: state.sourceFile?.name || '',
+      selectedSourceType: state.selectedSourceType,
+    });
 
     state.pipeline.profileReport = profileReport;
     state.detectedSourceType = profileReport.isKnownProfile
@@ -306,6 +338,8 @@ export function runPipelineAction(state, action) {
 
     const result = normalizeXmlToUxml(state.sourceText, {
       name: state.sourceFile?.name || '',
+      fileName: state.sourceFile?.name || '',
+      selectedSourceType: state.selectedSourceType,
       profileReport,
     });
 
@@ -450,6 +484,59 @@ export function runPipelineAction(state, action) {
     return comparison;
   }
 
+  if (action === 'run-decision-gate') {
+    if (!state.pipeline.comparison) runPipelineAction(state, 'compare-topology');
+
+    const topologyDecision = decideUxmlTopologyAcceptance(state.pipeline.uxml, {
+      comparison: state.pipeline.comparison,
+      allowPartialExport: true,
+      acceptUniversalOnly: true,
+      allowSafeRayPromotions: true,
+      allowFaceProximityPromotions: false,
+      maxPromotionDistanceAlongRayMm: 500,
+      maxPromotionPerpendicularMissMm: 12,
+    });
+
+    state.pipeline.topologyDecision = topologyDecision;
+    state.reports['decision-gate'] = stageReport('decision-gate', topologyDecision);
+
+    state.status = topologyDecision.outputBridgeReady
+      ? {
+          kind: topologyDecision.exportAllowed ? 'ok' : 'warn',
+          message: `Decision gate complete. Accepted=${safeCount(topologyDecision.summary?.acceptedConnectionCount)}, Manual=${safeCount(topologyDecision.summary?.manualReviewCount)}, Unresolved=${safeCount(topologyDecision.summary?.unresolvedCount)}.`,
+        }
+      : {
+          kind: 'warn',
+          message: 'Decision gate complete, but output bridge is not ready.',
+        };
+
+    return topologyDecision;
+  }
+
+  if (action === 'run-route-handoff') {
+    if (!state.pipeline.topologyDecision) runPipelineAction(state, 'run-decision-gate');
+
+    const routeHandoff = createUxmlRouteHandoffPayload({
+      targetRoute: UXML_ROUTE_TARGETS.DIAGNOSTICS_ONLY,
+      uxml: state.pipeline.uxml,
+      topologyDecision: state.pipeline.topologyDecision,
+      acceptedTopologyHandoff: null,
+      diagnostics: state.pipeline.uxml?.diagnostics || [],
+      lossContract: state.pipeline.uxml?.lossContract || [],
+      allowPartialExport: true,
+    });
+
+    state.pipeline.routeHandoff = routeHandoff;
+    state.reports['route-handoff'] = stageReport('route-handoff', routeHandoff.policy);
+
+    state.status = {
+      kind: routeHandoff.allowed ? 'ok' : 'warn',
+      message: summarizeUxmlRouteHandoff(routeHandoff.policy),
+    };
+
+    return routeHandoff;
+  }
+
   if (action === 'run-full-pipeline') {
     runPipelineAction(state, 'detect-profile');
     runPipelineAction(state, 'convert-uxml');
@@ -457,7 +544,9 @@ export function runPipelineAction(state, action) {
     runPipelineAction(state, 'build-face-model');
     runPipelineAction(state, 'build-universal-topology');
     runPipelineAction(state, 'build-ray-topology');
-    return runPipelineAction(state, 'compare-topology');
+    runPipelineAction(state, 'compare-topology');
+    runPipelineAction(state, 'run-decision-gate');
+    return runPipelineAction(state, 'run-route-handoff');
   }
 
   throw new Error(`Unknown UXML action: ${action}`);
@@ -552,7 +641,7 @@ function panelHtml(state) {
     return `
       <section class="uxml-panel-section">
         <h3>Source Intake</h3>
-        <p>Load XML/InputXML/UXML directly. PDF / REV / JSON / TXT / PCF must first go through the existing converter route.</p>
+        <p>Load XML, InputXML, or UXML directly. For JSON/RVM → PCF, use the RVM / JSON → PCF Extract tab and select UXML topology mode.</p>
         ${sourceSummaryHtml(state)}
         ${reportSummaryHtml(p.profileReport, 'Profile Detection')}
         <div class="uxml-preview-block">
@@ -566,45 +655,38 @@ function panelHtml(state) {
   if (panel === 'existing-converter') {
     return `
       <section class="uxml-panel-section">
-        <h3>Existing Converter Output / PCF Extract Bridge</h3>
+        <h3>Existing Converter / Route Bridge</h3>
 
         <p>
-          This Universal XML Converter tab is a standalone XML-first workbench.
-          It directly accepts XML, InputXML, and UXML only.
+          This tab is a standalone XML/InputXML/UXML topology workbench.
+          It does not own the JSON/RVM → PCF production export workflow.
         </p>
 
         <div class="uxml-placeholder">
-          <b>For JSON/RVM → PCF extraction:</b><br>
-          Use the existing <b>RVM / JSON → PCF Extract</b> tab and select:
-          <br><br>
-          <code>Topology mode = UXML topology</code>
-          <br><br>
-          That route converts extracted rows to UXML only for topology generation/checking,
-          then pushes topology evidence back into the existing legacy PCF route.
+          <b>JSON/RVM → PCF production path:</b><br>
+          Open <b>RVM / JSON → PCF Extract</b>, then select
+          <code>Topology mode = UXML topology</code>.
+          That route uses UXML only for topology generation/checking, then continues through
+          the existing master resolution and existing PCF emitter.
         </div>
 
         <div class="uxml-placeholder" style="margin-top:12px;">
-          <b>Routing contract:</b>
+          <b>Standalone XML path in this tab:</b>
           <pre style="white-space:pre-wrap;margin:8px 0 0;">
-JSON/RVM rows
+XML / InputXML / UXML
   ↓
-Existing 2D CSV / row builder
+UXML normalization
   ↓
-Topology mode selector
-  ├─ Legacy topology → existing readiness/topology
-  └─ UXML topology → rows → UXML → FaceModel → UniversalTopoGraph → RayTopoGraph → Comparison
-          ↓
-      Push topology evidence back to rows/readinessGate
-          ↓
-Existing master resolution
-          ↓
-Existing PCF generation/export
+Validation
+  ↓
+FaceModel
+  ↓
+UniversalTopoGraph + RayTopoGraph
+  ↓
+Comparison / diagnostics
+  ↓
+Route handoff
           </pre>
-        </div>
-
-        <div class="uxml-placeholder" style="margin-top:12px;">
-          Raw PDF / REV / JSON / TXT / PCF parsing is intentionally not implemented inside this tab.
-          Those formats must use their existing/planned converters first.
         </div>
       </section>
     `;
@@ -676,12 +758,92 @@ Existing PCF generation/export
     `;
   }
 
+  if (panel === 'decision-gate') {
+    const decision = state.pipeline.topologyDecision;
+
+    return `
+      <section class="uxml-panel-section">
+        <h3>Decision Gate</h3>
+        <p>
+          Converts UniversalTopoGraph/RayTopoGraph comparison evidence into accepted,
+          manual-review, rejected and unresolved topology decisions.
+        </p>
+
+        ${decision ? `
+          <div class="uxml-kv-grid">
+            <div><b>Schema</b><span>${esc(decision.schema)}</span></div>
+            <div><b>Output bridge ready</b><span>${decision.outputBridgeReady ? 'YES' : 'NO'}</span></div>
+            <div><b>Export allowed</b><span>${decision.exportAllowed ? 'YES' : 'NO'}</span></div>
+            <div><b>Accepted</b><span>${safeCount(decision.summary?.acceptedConnectionCount)}</span></div>
+            <div><b>Manual review</b><span>${safeCount(decision.summary?.manualReviewCount)}</span></div>
+            <div><b>Rejected</b><span>${safeCount(decision.summary?.rejectedCount)}</span></div>
+            <div><b>Unresolved</b><span>${safeCount(decision.summary?.unresolvedCount)}</span></div>
+          </div>
+
+          <div class="uxml-placeholder" style="margin-top:12px;">
+            UXML does not move coordinates or apply topology fixes here.
+            This stage only prepares route-handoff decisions.
+          </div>
+        ` : `
+          <div class="uxml-placeholder">Run comparator, then run decision gate.</div>
+        `}
+      </section>
+    `;
+  }
+
+  if (panel === 'route-handoff') {
+    const handoff = state.pipeline.routeHandoff;
+    const policy = handoff?.policy || null;
+
+    return `
+      <section class="uxml-panel-section">
+        <h3>Route Handoff Policy</h3>
+        <p>
+          Decides which downstream route may consume accepted topology evidence.
+          Exporters and masters remain owned by the target route.
+        </p>
+
+        ${policy ? `
+          <div class="uxml-kv-grid">
+            <div><b>Target route</b><span>${esc(policy.targetRouteLabel)}</span></div>
+            <div><b>Allowed</b><span>${policy.allowed ? 'YES' : 'NO'}</span></div>
+            <div><b>Master owner</b><span>${esc(policy.masterOwner)}</span></div>
+            <div><b>Accepted</b><span>${safeCount(policy.decisionSummary?.acceptedConnectionCount)}</span></div>
+            <div><b>Manual</b><span>${safeCount(policy.decisionSummary?.manualReviewCount)}</span></div>
+            <div><b>Rejected</b><span>${safeCount(policy.decisionSummary?.rejectedCount)}</span></div>
+            <div><b>Unresolved</b><span>${safeCount(policy.decisionSummary?.unresolvedCount)}</span></div>
+          </div>
+
+          ${policy.blockedReason ? `
+            <div class="uxml-placeholder" style="margin-top:12px;">
+              <b>Blocked reason:</b><br>${esc(policy.blockedReason)}
+            </div>
+          ` : ''}
+
+          <div class="uxml-placeholder" style="margin-top:12px;">
+            <b>Route contract:</b><br>
+            UXML emits no PCF directly: ${policy.routeContract.uxmlEmitsPcfDirectly ? 'NO' : 'YES'}<br>
+            UXML mutates coordinates: ${policy.routeContract.uxmlMutatesCoordinates ? 'YES' : 'NO'}<br>
+            UXML applies fixes: ${policy.routeContract.uxmlAppliesFixes ? 'YES' : 'NO'}
+          </div>
+        ` : `
+          <div class="uxml-placeholder">Run decision gate, then run route handoff.</div>
+        `}
+      </section>
+    `;
+  }
+
   if (panel === 'outputs') {
     return `
       <section class="uxml-panel-section">
-        <h3>Output Bridges</h3>
-        <p>Deferred. Output bridges will consume accepted topology only; no PCF/GLB/InputXML/CII emission is performed in Agent 09.</p>
-        <div class="uxml-placeholder">Output bridge placeholders only.</div>
+        <h3>Route Handoff</h3>
+        <p>
+          This workbench prepares accepted topology evidence. Actual export is owned by the target route.
+          For JSON/RVM → PCF, the existing Extract PCF route consumes UXML topology mode and continues through legacy masters/PCF export.
+        </p>
+        <div class="uxml-placeholder">
+          Route handoff targets: Extract PCF, GLB, 2D, InputXML, CII.
+        </div>
       </section>
     `;
   }
@@ -689,12 +851,15 @@ Existing PCF generation/export
   if (panel === 'masters') {
     return `
       <section class="uxml-panel-section">
-        <h3>Final Master Links</h3>
-        <p>Deferred. Line list, piping class master and weight master are linked after UXML, UniversalTopoGraph, RayGraph and comparator are stable.</p>
+        <h3>Masters by Target Route</h3>
+        <p>
+          Masters are not resolved in this standalone topology workbench.
+          They are resolved by the downstream route that performs export.
+        </p>
         <div class="uxml-master-placeholder-grid">
-          <div class="uxml-master-card"><h4>Line List</h4><div>Status: Deferred</div></div>
-          <div class="uxml-master-card"><h4>Piping Class Master</h4><div>Status: Deferred</div></div>
-          <div class="uxml-master-card"><h4>Weight Master</h4><div>Status: Deferred</div></div>
+          <div class="uxml-master-card"><h4>JSON/RVM → PCF</h4><div>Status: Existing legacy master route</div></div>
+          <div class="uxml-master-card"><h4>Standalone XML topology</h4><div>Status: Topology diagnostics only</div></div>
+          <div class="uxml-master-card"><h4>Future routes</h4><div>Status: Route-specific master policy</div></div>
         </div>
       </section>
     `;
@@ -724,12 +889,12 @@ function render(container, state) {
       <header class="uxml-header">
         <div>
           <h2>Universal XML Converter</h2>
-          <p>XML-first topology workbench: source → UXML → validation → face model → UniversalTopoGraph + RayTopoGraph comparison → output placeholders.</p>
+          <p>XML/InputXML/UXML topology workbench: source → UXML → validation → face model → UniversalTopoGraph + RayTopoGraph comparison → route handoff.</p>
         </div>
         <div class="uxml-header-badges">
           <span class="uxml-badge">Agent 09</span>
           <span class="uxml-badge">Integrated Pipeline</span>
-          <span class="uxml-badge muted">Masters deferred</span>
+          <span class="uxml-badge muted">Masters by target route</span>
         </div>
       </header>
 
@@ -753,6 +918,8 @@ function render(container, state) {
         <button data-uxml-action="build-universal-topology" type="button" ${state.pipeline.faceModel ? '' : 'disabled'}>Build UniversalTopoGraph</button>
         <button data-uxml-action="build-ray-topology" type="button" ${state.pipeline.faceModel ? '' : 'disabled'}>Build RayTopoGraph</button>
         <button data-uxml-action="compare-topology" type="button" ${state.pipeline.universalGraph && state.pipeline.rayGraph ? '' : 'disabled'}>Compare</button>
+        <button data-uxml-action="run-decision-gate" type="button" ${state.pipeline.comparison ? '' : 'disabled'}>Run decision gate</button>
+        <button data-uxml-action="run-route-handoff" type="button" ${state.pipeline.topologyDecision ? '' : 'disabled'}>Run route handoff</button>
         <button data-uxml-action="run-full-pipeline" type="button" ${xmlReady ? '' : 'disabled'}>Run Full Pipeline</button>
         <button data-uxml-action="export-summary" type="button">Export Summary JSON</button>
       </section>
@@ -917,7 +1084,9 @@ function bindEvents(container, state) {
         if (action === 'build-face-model') state.activePanel = 'face-model';
         if (action === 'build-universal-topology') state.activePanel = 'universal-topology';
         if (action === 'build-ray-topology') state.activePanel = 'ray-topology';
-        if (action === 'compare-topology' || action === 'run-full-pipeline') state.activePanel = 'comparison';
+        if (action === 'compare-topology') state.activePanel = 'comparison';
+        if (action === 'run-decision-gate') state.activePanel = 'decision-gate';
+        if (action === 'run-route-handoff' || action === 'run-full-pipeline') state.activePanel = 'route-handoff';
       }
     } catch (error) {
       state.status = {
@@ -946,4 +1115,5 @@ export const _test = Object.freeze({
   summarizeReport,
   buildSummary,
   canRunXmlActions,
+  PIPELINE_STAGES,
 });

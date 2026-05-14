@@ -16,6 +16,58 @@ const DEFAULT_PIPING_CLASS_REGEX =
 
 const DEFAULT_PIPING_CLASS_REGEX_GROUP = 1;
 
+const DEFAULT_RATING_REGEX = '';
+const DEFAULT_RATING_REGEX_GROUP = 1;
+
+const PIPING_CLASS_REGEX_STORAGE_KEY = 'rvm_pcf_piping_class_regex';
+const PIPING_CLASS_REGEX_GROUP_STORAGE_KEY = 'rvm_pcf_piping_class_regex_group';
+const RATING_REGEX_STORAGE_KEY = 'rvm_pcf_rating_regex';
+const RATING_REGEX_GROUP_STORAGE_KEY = 'rvm_pcf_rating_regex_group';
+
+const RATING_PRIORITY_TOKENS = Object.freeze([
+  '20000',
+  '15000',
+  '10000',
+  '5000',
+  '2500',
+  '1500',
+  '900',
+  '600',
+  '300',
+  '150',
+]);
+
+const HIGH_PRESSURE_RATING_TOKENS = Object.freeze([
+  '20000',
+  '15000',
+  '10000',
+  '5000',
+  '2500',
+  '1500',
+]);
+
+const ASME_CLASS_RATING_TOKENS = Object.freeze([
+  '900',
+  '600',
+  '300',
+  '150',
+]);
+
+const MASTER_APPLY_SCOPES = Object.freeze({
+  PIPELINE_BORE: 'PIPELINE_BORE',
+  PIPELINE: 'PIPELINE',
+  FULL_DATASET: 'FULL_DATASET',
+});
+
+function normalizeMasterApplyScope(value) {
+  const v = clean(value).toUpperCase();
+
+  if (v === MASTER_APPLY_SCOPES.PIPELINE) return MASTER_APPLY_SCOPES.PIPELINE;
+  if (v === MASTER_APPLY_SCOPES.FULL_DATASET) return MASTER_APPLY_SCOPES.FULL_DATASET;
+
+  return MASTER_APPLY_SCOPES.PIPELINE_BORE;
+}
+
 const HIGH_CONFIDENCE_SCORE = 0.92;
 const MIN_FUZZY_SCORE = 0.72;
 const LENGTH_TOLERANCE_MM = 4;
@@ -192,29 +244,178 @@ function resolveLengthMm(row) {
   return null;
 }
 
+function extractRegexGroup(value, regexText, groupNumber) {
+  const text = clean(value);
+  const rxText = clean(regexText);
+  const group = Number(groupNumber || 1);
+
+  if (!text || !rxText) return '';
+
+  try {
+    const re = new RegExp(rxText);
+    const match = text.match(re);
+
+    if (match && match[group]) return clean(match[group]);
+  } catch {
+    return '';
+  }
+
+  return '';
+}
+
+function ratingTokenPattern(token) {
+  return new RegExp(
+    `(?:^|[^A-Z0-9])(?:CL(?:ASS)?|ANSI)?\\s*${token}\\s*(?:#|LB|LBS|CLASS)?(?=$|[^A-Z0-9])`,
+    'i'
+  );
+}
+
+function normalizeResolvedRating(value) {
+  const raw = clean(value);
+  if (!raw) return '';
+
+  const n = toNumber(raw);
+  if (n == null) return '';
+
+  const token = String(Math.round(n));
+
+  if (RATING_PRIORITY_TOKENS.includes(token)) {
+    return token;
+  }
+
+  return '';
+}
+
+function extractRatingTokenFromPipelineRef(pipelineRef) {
+  const ref = clean(pipelineRef);
+  if (!ref) return '';
+
+  for (const token of RATING_PRIORITY_TOKENS) {
+    if (ratingTokenPattern(token).test(ref)) {
+      return token;
+    }
+  }
+
+  return '';
+}
+
+function pipePropertyCacheKey(row) {
+  const pipelineRef = norm(row?.pipelineRef || row?.lineNoKey || row?.lineKey || '');
+  const bore = toNumber(row?.convertedBore);
+
+  return [
+    pipelineRef || 'NO_PIPELINE',
+    bore == null ? 'NO_BORE' : `DN${Math.round(bore)}`,
+  ].join('||');
+}
+
+function pipelinePropertyCacheKey(row) {
+  const pipelineRef = norm(row?.pipelineRef || row?.lineNoKey || row?.lineKey || '');
+
+  return pipelineRef || 'NO_PIPELINE';
+}
+
+function bestRatingForGroup(values = []) {
+  const found = values
+    .map(normalizeResolvedRating)
+    .filter(Boolean);
+
+  if (!found.length) return '';
+
+  for (const token of RATING_PRIORITY_TOKENS) {
+    if (found.includes(token)) return token;
+  }
+
+  return found[0] || '';
+}
+
+function extractPipingClassTokenFromPipelineRef(pipelineRef) {
+  const ref = clean(pipelineRef);
+  if (!ref) return '';
+
+  // Example:
+  // /BTRM-1000-10"-P1710011-66620M0-01/B1
+  // first path segment = BTRM-1000-10"-P1710011-66620M0-01
+  const mainSegment = ref.replace(/^\/+/, '').split('/')[0] || '';
+  const parts = mainSegment.split('-').map(clean).filter(Boolean);
+
+  if (parts.length >= 5 && /^[A-Z0-9]+$/i.test(parts[4])) {
+    return parts[4];
+  }
+
+  // Fallback: scan right-to-left for a spec-like token.
+  // Exclude line number style P1710011 and simple revision tokens like 01.
+  for (let i = parts.length - 1; i >= 0; i -= 1) {
+    const p = clean(parts[i]);
+
+    if (!/^[A-Z0-9]+$/i.test(p)) continue;
+    if (/^P\d+$/i.test(p)) continue;
+    if (/^\d{1,2}$/.test(p)) continue;
+    if (p.length < 4) continue;
+    if (!/[A-Z]/i.test(p) || !/\d/.test(p)) continue;
+
+    return p;
+  }
+
+  return '';
+}
+
+function choosePipingClassFromPipelineRef(pipelineRef, regexValue) {
+  const tokenValue = extractPipingClassTokenFromPipelineRef(pipelineRef);
+  const rx = clean(regexValue);
+  const token = clean(tokenValue);
+
+  // For known AVEVA-style pipeline refs, the structural token is safer than
+  // stale child component data or accidentally-short regex extraction.
+  if (token) return token;
+
+  return rx;
+}
+
 function extractPipingClassFromPipelineRef(pipelineRef, options = {}) {
   const ref = clean(pipelineRef);
   if (!ref) return '';
 
   const regexText =
     options.pipingClassRegex ||
-    localStorage.getItem('rvm_pcf_piping_class_regex') ||
+    localStorage.getItem(PIPING_CLASS_REGEX_STORAGE_KEY) ||
     DEFAULT_PIPING_CLASS_REGEX;
 
   const group =
-    Number(options.pipingClassRegexGroup ?? localStorage.getItem('rvm_pcf_piping_class_regex_group') ?? DEFAULT_PIPING_CLASS_REGEX_GROUP);
+    Number(
+      options.pipingClassRegexGroup ??
+      localStorage.getItem(PIPING_CLASS_REGEX_GROUP_STORAGE_KEY) ??
+      DEFAULT_PIPING_CLASS_REGEX_GROUP
+    );
 
-  try {
-    const re = new RegExp(regexText);
-    const match = ref.match(re);
+  const regexValue = extractRegexGroup(ref, regexText, group);
 
-    if (match && match[group]) return clean(match[group]);
-  } catch {
-    // fallback below
-  }
+  return choosePipingClassFromPipelineRef(ref, regexValue);
+}
 
-  const parts = ref.replace(/^\/+/, '').split(/[/-]+/).filter(Boolean);
-  return clean(parts[4] || '');
+function extractRatingFromPipelineRef(pipelineRef, options = {}) {
+  const ref = clean(pipelineRef);
+  if (!ref) return '';
+
+  const regexText =
+    options.ratingRegex ||
+    localStorage.getItem(RATING_REGEX_STORAGE_KEY) ||
+    DEFAULT_RATING_REGEX;
+
+  const group =
+    Number(
+      options.ratingRegexGroup ??
+      localStorage.getItem(RATING_REGEX_GROUP_STORAGE_KEY) ??
+      DEFAULT_RATING_REGEX_GROUP
+    );
+
+  const regexRating = normalizeResolvedRating(
+    extractRegexGroup(ref, regexText, group)
+  );
+
+  if (regexRating) return regexRating;
+
+  return extractRatingTokenFromPipelineRef(ref);
 }
 
 function normalizeRating(value) {
@@ -332,6 +533,7 @@ function getLineListKey(row) {
 function getLineListCandidateValues(row) {
   return {
     lineNo: getLineListKey(row),
+
     pipingClass: clean(
       row.pipingClass ??
       row.PipingClass ??
@@ -340,6 +542,19 @@ function getLineListCandidateValues(row) {
       row._raw?.['Piping Class'] ??
       ''
     ),
+
+    rating: normalizeResolvedRating(
+      row.rating ??
+      row.Rating ??
+      row.RATING ??
+      row.ratingClass ??
+      row['Pressure Class'] ??
+      row._raw?.Rating ??
+      row._raw?.RATING ??
+      row._raw?.['Pressure Class'] ??
+      ''
+    ),
+
     convertedBore:
       toNumber(row.convertedBore) ??
       toNumber(row['Converted Bore']) ??
@@ -347,6 +562,7 @@ function getLineListCandidateValues(row) {
       toNumber(row.Bore) ??
       toNumber(row._raw?.['Converted Bore']) ??
       null,
+
     p1: clean(row.p1 ?? row.P1 ?? row.CA1 ?? row._raw?.P1 ?? ''),
     t1: clean(row.t1 ?? row.T1 ?? row.CA2 ?? row._raw?.T1 ?? ''),
     insThk: clean(row.insThk ?? row.InsThk ?? row.CA5 ?? row._raw?.InsThk ?? ''),
@@ -357,8 +573,37 @@ function getLineListCandidateValues(row) {
 function applyLineListValuesToRow(row, values, source) {
   if (!row.ca) row.ca = {};
 
-  if (values.pipingClass) row.pipingClass = values.pipingClass;
-  if (values.convertedBore != null) row.convertedBore = values.convertedBore;
+  const refClass = extractPipingClassFromPipelineRef(row.pipelineRef);
+  const refRating = extractRatingFromPipelineRef(row.pipelineRef);
+
+  if (refClass) {
+    row.pipingClass = refClass;
+    row.pipingClassDerived = refClass;
+    row.pipingClassSource = 'PIPELINE-REF-TOKEN';
+  } else if (values.pipingClass) {
+    row.pipingClass = values.pipingClass;
+  }
+
+  const resolvedRating = normalizeResolvedRating(
+    row.rating ||
+    row.ratingClass ||
+    row.ratingDerived ||
+    values.rating ||
+    refRating ||
+    ''
+  );
+
+  if (resolvedRating) {
+    row.rating = resolvedRating;
+    row.ratingDerived = resolvedRating;
+    row.ratingSource = 'PIPELINE-LINELIST-RATING';
+  }
+
+  // Keep convertedBore as read-only source/row property.
+  // Do not require user manual input for convertedBore.
+  if (values.convertedBore != null && row.convertedBore == null) {
+    row.convertedBore = values.convertedBore;
+  }
 
   if (values.p1 !== '') row.ca['1'] = values.p1;
   if (values.t1 !== '') row.ca['2'] = values.t1;
@@ -424,9 +669,140 @@ export class RvmMasterResolutionWorkflow {
     this.overrides = loadOverrides();
   }
 
+_applyPipePropertyCache(rows = [], diagnostics = []) {
+    const boreGroups = new Map();
+    const pipelineGroups = new Map();
+
+    for (const row of rows) {
+      if (!row || row.include === false) continue;
+
+      const boreKey = pipePropertyCacheKey(row);
+      const pipelineKey = pipelinePropertyCacheKey(row);
+
+      if (!boreGroups.has(boreKey)) {
+        boreGroups.set(boreKey, {
+          key: boreKey,
+          pipingClasses: [],
+          ratings: [],
+          rows: [],
+        });
+      }
+
+      if (!pipelineGroups.has(pipelineKey)) {
+        pipelineGroups.set(pipelineKey, {
+          key: pipelineKey,
+          pipingClasses: [],
+          ratings: [],
+          rows: [],
+        });
+      }
+
+      const boreGroup = boreGroups.get(boreKey);
+      const pipelineGroup = pipelineGroups.get(pipelineKey);
+
+      boreGroup.rows.push(row);
+      pipelineGroup.rows.push(row);
+
+      const pipeClass =
+        extractPipingClassFromPipelineRef(row.pipelineRef, this.options) ||
+        row.pipingClassDerived ||
+        row.pipingClass ||
+        '';
+
+      if (pipeClass) {
+        boreGroup.pipingClasses.push(pipeClass);
+        pipelineGroup.pipingClasses.push(pipeClass);
+      }
+
+      const rating =
+        row.rating ||
+        row.ratingClass ||
+        row.ratingDerived ||
+        extractRatingFromPipelineRef(row.pipelineRef, this.options) ||
+        '';
+
+      if (rating) {
+        boreGroup.ratings.push(rating);
+        pipelineGroup.ratings.push(rating);
+      }
+    }
+
+    for (const boreGroup of boreGroups.values()) {
+      const groupPipingClass = clean(boreGroup.pipingClasses[0] || '');
+
+      // Rating rule:
+      // 1. Prefer same Pipeline Ref + Bore.
+      // 2. If missing, inherit from same Pipeline Ref.
+      const sameBoreRating = bestRatingForGroup(boreGroup.ratings);
+      const pipelineKey = pipelinePropertyCacheKey(boreGroup.rows[0]);
+      const samePipelineRating = bestRatingForGroup(pipelineGroups.get(pipelineKey)?.ratings || []);
+      const groupRating = sameBoreRating || samePipelineRating;
+
+      for (const row of boreGroup.rows) {
+        if (groupPipingClass) {
+          const previous = clean(row.pipingClass);
+
+          row.pipingClass = groupPipingClass;
+          row.pipingClassDerived = groupPipingClass;
+          row.pipingClassSource = 'PIPELINE-REF-TOKEN-GROUP';
+
+          if (previous && norm(previous) !== norm(groupPipingClass)) {
+            diagnostics.push({
+              severity: 'WARNING',
+              code: 'PCF-CLASS-GROUP-OVERRIDE',
+              message: `Component piping class "${previous}" overridden by pipe-group piping class "${groupPipingClass}".`,
+              rowNo: row.rowNo,
+              componentType: row.type,
+              pipelineRef: row.pipelineRef,
+              previousPipingClass: previous,
+              derivedPipingClass: groupPipingClass,
+            });
+          }
+        }
+
+        if (groupRating) {
+          const previousRating = clean(row.rating || row.ratingClass || row.ratingDerived);
+
+          row.rating = groupRating;
+          row.ratingDerived = groupRating;
+          row.ratingSource = sameBoreRating
+            ? 'PIPELINE-BORE-RATING-GROUP'
+            : 'PIPELINE-REF-RATING-GROUP';
+
+          if (previousRating && normalizeResolvedRating(previousRating) !== groupRating) {
+            diagnostics.push({
+              severity: 'WARNING',
+              code: 'RATING-GROUP-OVERRIDE',
+              message: `Component rating "${previousRating}" overridden by pipe-group rating "${groupRating}".`,
+              rowNo: row.rowNo,
+              componentType: row.type,
+              pipelineRef: row.pipelineRef,
+              previousRating,
+              derivedRating: groupRating,
+            });
+          }
+
+          if (!sameBoreRating && samePipelineRating) {
+            diagnostics.push({
+              severity: 'INFO',
+              code: 'RATING-INHERITED-FROM-PIPELINE',
+              message: `Rating "${samePipelineRating}" inherited from another bore group with the same Pipeline Ref.`,
+              rowNo: row.rowNo,
+              componentType: row.type,
+              pipelineRef: row.pipelineRef,
+              derivedRating: samePipelineRating,
+            });
+          }
+        }
+      }
+    }
+  }
+
   processRows(rows = []) {
     const requests = [];
     const diagnostics = [];
+
+    this._applyPipePropertyCache(rows, diagnostics);
 
     for (const row of rows) {
       if (!row || row.include === false) continue;
@@ -445,24 +821,50 @@ export class RvmMasterResolutionWorkflow {
     if (!request || !payload) return { applied: 0, diagnostics: [] };
 
     const diagnostics = [];
-    const applyAll = payload.applyAll !== false;
+const applyScope = normalizeMasterApplyScope(payload.applyScope);
     let applied = 0;
 
     const targetRows = (rows || []).filter(row => {
-      if (!applyAll) {
-        return String(row.sourceCanonicalId || row.rowNo) === String(request.rowId);
+      if (row?.include === false) return false;
+
+      if (applyScope === MASTER_APPLY_SCOPES.PIPELINE_BORE) {
+        if (request.kind === 'PIPING_CLASS' || request.kind === 'LINELIST') {
+          return this._samePipePropertyGroup(row, request);
+        }
+
+        if (request.kind === 'WEIGHT') {
+          return this._weightKey(row) === request.weightKey;
+        }
+
+        return false;
       }
 
-      if (request.kind === 'PIPING_CLASS') {
-        return norm(this._derivedPipingClass(row)) === norm(request.derivedPipingClass);
+      if (applyScope === MASTER_APPLY_SCOPES.PIPELINE) {
+        if (request.kind === 'PIPING_CLASS' || request.kind === 'LINELIST') {
+          return this._samePipelineGroup(row, request);
+        }
+
+        // Weight is still protected from broad unsafe propagation.
+        // For weight, Pipeline scope means same pipeline + same weight key.
+        if (request.kind === 'WEIGHT') {
+          return this._samePipelineGroup(row, request) && this._weightKey(row) === request.weightKey;
+        }
+
+        return false;
       }
 
-      if (request.kind === 'LINELIST') {
-        return norm(this._lineListLookupKey(row)) === norm(request.lookupKey);
-      }
+      if (applyScope === MASTER_APPLY_SCOPES.FULL_DATASET) {
+        if (request.kind === 'PIPING_CLASS' || request.kind === 'LINELIST') {
+          return true;
+        }
 
-      if (request.kind === 'WEIGHT') {
-        return this._weightKey(row) === request.weightKey;
+        // For weight, full dataset applies only to rows with same weight key.
+        // This avoids putting one valve/flange weight onto unrelated components.
+        if (request.kind === 'WEIGHT') {
+          return this._weightKey(row) === request.weightKey;
+        }
+
+        return false;
       }
 
       return false;
@@ -514,9 +916,10 @@ export class RvmMasterResolutionWorkflow {
         }
 
         if (payload.action === 'manual') {
-          const values = {
+const values = {
             pipingClass: clean(payload.pipingClass),
-            convertedBore: toNumber(payload.convertedBore),
+            rating: normalizeResolvedRating(payload.rating),
+            convertedBore: null,
             p1: clean(payload.p1),
             t1: clean(payload.t1),
             insThk: clean(payload.insThk),
@@ -629,8 +1032,37 @@ export class RvmMasterResolutionWorkflow {
     requests.push(this._lineListRequest(row, key, fuzzy, fuzzy.length ? 'AMBIGUOUS_FUZZY' : 'NO_MATCH'));
   }
 
-  _resolvePipingClass(row, requests, diagnostics) {
+_resolvePipingClass(row, requests, diagnostics) {
     const derived = this._derivedPipingClass(row);
+    const derivedRating = this._derivedRating(row);
+
+    if (derived) {
+      const previous = clean(row.pipingClass);
+
+      row.pipingClass = derived;
+      row.pipingClassDerived = derived;
+      row.pipingClassSource = 'PIPELINE-REF-TOKEN';
+
+      if (previous && norm(previous) !== norm(derived)) {
+        diagnostics.push({
+          severity: 'WARNING',
+          code: 'PCF-CLASS-CHILD-VALUE-OVERRIDDEN',
+          message: `Component piping class "${previous}" overridden by pipeline reference piping class "${derived}".`,
+          rowNo: row.rowNo,
+          componentType: row.type,
+          pipelineRef: row.pipelineRef,
+          previousPipingClass: previous,
+          derivedPipingClass: derived,
+        });
+      }
+    }
+
+if (derivedRating) {
+      row.rating = derivedRating;
+      row.ratingDerived = derivedRating;
+      row.ratingSource = row.ratingSource || 'PIPELINE-REF-RATING-GROUP';
+    }
+
     if (!derived) return;
 
     const override = this.overrides?.pipingClass?.[norm(derived)];
@@ -791,12 +1223,61 @@ export class RvmMasterResolutionWorkflow {
     );
   }
 
-  _derivedPipingClass(row) {
+_derivedPipingClass(row) {
+    const fromPipelineRef = extractPipingClassFromPipelineRef(row.pipelineRef, this.options);
+
+    if (fromPipelineRef) {
+      return clean(fromPipelineRef);
+    }
+
     return clean(
-      row.pipingClass ||
       row.pipingClassDerived ||
-      extractPipingClassFromPipelineRef(row.pipelineRef, this.options)
+      row.pipingClass ||
+      ''
     );
+  }
+
+_derivedRating(row) {
+    const existing = normalizeResolvedRating(
+      row.rating ||
+      row.ratingClass ||
+      row.ratingDerived ||
+      ''
+    );
+
+    if (existing) return existing;
+
+    return normalizeResolvedRating(
+      extractRatingFromPipelineRef(row.pipelineRef, this.options)
+    );
+  }
+
+_samePipelineGroup(row, request) {
+    const requestPipeRef = norm(request.pipelineRef || request.lookupKey || '');
+    const rowPipeRef = norm(row.pipelineRef || row.lineNoKey || row.lineKey || row.name || '');
+
+    return Boolean(requestPipeRef && rowPipeRef && requestPipeRef === rowPipeRef);
+  }
+
+  _samePipePropertyGroup(row, request) {
+    const requestPipeRef = norm(request.pipelineRef || request.lookupKey || '');
+    const rowPipeRef = norm(row.pipelineRef || row.lineNoKey || row.lineKey || row.name || '');
+
+    if (!requestPipeRef || !rowPipeRef || requestPipeRef !== rowPipeRef) {
+      return false;
+    }
+
+    const requestBore = toNumber(request.boreMm);
+    const rowBore = toNumber(row.convertedBore);
+
+    // If bore is known, group by pipeline + bore.
+    if (requestBore != null && rowBore != null) {
+      return Math.abs(requestBore - rowBore) < 1;
+    }
+
+    // If bore is missing, fall back to pipeline only.
+    // This is still safer than splitting by component type.
+    return true;
   }
 
   _lineListLookupKey(row) {
@@ -816,7 +1297,7 @@ export class RvmMasterResolutionWorkflow {
     return `${type}|${normalizeRating(rating)}|DN${Math.round(boreMm)}|L${Math.round(lengthMm)}`;
   }
 
-  _pipingClassRequest(row, derivedPipingClass, candidates, reason) {
+_pipingClassRequest(row, derivedPipingClass, candidates, reason) {
     return {
       id: requestId('PIPING_CLASS', row, derivedPipingClass),
       kind: 'PIPING_CLASS',
@@ -824,13 +1305,18 @@ export class RvmMasterResolutionWorkflow {
       rowId: String(row.sourceCanonicalId || row.rowNo),
       rowNo: row.rowNo,
       componentType: row.type,
+      name: row.name || row.componentName || '',
       pipelineRef: row.pipelineRef || '',
+      lineNo: row.lineNo || row.lineNoKey || row.lineKey || '',
+      boreMm: toNumber(row.convertedBore),
       derivedPipingClass,
+      derivedRating: this._derivedRating(row),
+      rating: this._derivedRating(row),
       candidates
     };
   }
 
-  _lineListRequest(row, lookupKey, candidates, reason) {
+_lineListRequest(row, lookupKey, candidates, reason) {
     return {
       id: requestId('LINELIST', row, lookupKey),
       kind: 'LINELIST',
@@ -838,13 +1324,19 @@ export class RvmMasterResolutionWorkflow {
       rowId: String(row.sourceCanonicalId || row.rowNo),
       rowNo: row.rowNo,
       componentType: row.type,
+      name: row.name || row.componentName || '',
       pipelineRef: row.pipelineRef || '',
+      lineNo: row.lineNo || row.lineNoKey || row.lineKey || '',
+      boreMm: toNumber(row.convertedBore),
+      derivedPipingClass: this._derivedPipingClass(row),
+      derivedRating: this._derivedRating(row),
+      rating: this._derivedRating(row),
       lookupKey,
       candidates
     };
   }
 
-  _weightRequest(row, weightKey, candidates, reason) {
+_weightRequest(row, weightKey, candidates, reason) {
     return {
       id: requestId('WEIGHT', row, weightKey),
       kind: 'WEIGHT',
@@ -852,10 +1344,14 @@ export class RvmMasterResolutionWorkflow {
       rowId: String(row.sourceCanonicalId || row.rowNo),
       rowNo: row.rowNo,
       componentType: row.type,
+      name: row.name || row.componentName || '',
       pipelineRef: row.pipelineRef || '',
+      lineNo: row.lineNo || row.lineNoKey || row.lineKey || '',
       weightKey,
       boreMm: toNumber(row.convertedBore),
-      rating: clean(row.rating || row.ratingClass || row.pipingClass || ''),
+      rating: this._derivedRating(row),
+      derivedPipingClass: this._derivedPipingClass(row),
+      derivedRating: this._derivedRating(row),
       lengthMm: resolveLengthMm(row),
       candidates
     };
@@ -868,7 +1364,7 @@ function requestTitle(request) {
   }
 
   if (request.kind === 'LINELIST') {
-    return `Line list resolution — ${request.lookupKey || '(blank)'}`;
+    return `Line list resolution — ${request.lookupKey || request.pipelineRef || '(blank)'}`;
   }
 
   if (request.kind === 'WEIGHT') {
@@ -878,34 +1374,259 @@ function requestTitle(request) {
   return 'Master resolution';
 }
 
+function requestBoreLabel(request) {
+  const bore = toNumber(request.boreMm);
+  return bore == null ? '—' : `${Math.round(bore)} DN`;
+}
+
+function requestPipeClassLabel(request) {
+  return clean(
+    request.derivedPipingClass ||
+    request.pipingClass ||
+    ''
+  ) || '—';
+}
+
+function requestRatingLabel(request) {
+  return clean(
+    request.derivedRating ||
+    request.rating ||
+    ''
+  ) || '—';
+}
+
+function requestLineLabel(request) {
+  return clean(
+    request.lineNo ||
+    request.lookupKey ||
+    request.pipelineRef ||
+    ''
+  ) || '—';
+}
+
+function masterResolutionPipePropertyKey(request) {
+  return [
+    norm(request.pipelineRef || request.lookupKey || ''),
+    request.boreMm == null ? 'NO_BORE' : `DN${Math.round(Number(request.boreMm))}`,
+  ].join('||');
+}
+
+function masterResolutionGroupKey(request) {
+  // Important:
+  // Do not split line-list / piping-class resolution by component type.
+  // Pipe-level properties apply to all children on the same pipeline + bore:
+  // PIPE, BEND, TEE, OLET, FLANGE, VALVE, SUPPORT-associated rows, etc.
+  if (request.kind === 'LINELIST' || request.kind === 'PIPING_CLASS') {
+    return masterResolutionPipePropertyKey(request);
+  }
+
+  // Weight remains component-sensitive because weight depends on
+  // component type + bore + rating + length.
+  if (request.kind === 'WEIGHT') {
+    return [
+      request.kind || 'WEIGHT',
+      request.componentType || '',
+      norm(request.pipelineRef || ''),
+      request.boreMm == null ? 'NO_BORE' : `DN${Math.round(Number(request.boreMm))}`,
+      normalizeRating(request.rating || request.derivedRating || request.derivedPipingClass || ''),
+      request.lengthMm == null ? 'NO_LENGTH' : `L${Math.round(Number(request.lengthMm))}`,
+    ].join('||');
+  }
+
+  return masterResolutionPipePropertyKey(request);
+}
+
+function groupMasterRequests(requests = []) {
+  const groups = [];
+  const map = new Map();
+
+  for (let i = 0; i < requests.length; i += 1) {
+    const request = requests[i];
+    const key = masterResolutionGroupKey(request);
+
+    if (!map.has(key)) {
+      const group = {
+        key,
+        pipelineRef: request.pipelineRef || request.lookupKey || '(no pipeline)',
+        bore: requestBoreLabel(request),
+        kinds: new Set(),
+        componentTypes: new Set(),
+        reasons: new Set(),
+        pipingClass: requestPipeClassLabel(request),
+        rating: requestRatingLabel(request),
+        requests: [],
+      };
+
+      map.set(key, group);
+      groups.push(group);
+    }
+
+    const group = map.get(key);
+
+    if (request.kind) group.kinds.add(request.kind);
+    if (request.componentType) group.componentTypes.add(request.componentType);
+    if (request.reason) group.reasons.add(request.reason);
+
+    if ((!group.pipingClass || group.pipingClass === '—') && requestPipeClassLabel(request) !== '—') {
+      group.pipingClass = requestPipeClassLabel(request);
+    }
+
+    if ((!group.rating || group.rating === '—') && requestRatingLabel(request) !== '—') {
+      group.rating = requestRatingLabel(request);
+    }
+
+    group.requests.push({
+      request,
+      index: i,
+    });
+  }
+
+  return groups.sort((a, b) => {
+    return String(a.pipelineRef).localeCompare(String(b.pipelineRef)) ||
+      String(a.bore).localeCompare(String(b.bore));
+  });
+}
+
+function renderRegexHeader(activeRequest) {
+  const currentPipingRegex =
+    localStorage.getItem(PIPING_CLASS_REGEX_STORAGE_KEY) ||
+    DEFAULT_PIPING_CLASS_REGEX;
+
+  const currentPipingGroup =
+    Number(localStorage.getItem(PIPING_CLASS_REGEX_GROUP_STORAGE_KEY) || DEFAULT_PIPING_CLASS_REGEX_GROUP);
+
+  const currentRatingRegex =
+    localStorage.getItem(RATING_REGEX_STORAGE_KEY) ||
+    DEFAULT_RATING_REGEX;
+
+  const currentRatingGroup =
+    Number(localStorage.getItem(RATING_REGEX_GROUP_STORAGE_KEY) || DEFAULT_RATING_REGEX_GROUP);
+
+  const pipelineRef = activeRequest?.pipelineRef || '';
+  const previewPipingClass = extractPipingClassFromPipelineRef(pipelineRef, {
+    pipingClassRegex: currentPipingRegex,
+    pipingClassRegexGroup: currentPipingGroup,
+  });
+
+  const previewRating = extractRatingFromPipelineRef(pipelineRef, {
+    ratingRegex: currentRatingRegex,
+    ratingRegexGroup: currentRatingGroup,
+  });
+
+  return `
+    <div class="rvm-master-regex-header">
+      <div class="rvm-master-regex-title">Pipeline Reference Reader</div>
+
+      <div class="rvm-master-simple-help">
+        <div class="rvm-master-help-line">
+          <b>Example:</b>
+          <code>/BTRM-1000-10"-P1710011-66620M0-01/B1</code>
+        </div>
+        <div class="rvm-master-help-line">
+          The app reads <b>66620M0</b> as the <b>Piping Class</b>.
+        </div>
+        <div class="rvm-master-help-line">
+          Rating is found only if the line text contains values like
+          <b>600</b>, <b>CL600</b>, <b>600#</b>, or if another row in the same pipeline already has rating.
+        </div>
+      </div>
+
+      <div class="rvm-master-regex-preview">
+        <div><b>Pipeline Ref</b></div>
+        <div>${esc(pipelineRef || '—')}</div>
+
+        <div><b>Piping Class</b></div>
+        <div data-regex-preview-piping-class>${esc(previewPipingClass || '—')}</div>
+
+        <div><b>Rating</b></div>
+        <div data-regex-preview-rating>${esc(previewRating || '—')}</div>
+      </div>
+
+      <details class="rvm-master-advanced-regex">
+        <summary>Advanced extraction settings</summary>
+
+        <div class="rvm-master-regex-grid">
+          <label>
+            <span>Piping Class Regex</span>
+            <input data-regex-key="pipingClassRegex" type="text" value="${esc(currentPipingRegex)}"
+              placeholder="Example: (?:^|\\/)[^-\\/]+-[^-]+-[^-]+-[^-]+-([A-Z0-9]+)-[^\\/]+">
+          </label>
+
+          <label>
+            <span>Group</span>
+            <input data-regex-key="pipingClassRegexGroup" type="number" min="1" step="1" value="${esc(currentPipingGroup)}">
+          </label>
+
+          <label>
+            <span>Rating Regex Optional</span>
+            <input data-regex-key="ratingRegex" type="text" value="${esc(currentRatingRegex)}"
+              placeholder="Example: (\\d+)#">
+          </label>
+
+          <label>
+            <span>Group</span>
+            <input data-regex-key="ratingRegexGroup" type="number" min="1" step="1" value="${esc(currentRatingGroup)}">
+          </label>
+        </div>
+
+        <div class="rvm-master-regex-actions">
+          <button type="button" data-action="save-regex">Save Regex</button>
+          <span data-regex-status>Saved regex is applied on next Rebuild 2D CSV / PCF build.</span>
+        </div>
+      </details>
+    </div>
+  `;
+}
+
+function candidateCellText(request, candidate) {
+  if (!candidate) return '';
+
+  if (request.kind === 'PIPING_CLASS') {
+    const rating = getRatingFromMasterRow(candidate.row);
+    return `${candidate.pipingClass || getPipingClassFromMasterRow(candidate.row)}${rating ? ` | Rating ${rating}` : ''} | Score ${(candidate.score || 0).toFixed(3)}`;
+  }
+
+  if (request.kind === 'LINELIST') {
+    const values = getLineListCandidateValues(candidate.row);
+    return `${values.lineNo || candidate.key || ''} | PC ${values.pipingClass || '—'} | Bore ${values.convertedBore ?? '—'} | Score ${(candidate.score || 0).toFixed(3)}`;
+  }
+
+  if (request.kind === 'WEIGHT') {
+    return `${candidate.description || ''} | Bore ${candidate.bore ?? '—'} | Rating ${candidate.rating || '—'} | Length ${candidate.length ?? '—'} | Weight ${candidate.weight ?? '—'}`;
+  }
+
+  return JSON.stringify(candidate.row || candidate);
+}
+
 function renderCandidateRows(request) {
   const candidates = request.candidates || [];
 
   if (!candidates.length) {
-    return `<div style="font-size:12px;color:#fca5a5;margin:8px 0;">No candidates found. Use manual entry.</div>`;
+    return `<div class="rvm-master-empty">No candidates found. Use manual entry.</div>`;
   }
 
   return `
-    <div style="max-height:220px;overflow:auto;border:1px solid #334155;border-radius:8px;">
-      ${candidates.map((c, index) => {
-        let text = '';
-
-        if (request.kind === 'PIPING_CLASS') {
-          text = `${c.pipingClass || getPipingClassFromMasterRow(c.row)} | rating=${getRatingFromMasterRow(c.row) || '-'} | score=${Number(c.score || 0).toFixed(3)}`;
-        } else if (request.kind === 'LINELIST') {
-          const v = getLineListCandidateValues(c.row);
-          text = `${c.key || v.lineNo || '-'} | PC=${v.pipingClass || '-'} | Bore=${v.convertedBore ?? '-'} | CA1=${v.p1 || '-'} | score=${Number(c.score || 0).toFixed(3)}`;
-        } else if (request.kind === 'WEIGHT') {
-          text = `Rating=${c.rating || '-'} | Bore=${c.bore ?? '-'} | Length=${c.length ?? '-'} | Weight=${c.weight ?? '-'} | ${c.description || ''}`;
-        }
-
-        return `
-          <label style="display:block;padding:8px 10px;border-bottom:1px solid #1e293b;cursor:pointer;font-size:12px;">
-            <input type="radio" name="candidate-${esc(request.id)}" value="${index}" ${index === 0 ? 'checked' : ''}>
-            <span>${esc(text)}</span>
-          </label>
-        `;
-      }).join('')}
+    <div class="rvm-master-candidate-sheet">
+      <table>
+        <thead>
+          <tr>
+            <th>Select</th>
+            <th>Candidate</th>
+            <th>Score</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${candidates.map((candidate, index) => `
+            <tr>
+              <td>
+                <input type="radio" name="candidateIndex" value="${index}" ${index === 0 ? 'checked' : ''}>
+              </td>
+              <td>${esc(candidateCellText(request, candidate))}</td>
+              <td>${esc(candidate.score != null ? Number(candidate.score).toFixed(3) : '—')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
     </div>
   `;
 }
@@ -913,12 +1634,15 @@ function renderCandidateRows(request) {
 function renderManualFields(request) {
   if (request.kind === 'PIPING_CLASS') {
     return `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">
-        <label style="font-size:12px;">Piping Class
-          <input data-manual="pipingClass" value="${esc(request.derivedPipingClass || '')}" style="width:100%;box-sizing:border-box;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px;">
+      <div class="rvm-master-manual-grid">
+        <label>
+          <span>Piping Class</span>
+          <input name="manualPipingClass" value="${esc(request.derivedPipingClass || '')}" placeholder="e.g. 66620M0">
         </label>
-        <label style="font-size:12px;">Rating
-          <input data-manual="rating" value="" style="width:100%;box-sizing:border-box;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px;">
+
+        <label>
+          <span>Rating</span>
+          <input name="manualRating" value="${esc(request.derivedRating || request.rating || '')}" placeholder="e.g. 150 / 300 / 600 / 150#">
         </label>
       </div>
     `;
@@ -926,24 +1650,41 @@ function renderManualFields(request) {
 
   if (request.kind === 'LINELIST') {
     return `
-      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px;">
-        <label style="font-size:12px;">Piping Class
-          <input data-manual="pipingClass" value="" style="width:100%;box-sizing:border-box;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px;">
+      <div class="rvm-master-readonly-strip">
+        <div><b>Pipeline Ref</b><span>${esc(request.pipelineRef || '—')}</span></div>
+        <div><b>Bore</b><span>${esc(requestBoreLabel(request))}</span></div>
+        <div><b>Derived Piping Class</b><span>${esc(requestPipeClassLabel(request))}</span></div>
+        <div><b>Derived Rating</b><span>${esc(requestRatingLabel(request))}</span></div>
+      </div>
+
+      <div class="rvm-master-note">
+        Converted Bore is not required as manual input because bore is already available from the selected row.
+      </div>
+
+      <div class="rvm-master-manual-grid">
+        <label>
+          <span>Piping Class Override (optional)</span>
+          <input name="manualPipingClass" value="${esc(request.derivedPipingClass || '')}" placeholder="leave blank to keep derived">
         </label>
-        <label style="font-size:12px;">Converted Bore
-          <input data-manual="convertedBore" value="${esc(request.boreMm ?? '')}" style="width:100%;box-sizing:border-box;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px;">
+
+        <label>
+          <span>CA1 / P1</span>
+          <input name="manualP1" placeholder="e.g. kPa with unit">
         </label>
-        <label style="font-size:12px;">P1 / CA1
-          <input data-manual="p1" value="" style="width:100%;box-sizing:border-box;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px;">
+
+        <label>
+          <span>CA2 / T1</span>
+          <input name="manualT1" placeholder="e.g. °C with unit">
         </label>
-        <label style="font-size:12px;">T1 / CA2
-          <input data-manual="t1" value="" style="width:100%;box-sizing:border-box;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px;">
+
+        <label>
+          <span>CA5 / Insulation Thickness</span>
+          <input name="manualInsThk" placeholder="e.g. 45 mm">
         </label>
-        <label style="font-size:12px;">InsThk / CA5
-          <input data-manual="insThk" value="" style="width:100%;box-sizing:border-box;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px;">
-        </label>
-        <label style="font-size:12px;">HP / CA10
-          <input data-manual="hp" value="" style="width:100%;box-sizing:border-box;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px;">
+
+        <label>
+          <span>CA10 / HP</span>
+          <input name="manualHp" placeholder="e.g. kPa with unit">
         </label>
       </div>
     `;
@@ -951,9 +1692,17 @@ function renderManualFields(request) {
 
   if (request.kind === 'WEIGHT') {
     return `
-      <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-top:8px;">
-        <label style="font-size:12px;">Manual Weight / CA8
-          <input data-manual="weight" value="" style="width:100%;box-sizing:border-box;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px;">
+      <div class="rvm-master-readonly-strip">
+        <div><b>Pipeline Ref</b><span>${esc(request.pipelineRef || '—')}</span></div>
+        <div><b>Bore</b><span>${esc(requestBoreLabel(request))}</span></div>
+        <div><b>Rating</b><span>${esc(request.rating || request.derivedRating || request.derivedPipingClass || '—')}</span></div>
+        <div><b>Length</b><span>${esc(request.lengthMm != null ? `${Math.round(request.lengthMm)} mm` : '—')}</span></div>
+      </div>
+
+      <div class="rvm-master-manual-grid">
+        <label>
+          <span>Manual Weight / CA8</span>
+          <input name="manualWeight" type="number" step="0.001" placeholder="kg">
         </label>
       </div>
     `;
@@ -962,162 +1711,692 @@ function renderManualFields(request) {
   return '';
 }
 
+function renderGroupedDataSheet(requests, activeIndex) {
+  const groups = groupMasterRequests(requests);
+
+  return `
+    <div class="rvm-master-sheet">
+      ${groups.map(group => `
+        <div class="rvm-master-group">
+          <div class="rvm-master-group-title">
+            <span>${esc(group.pipelineRef)}</span>
+            <b>→ Bore ${esc(group.bore)}</b>
+            <em>
+              Pipe properties / ${esc(Array.from(group.kinds).join(', ') || 'MASTER')} / ${group.requests.length} request(s)
+            </em>
+
+          </div>
+
+          <table class="rvm-master-sheet-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>Kind</th>
+                <th>Row</th>
+                <th>Type</th>
+                <th>Line / Lookup</th>
+                <th>Piping Class</th>
+                <th>Rating</th>
+                <th>Reason</th>
+                <th>Candidates</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${group.requests.map(({ request, index }) => `
+                <tr class="${index === activeIndex ? 'is-active' : ''}">
+                  <td>
+                    <button type="button" data-select-request="${index}">Open</button>
+                  </td>
+                  <td>${esc(request.kind || '—')}</td>
+                  <td>${esc(request.rowNo || '—')}</td>
+                  <td>${esc(request.componentType || '—')}</td>
+                  <td>${esc(requestLineLabel(request))}</td>
+                  <td>${esc(requestPipeClassLabel(request))}</td>
+                  <td>${esc(requestRatingLabel(request))}</td>
+                  <td>${esc(request.reason || '—')}</td>
+                  <td>${esc((request.candidates || []).length)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderRequestDetail(request, index, total) {
+  return `
+    <div class="rvm-master-detail">
+      <div class="rvm-master-detail-title">
+        <span>${esc(requestTitle(request))}</span>
+        <em>${index + 1} / ${total}</em>
+      </div>
+
+      <div class="rvm-master-detail-kv">
+        <div>Reason</div><div>${esc(request.reason)}</div>
+        <div>Row</div><div>${esc(request.rowNo)}</div>
+        <div>Type</div><div>${esc(request.componentType)}</div>
+        <div>Pipeline Ref</div><div>${esc(request.pipelineRef)}</div>
+        <div>Bore</div><div>${esc(requestBoreLabel(request))}</div>
+        <div>Derived Piping Class</div><div>${esc(requestPipeClassLabel(request))}</div>
+        <div>Derived Rating</div><div>${esc(requestRatingLabel(request))}</div>
+      </div>
+
+      <div class="rvm-master-section-title">Candidate Data Sheet</div>
+      ${renderCandidateRows(request)}
+
+      <div class="rvm-master-section-title">Manual Entry</div>
+      ${renderManualFields(request)}
+
+      <div class="rvm-master-apply-row">
+        <fieldset class="rvm-master-apply-scope">
+          <legend>Apply scope</legend>
+
+          <label>
+            <input type="radio" name="applyScope" value="PIPELINE_BORE" checked>
+            Apply to all rows with same Pipeline Ref + Bore
+          </label>
+
+          <label>
+            <input type="radio" name="applyScope" value="PIPELINE">
+            Apply to all rows with same Pipeline Ref
+          </label>
+
+          <label>
+            <input type="radio" name="applyScope" value="FULL_DATASET">
+            Apply to all rows for full data set
+          </label>
+        </fieldset>
+
+        <div class="rvm-master-apply-buttons">
+          <button type="button" data-action="apply-candidate" ${request.candidates?.length ? '' : 'disabled'}>
+            Apply Selected Candidate
+          </button>
+
+          <button type="button" data-action="apply-manual">
+            Apply Manual
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function collectManualPayload(form, request) {
+  if (request.kind === 'PIPING_CLASS') {
+    return {
+      action: 'manual',
+      pipingClass: clean(form.elements.manualPipingClass?.value),
+      rating: clean(form.elements.manualRating?.value),
+      applyScope: normalizeMasterApplyScope(form.elements.applyScope?.value),
+    };
+  }
+
+  if (request.kind === 'LINELIST') {
+return {
+      action: 'manual',
+      pipingClass: clean(form.elements.manualPipingClass?.value),
+      rating: normalizeResolvedRating(form.elements.manualRating?.value || request.rating || request.derivedRating || ''),
+      // convertedBore intentionally omitted.
+      p1: clean(form.elements.manualP1?.value),
+      t1: clean(form.elements.manualT1?.value),
+      insThk: clean(form.elements.manualInsThk?.value),
+      hp: clean(form.elements.manualHp?.value),
+      applyScope: normalizeMasterApplyScope(form.elements.applyScope?.value),
+    };
+  }
+
+  if (request.kind === 'WEIGHT') {
+    return {
+      action: 'manual',
+      weight: toNumber(form.elements.manualWeight?.value),
+      applyScope: normalizeMasterApplyScope(form.elements.applyScope?.value),
+    };
+  }
+
+  return {
+    action: 'manual',
+    applyScope: normalizeMasterApplyScope(form.elements.applyScope?.value),
+  };
+}
+
+function ensureMasterResolutionStyles() {
+  if (document.getElementById('rvm-master-resolution-datasheet-styles')) return;
+
+  const style = document.createElement('style');
+  style.id = 'rvm-master-resolution-datasheet-styles';
+  style.textContent = `
+    .rvm-master-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: rgba(0, 0, 0, 0.58);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #dbeafe;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .rvm-master-dialog {
+      width: min(1180px, 96vw);
+      max-height: 92vh;
+      background: #111827;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .rvm-master-topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-bottom: 1px solid #334155;
+      background: #0f172a;
+    }
+
+    .rvm-master-topbar h3 {
+      margin: 0;
+      font-size: 14px;
+      color: #f8fafc;
+    }
+
+    .rvm-master-topbar button,
+    .rvm-master-apply-row button,
+    .rvm-master-sheet-table button,
+    .rvm-master-regex-actions button {
+      background: #2563eb;
+      color: #fff;
+      border: 1px solid #60a5fa;
+      border-radius: 6px;
+      padding: 5px 9px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .rvm-master-topbar button:hover,
+    .rvm-master-apply-row button:hover,
+    .rvm-master-sheet-table button:hover,
+    .rvm-master-regex-actions button:hover {
+      background: #1d4ed8;
+    }
+
+    .rvm-master-apply-row button:disabled,
+    .rvm-master-sheet-table button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .rvm-master-body {
+      overflow: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .rvm-master-regex-header {
+      border: 1px solid #334155;
+      border-radius: 10px;
+      background: #162033;
+      padding: 10px;
+    }
+
+    .rvm-master-regex-title,
+    .rvm-master-section-title {
+      color: #bfdbfe;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-size: 11px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    .rvm-master-regex-preview,
+    .rvm-master-detail-kv {
+      display: grid;
+      grid-template-columns: 160px 1fr;
+      gap: 5px 10px;
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+
+    .rvm-master-regex-preview > div:nth-child(odd),
+    .rvm-master-detail-kv > div:nth-child(odd) {
+      color: #93a4bd;
+    }
+
+    .rvm-master-regex-grid,
+    .rvm-master-manual-grid {
+      display: grid;
+      grid-template-columns: 1fr 90px 1fr 90px;
+      gap: 8px;
+      align-items: end;
+    }
+
+    .rvm-master-manual-grid {
+      grid-template-columns: repeat(2, minmax(220px, 1fr));
+    }
+
+    .rvm-master-regex-grid label,
+    .rvm-master-manual-grid label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 11px;
+      color: #9fb0c8;
+    }
+
+    .rvm-master-regex-grid input,
+    .rvm-master-manual-grid input {
+      background: #0f172a;
+      border: 1px solid #334155;
+      color: #e2e8f0;
+      border-radius: 6px;
+      padding: 6px 8px;
+    }
+
+    .rvm-master-regex-actions {
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 11px;
+      color: #93a4bd;
+    }
+
+    .rvm-master-content-grid {
+      display: grid;
+      grid-template-columns: minmax(520px, 1.2fr) minmax(360px, 0.8fr);
+      gap: 12px;
+      min-height: 0;
+    }
+
+    .rvm-master-sheet,
+    .rvm-master-detail {
+      border: 1px solid #334155;
+      border-radius: 10px;
+      background: #111c2f;
+      overflow: auto;
+    }
+
+    .rvm-master-group {
+      border-bottom: 1px solid #26364e;
+    }
+
+    .rvm-master-group-title {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 10px;
+      background: #17243a;
+      font-size: 12px;
+      color: #e2e8f0;
+    }
+
+    .rvm-master-group-title span {
+      font-weight: 800;
+      color: #bfdbfe;
+    }
+
+    .rvm-master-group-title b {
+      color: #7ddc9a;
+    }
+
+    .rvm-master-group-title em {
+      color: #93a4bd;
+      font-style: normal;
+      margin-left: auto;
+    }
+
+    .rvm-master-sheet-table,
+    .rvm-master-candidate-sheet table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+    }
+
+    .rvm-master-sheet-table th,
+    .rvm-master-sheet-table td,
+    .rvm-master-candidate-sheet th,
+    .rvm-master-candidate-sheet td {
+      border-top: 1px solid #26364e;
+      padding: 6px 7px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .rvm-master-sheet-table th,
+    .rvm-master-candidate-sheet th {
+      color: #93c5fd;
+      background: #0f172a;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    .rvm-master-sheet-table tr.is-active {
+      background: rgba(37, 99, 235, 0.18);
+      outline: 1px solid rgba(96, 165, 250, 0.45);
+    }
+
+    .rvm-master-detail {
+      padding: 10px;
+      overflow: auto;
+    }
+
+    .rvm-master-detail-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 13px;
+      font-weight: 800;
+      color: #f8fafc;
+      margin-bottom: 10px;
+    }
+
+    .rvm-master-detail-title em {
+      color: #93a4bd;
+      font-style: normal;
+      font-weight: 600;
+    }
+
+    .rvm-master-empty,
+    .rvm-master-note {
+      padding: 8px 10px;
+      border: 1px dashed #475569;
+      border-radius: 8px;
+      color: #fca5a5;
+      background: rgba(127, 29, 29, 0.12);
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+
+    .rvm-master-note {
+      color: #facc15;
+      background: rgba(161, 98, 7, 0.12);
+    }
+
+    .rvm-master-readonly-strip {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(180px, 1fr));
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .rvm-master-readonly-strip div {
+      background: #0f172a;
+      border: 1px solid #26364e;
+      border-radius: 7px;
+      padding: 6px 8px;
+      font-size: 11px;
+    }
+
+    .rvm-master-readonly-strip b {
+      display: block;
+      color: #93a4bd;
+      margin-bottom: 2px;
+    }
+
+    .rvm-master-readonly-strip span {
+      color: #dbeafe;
+      font-weight: 700;
+    }
+
+.rvm-master-apply-row {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid #334155;
+      display: flex;
+      align-items: stretch;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+      font-size: 12px;
+      color: #cbd5e1;
+    }
+
+    .rvm-master-apply-scope {
+      flex: 1 1 420px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin: 0;
+      padding: 8px 10px;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      background: #0f172a;
+    }
+
+    .rvm-master-apply-scope legend {
+      padding: 0 4px;
+      color: #93c5fd;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .rvm-master-apply-scope label {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: #dbeafe;
+      font-size: 12px;
+    }
+
+    .rvm-master-apply-scope input[type="radio"] {
+      accent-color: #2563eb;
+    }
+
+    .rvm-master-apply-buttons {
+      display: flex;
+      align-items: flex-end;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+.rvm-master-simple-help {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 10px;
+      padding: 9px 10px;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #dbeafe;
+      font-size: 12px;
+    }
+
+    .rvm-master-help-line code {
+      color: #93c5fd;
+      background: rgba(37, 99, 235, 0.16);
+      padding: 2px 5px;
+      border-radius: 4px;
+    }
+
+    .rvm-master-advanced-regex {
+      margin-top: 8px;
+      border-top: 1px solid #334155;
+      padding-top: 8px;
+    }
+
+    .rvm-master-advanced-regex summary {
+      cursor: pointer;
+      color: #93c5fd;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    @media (max-width: 980px) {
+      .rvm-master-content-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .rvm-master-regex-grid,
+      .rvm-master-manual-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  `;
+
+  document.head.appendChild(style);
+}
+
+function saveRegexConfigFromDialog(dialog, activeRequest) {
+  const get = key => dialog.querySelector(`[data-regex-key="${key}"]`)?.value ?? '';
+
+  const pipingRegex = get('pipingClassRegex');
+  const pipingGroup = Number(get('pipingClassRegexGroup') || 1);
+  const ratingRegex = get('ratingRegex');
+  const ratingGroup = Number(get('ratingRegexGroup') || 1);
+
+  localStorage.setItem(PIPING_CLASS_REGEX_STORAGE_KEY, pipingRegex);
+  localStorage.setItem(PIPING_CLASS_REGEX_GROUP_STORAGE_KEY, String(pipingGroup || 1));
+  localStorage.setItem(RATING_REGEX_STORAGE_KEY, ratingRegex);
+  localStorage.setItem(RATING_REGEX_GROUP_STORAGE_KEY, String(ratingGroup || 1));
+
+  const pipelineRef = activeRequest?.pipelineRef || '';
+  const pc = extractPipingClassFromPipelineRef(pipelineRef, {
+    pipingClassRegex: pipingRegex,
+    pipingClassRegexGroup: pipingGroup || 1,
+  });
+
+  const rating = extractRatingFromPipelineRef(pipelineRef, {
+    ratingRegex,
+    ratingRegexGroup: ratingGroup || 1,
+  });
+
+  const pcEl = dialog.querySelector('[data-regex-preview-piping-class]');
+  const ratingEl = dialog.querySelector('[data-regex-preview-rating]');
+  const statusEl = dialog.querySelector('[data-regex-status]');
+
+  if (pcEl) pcEl.textContent = pc || '—';
+  if (ratingEl) ratingEl.textContent = rating || '—';
+  if (statusEl) statusEl.textContent = 'Saved. Rebuild 2D CSV / PCF to apply to all rows.';
+}
+
 export function showRvmMasterResolutionDialog({
   requests = [],
   rows = [],
   resolver,
   onApplied
 } = {}) {
-  if (typeof document === 'undefined') return;
   if (!requests.length || !resolver) return;
 
-  const existing = document.getElementById('rvm-master-resolution-dialog');
-  if (existing) existing.remove();
+  ensureMasterResolutionStyles();
 
-  let index = 0;
+  let activeIndex = 0;
 
   const overlay = document.createElement('div');
-  overlay.id = 'rvm-master-resolution-dialog';
-  overlay.style.cssText = `
-    position:fixed;
-    inset:0;
-    background:rgba(2,6,23,.74);
-    z-index:99999;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    color:#e2e8f0;
-    font-family:Inter,Arial,sans-serif;
-  `;
+  overlay.className = 'rvm-master-overlay';
 
-  const shell = document.createElement('div');
-  shell.style.cssText = `
-    width:min(960px,calc(100vw - 48px));
-    max-height:calc(100vh - 48px);
-    background:#0f172a;
-    border:1px solid #334155;
-    border-radius:14px;
-    box-shadow:0 24px 80px rgba(0,0,0,.45);
-    display:flex;
-    flex-direction:column;
-    overflow:hidden;
-  `;
+  function render() {
+    const activeRequest = requests[activeIndex] || requests[0];
 
-  overlay.appendChild(shell);
-  document.body.appendChild(overlay);
-
-  const render = () => {
-    const request = requests[index];
-    const hasCandidates = (request.candidates || []).length > 0;
-
-    shell.innerHTML = `
-      <div style="padding:14px 16px;border-bottom:1px solid #334155;display:flex;align-items:center;gap:10px;">
-        <div style="font-weight:700;font-size:15px;">${esc(requestTitle(request))}</div>
-        <div style="margin-left:auto;font-size:12px;color:#94a3b8;">${index + 1} / ${requests.length}</div>
-        <button data-close style="background:transparent;color:#cbd5e1;border:1px solid #475569;border-radius:8px;padding:5px 9px;cursor:pointer;">Close</button>
-      </div>
-
-      <div style="padding:14px 16px;overflow:auto;">
-        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:12px;font-size:12px;">
-          <div><b>Reason</b><br>${esc(request.reason)}</div>
-          <div><b>Row</b><br>${esc(request.rowNo)}</div>
-          <div><b>Type</b><br>${esc(request.componentType)}</div>
-          <div><b>Pipeline Ref</b><br>${esc(request.pipelineRef || '-')}</div>
+    overlay.innerHTML = `
+      <div class="rvm-master-dialog" role="dialog" aria-modal="true">
+        <div class="rvm-master-topbar">
+          <h3>Master Resolution Data Sheet — ${requests.length} pending item(s)</h3>
+          <button type="button" data-action="close">Close</button>
         </div>
 
-        ${request.kind === 'WEIGHT' ? `
-          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:12px;font-size:12px;">
-            <div><b>Bore</b><br>${esc(request.boreMm ?? '-')}</div>
-            <div><b>Rating / Class</b><br>${esc(request.rating || '-')}</div>
-            <div><b>Length</b><br>${esc(request.lengthMm != null ? Number(request.lengthMm).toFixed(2) : '-')}</div>
+        <form class="rvm-master-body">
+          ${renderRegexHeader(activeRequest)}
+
+          <div class="rvm-master-content-grid">
+            ${renderGroupedDataSheet(requests, activeIndex)}
+            ${renderRequestDetail(activeRequest, activeIndex, requests.length)}
           </div>
-        ` : ''}
-
-        ${renderCandidateRows(request)}
-
-        <div style="margin-top:12px;padding:10px;border:1px solid #334155;border-radius:8px;background:#111827;">
-          <div style="font-weight:700;font-size:12px;color:#fbbf24;margin-bottom:6px;">Manual entry</div>
-          ${renderManualFields(request)}
-        </div>
-
-        <label style="display:flex;align-items:center;gap:7px;margin-top:12px;font-size:12px;color:#cbd5e1;">
-          <input type="checkbox" data-apply-all checked>
-          Apply to all rows with same unresolved key
-        </label>
-      </div>
-
-      <div style="padding:12px 16px;border-top:1px solid #334155;display:flex;gap:8px;justify-content:flex-end;">
-        <button data-prev ${index === 0 ? 'disabled' : ''} style="padding:7px 12px;border-radius:8px;border:1px solid #475569;background:#020617;color:#e2e8f0;cursor:pointer;">Previous</button>
-        <button data-use-candidate ${hasCandidates ? '' : 'disabled'} style="padding:7px 12px;border-radius:8px;border:1px solid #2563eb;background:#2563eb;color:white;cursor:pointer;">Use selected candidate</button>
-        <button data-use-manual style="padding:7px 12px;border-radius:8px;border:1px solid #d97706;background:#d97706;color:white;cursor:pointer;">Use manual entry</button>
-        <button data-skip style="padding:7px 12px;border-radius:8px;border:1px solid #475569;background:#020617;color:#e2e8f0;cursor:pointer;">Skip</button>
-        <button data-next ${index >= requests.length - 1 ? 'disabled' : ''} style="padding:7px 12px;border-radius:8px;border:1px solid #475569;background:#020617;color:#e2e8f0;cursor:pointer;">Next</button>
+        </form>
       </div>
     `;
+  }
 
-    shell.querySelector('[data-close]')?.addEventListener('click', () => overlay.remove());
+  function activeRequest() {
+    return requests[activeIndex] || requests[0];
+  }
 
-    shell.querySelector('[data-prev]')?.addEventListener('click', () => {
-      index = Math.max(0, index - 1);
+  function activeForm() {
+    return overlay.querySelector('form');
+  }
+
+  function applyResult(result) {
+    if (typeof onApplied === 'function') {
+      onApplied(result);
+    }
+  }
+
+  overlay.addEventListener('click', event => {
+    const closeBtn = event.target.closest('[data-action="close"]');
+    if (closeBtn) {
+      overlay.remove();
+      return;
+    }
+
+    const selectBtn = event.target.closest('[data-select-request]');
+    if (selectBtn) {
+      activeIndex = Number(selectBtn.getAttribute('data-select-request') || 0);
       render();
-    });
+      return;
+    }
 
-    shell.querySelector('[data-next]')?.addEventListener('click', () => {
-      index = Math.min(requests.length - 1, index + 1);
-      render();
-    });
+    const saveRegexBtn = event.target.closest('[data-action="save-regex"]');
+    if (saveRegexBtn) {
+      saveRegexConfigFromDialog(overlay, activeRequest());
+      return;
+    }
 
-    shell.querySelector('[data-skip]')?.addEventListener('click', () => {
-      if (index < requests.length - 1) {
-        index += 1;
-        render();
-      } else {
-        overlay.remove();
-      }
-    });
+    const applyCandidateBtn = event.target.closest('[data-action="apply-candidate"]');
+    if (applyCandidateBtn) {
+      const request = activeRequest();
+      const form = activeForm();
 
-    shell.querySelector('[data-use-candidate]')?.addEventListener('click', () => {
-      const selected = shell.querySelector(`input[name="candidate-${CSS.escape(request.id)}"]:checked`);
-      const candidateIndex = Number(selected?.value ?? 0);
-      const applyAll = shell.querySelector('[data-apply-all]')?.checked !== false;
+      const candidateIndex = Number(form.elements.candidateIndex?.value ?? 0);
+      const applyScope = normalizeMasterApplyScope(form.elements.applyScope?.value);
 
       const result = resolver.applyRequestResolution(rows, request, {
         action: 'candidate',
         candidateIndex,
-        applyAll
+        applyScope,
       });
 
-      if (onApplied) onApplied(result);
+      applyResult(result);
+      overlay.remove();
+      return;
+    }
 
-      if (index < requests.length - 1) {
-        index += 1;
-        render();
-      } else {
-        overlay.remove();
-      }
-    });
-
-    shell.querySelector('[data-use-manual]')?.addEventListener('click', () => {
-      const applyAll = shell.querySelector('[data-apply-all]')?.checked !== false;
-      const inputs = Array.from(shell.querySelectorAll('[data-manual]'));
-      const payload = { action: 'manual', applyAll };
-
-      for (const input of inputs) {
-        payload[input.dataset.manual] = input.value;
-      }
+    const applyManualBtn = event.target.closest('[data-action="apply-manual"]');
+    if (applyManualBtn) {
+      const request = activeRequest();
+      const form = activeForm();
+      const payload = collectManualPayload(form, request);
 
       const result = resolver.applyRequestResolution(rows, request, payload);
 
-      if (onApplied) onApplied(result);
+      applyResult(result);
+      overlay.remove();
+    }
+  });
 
-      if (index < requests.length - 1) {
-        index += 1;
-        render();
-      } else {
-        overlay.remove();
-      }
-    });
-  };
+  overlay.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      overlay.remove();
+    }
+  });
 
   render();
+  document.body.appendChild(overlay);
+
+  const firstOpen = overlay.querySelector('[data-select-request]');
+  if (firstOpen) firstOpen.focus();
 }
