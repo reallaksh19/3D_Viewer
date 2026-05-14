@@ -24,6 +24,21 @@ const PIPING_CLASS_REGEX_GROUP_STORAGE_KEY = 'rvm_pcf_piping_class_regex_group';
 const RATING_REGEX_STORAGE_KEY = 'rvm_pcf_rating_regex';
 const RATING_REGEX_GROUP_STORAGE_KEY = 'rvm_pcf_rating_regex_group';
 
+const MASTER_APPLY_SCOPES = Object.freeze({
+  PIPELINE_BORE: 'PIPELINE_BORE',
+  PIPELINE: 'PIPELINE',
+  FULL_DATASET: 'FULL_DATASET',
+});
+
+function normalizeMasterApplyScope(value) {
+  const v = clean(value).toUpperCase();
+
+  if (v === MASTER_APPLY_SCOPES.PIPELINE) return MASTER_APPLY_SCOPES.PIPELINE;
+  if (v === MASTER_APPLY_SCOPES.FULL_DATASET) return MASTER_APPLY_SCOPES.FULL_DATASET;
+
+  return MASTER_APPLY_SCOPES.PIPELINE_BORE;
+}
+
 const HIGH_CONFIDENCE_SCORE = 0.92;
 const MIN_FUZZY_SCORE = 0.72;
 const LENGTH_TOLERANCE_MM = 4;
@@ -219,6 +234,49 @@ function extractRegexGroup(value, regexText, groupNumber) {
   return '';
 }
 
+function extractPipingClassTokenFromPipelineRef(pipelineRef) {
+  const ref = clean(pipelineRef);
+  if (!ref) return '';
+
+  // Example:
+  // /BTRM-1000-10"-P1710011-66620M0-01/B1
+  // first path segment = BTRM-1000-10"-P1710011-66620M0-01
+  const mainSegment = ref.replace(/^\/+/, '').split('/')[0] || '';
+  const parts = mainSegment.split('-').map(clean).filter(Boolean);
+
+  if (parts.length >= 5 && /^[A-Z0-9]+$/i.test(parts[4])) {
+    return parts[4];
+  }
+
+  // Fallback: scan right-to-left for a spec-like token.
+  // Exclude line number style P1710011 and simple revision tokens like 01.
+  for (let i = parts.length - 1; i >= 0; i -= 1) {
+    const p = clean(parts[i]);
+
+    if (!/^[A-Z0-9]+$/i.test(p)) continue;
+    if (/^P\d+$/i.test(p)) continue;
+    if (/^\d{1,2}$/.test(p)) continue;
+    if (p.length < 4) continue;
+    if (!/[A-Z]/i.test(p) || !/\d/.test(p)) continue;
+
+    return p;
+  }
+
+  return '';
+}
+
+function choosePipingClassFromPipelineRef(pipelineRef, regexValue) {
+  const tokenValue = extractPipingClassTokenFromPipelineRef(pipelineRef);
+  const rx = clean(regexValue);
+  const token = clean(tokenValue);
+
+  // For known AVEVA-style pipeline refs, the structural token is safer than
+  // stale child component data or accidentally-short regex extraction.
+  if (token) return token;
+
+  return rx;
+}
+
 function extractPipingClassFromPipelineRef(pipelineRef, options = {}) {
   const ref = clean(pipelineRef);
   if (!ref) return '';
@@ -236,15 +294,8 @@ function extractPipingClassFromPipelineRef(pipelineRef, options = {}) {
     );
 
   const regexValue = extractRegexGroup(ref, regexText, group);
-  if (regexValue) return regexValue;
 
-  const parts = ref.replace(/^\/+/, '').split(/[/-]+/).filter(Boolean);
-
-  // Example:
-  // /BTRM-1000-10"-P1710011-66620M0-01/B1
-  // parts = BTRM, 1000, 10", P1710011, 66620M0, 01, B1
-  // piping class = 66620M0
-  return clean(parts[4] || '');
+  return choosePipingClassFromPipelineRef(ref, regexValue);
 }
 
 function extractRatingFromPipelineRef(pipelineRef, options = {}) {
@@ -406,8 +457,21 @@ function getLineListCandidateValues(row) {
 function applyLineListValuesToRow(row, values, source) {
   if (!row.ca) row.ca = {};
 
-  if (values.pipingClass) row.pipingClass = values.pipingClass;
-  if (values.convertedBore != null) row.convertedBore = values.convertedBore;
+const refClass = extractPipingClassFromPipelineRef(row.pipelineRef);
+
+  if (refClass) {
+    row.pipingClass = refClass;
+    row.pipingClassDerived = refClass;
+    row.pipingClassSource = 'PIPELINE-REF-TOKEN';
+  } else if (values.pipingClass) {
+    row.pipingClass = values.pipingClass;
+  }
+
+  // Keep convertedBore as read-only source/row property.
+  // Do not require user manual input for convertedBore.
+  if (values.convertedBore != null && row.convertedBore == null) {
+    row.convertedBore = values.convertedBore;
+  }
 
   if (values.p1 !== '') row.ca['1'] = values.p1;
   if (values.t1 !== '') row.ca['2'] = values.t1;
@@ -494,23 +558,50 @@ export class RvmMasterResolutionWorkflow {
     if (!request || !payload) return { applied: 0, diagnostics: [] };
 
     const diagnostics = [];
-    const applyAll = payload.applyAll !== false;
+const applyScope = normalizeMasterApplyScope(payload.applyScope);
     let applied = 0;
 
     const targetRows = (rows || []).filter(row => {
-      if (!applyAll) {
-        return String(row.sourceCanonicalId || row.rowNo) === String(request.rowId);
+      if (row?.include === false) return false;
+
+      if (applyScope === MASTER_APPLY_SCOPES.PIPELINE_BORE) {
+        if (request.kind === 'PIPING_CLASS' || request.kind === 'LINELIST') {
+          return this._samePipePropertyGroup(row, request);
+        }
+
+        if (request.kind === 'WEIGHT') {
+          return this._weightKey(row) === request.weightKey;
+        }
+
+        return false;
       }
 
-      // Pipe-level properties apply to all child components under the same
-      // pipeline + bore. Do not split by component type.
-      if (request.kind === 'PIPING_CLASS' || request.kind === 'LINELIST') {
-        return this._samePipePropertyGroup(row, request);
+      if (applyScope === MASTER_APPLY_SCOPES.PIPELINE) {
+        if (request.kind === 'PIPING_CLASS' || request.kind === 'LINELIST') {
+          return this._samePipelineGroup(row, request);
+        }
+
+        // Weight is still protected from broad unsafe propagation.
+        // For weight, Pipeline scope means same pipeline + same weight key.
+        if (request.kind === 'WEIGHT') {
+          return this._samePipelineGroup(row, request) && this._weightKey(row) === request.weightKey;
+        }
+
+        return false;
       }
 
-      // Weight stays component-specific.
-      if (request.kind === 'WEIGHT') {
-        return this._weightKey(row) === request.weightKey;
+      if (applyScope === MASTER_APPLY_SCOPES.FULL_DATASET) {
+        if (request.kind === 'PIPING_CLASS' || request.kind === 'LINELIST') {
+          return true;
+        }
+
+        // For weight, full dataset applies only to rows with same weight key.
+        // This avoids putting one valve/flange weight onto unrelated components.
+        if (request.kind === 'WEIGHT') {
+          return this._weightKey(row) === request.weightKey;
+        }
+
+        return false;
       }
 
       return false;
@@ -677,14 +768,29 @@ export class RvmMasterResolutionWorkflow {
     requests.push(this._lineListRequest(row, key, fuzzy, fuzzy.length ? 'AMBIGUOUS_FUZZY' : 'NO_MATCH'));
   }
 
-  _resolvePipingClass(row, requests, diagnostics) {
+_resolvePipingClass(row, requests, diagnostics) {
     const derived = this._derivedPipingClass(row);
     const derivedRating = this._derivedRating(row);
 
-    if (derived && !row.pipingClass) {
+    if (derived) {
+      const previous = clean(row.pipingClass);
+
       row.pipingClass = derived;
       row.pipingClassDerived = derived;
-      row.pipingClassSource = 'PIPELINE-REF-REGEX';
+      row.pipingClassSource = 'PIPELINE-REF-TOKEN';
+
+      if (previous && norm(previous) !== norm(derived)) {
+        diagnostics.push({
+          severity: 'WARNING',
+          code: 'PCF-CLASS-CHILD-VALUE-OVERRIDDEN',
+          message: `Component piping class "${previous}" overridden by pipeline reference piping class "${derived}".`,
+          rowNo: row.rowNo,
+          componentType: row.type,
+          pipelineRef: row.pipelineRef,
+          previousPipingClass: previous,
+          derivedPipingClass: derived,
+        });
+      }
     }
 
     if (derivedRating && !row.rating) {
@@ -853,11 +959,17 @@ export class RvmMasterResolutionWorkflow {
     );
   }
 
-  _derivedPipingClass(row) {
+_derivedPipingClass(row) {
+    const fromPipelineRef = extractPipingClassFromPipelineRef(row.pipelineRef, this.options);
+
+    if (fromPipelineRef) {
+      return clean(fromPipelineRef);
+    }
+
     return clean(
-      row.pipingClass ||
       row.pipingClassDerived ||
-      extractPipingClassFromPipelineRef(row.pipelineRef, this.options)
+      row.pipingClass ||
+      ''
     );
   }
 
@@ -868,6 +980,13 @@ export class RvmMasterResolutionWorkflow {
       row.ratingDerived ||
       extractRatingFromPipelineRef(row.pipelineRef, this.options)
     );
+  }
+
+_samePipelineGroup(row, request) {
+    const requestPipeRef = norm(request.pipelineRef || request.lookupKey || '');
+    const rowPipeRef = norm(row.pipelineRef || row.lineNoKey || row.lineKey || row.name || '');
+
+    return Boolean(requestPipeRef && rowPipeRef && requestPipeRef === rowPipeRef);
   }
 
   _samePipePropertyGroup(row, request) {
@@ -1311,18 +1430,16 @@ function renderGroupedDataSheet(requests, activeIndex) {
             <span>${esc(group.pipelineRef)}</span>
             <b>→ Bore ${esc(group.bore)}</b>
             <em>
-              ${esc(Array.from(group.kinds).join(', ') || 'MASTER')}
-              /
-              ${esc(Array.from(group.componentTypes).join(', ') || 'ALL COMPONENTS')}
-              /
-              ${group.requests.length} row(s)
+              Pipe properties / ${esc(Array.from(group.kinds).join(', ') || 'MASTER')} / ${group.requests.length} request(s)
             </em>
+
           </div>
 
           <table class="rvm-master-sheet-table">
             <thead>
               <tr>
                 <th></th>
+                <th>Kind</th>
                 <th>Row</th>
                 <th>Type</th>
                 <th>Line / Lookup</th>
@@ -1338,6 +1455,7 @@ function renderGroupedDataSheet(requests, activeIndex) {
                   <td>
                     <button type="button" data-select-request="${index}">Open</button>
                   </td>
+                  <td>${esc(request.kind || '—')}</td>
                   <td>${esc(request.rowNo || '—')}</td>
                   <td>${esc(request.componentType || '—')}</td>
                   <td>${esc(requestLineLabel(request))}</td>
@@ -1380,18 +1498,34 @@ function renderRequestDetail(request, index, total) {
       ${renderManualFields(request)}
 
       <div class="rvm-master-apply-row">
-        <label>
-          <input type="checkbox" name="applyAll" checked>
-          Apply to all rows with same Pipeline Ref + Bore
-        </label>
+        <fieldset class="rvm-master-apply-scope">
+          <legend>Apply scope</legend>
 
-        <button type="button" data-action="apply-candidate" ${request.candidates?.length ? '' : 'disabled'}>
-          Apply Selected Candidate
-        </button>
+          <label>
+            <input type="radio" name="applyScope" value="PIPELINE_BORE" checked>
+            Apply to all rows with same Pipeline Ref + Bore
+          </label>
 
-        <button type="button" data-action="apply-manual">
-          Apply Manual
-        </button>
+          <label>
+            <input type="radio" name="applyScope" value="PIPELINE">
+            Apply to all rows with same Pipeline Ref
+          </label>
+
+          <label>
+            <input type="radio" name="applyScope" value="FULL_DATASET">
+            Apply to all rows for full data set
+          </label>
+        </fieldset>
+
+        <div class="rvm-master-apply-buttons">
+          <button type="button" data-action="apply-candidate" ${request.candidates?.length ? '' : 'disabled'}>
+            Apply Selected Candidate
+          </button>
+
+          <button type="button" data-action="apply-manual">
+            Apply Manual
+          </button>
+        </div>
       </div>
     </div>
   `;
@@ -1403,7 +1537,7 @@ function collectManualPayload(form, request) {
       action: 'manual',
       pipingClass: clean(form.elements.manualPipingClass?.value),
       rating: clean(form.elements.manualRating?.value),
-      applyAll: !!form.elements.applyAll?.checked,
+      applyScope: normalizeMasterApplyScope(form.elements.applyScope?.value),
     };
   }
 
@@ -1416,7 +1550,7 @@ function collectManualPayload(form, request) {
       t1: clean(form.elements.manualT1?.value),
       insThk: clean(form.elements.manualInsThk?.value),
       hp: clean(form.elements.manualHp?.value),
-      applyAll: !!form.elements.applyAll?.checked,
+      applyScope: normalizeMasterApplyScope(form.elements.applyScope?.value),
     };
   }
 
@@ -1424,13 +1558,13 @@ function collectManualPayload(form, request) {
     return {
       action: 'manual',
       weight: toNumber(form.elements.manualWeight?.value),
-      applyAll: !!form.elements.applyAll?.checked,
+      applyScope: normalizeMasterApplyScope(form.elements.applyScope?.value),
     };
   }
 
   return {
     action: 'manual',
-    applyAll: !!form.elements.applyAll?.checked,
+    applyScope: normalizeMasterApplyScope(form.elements.applyScope?.value),
   };
 }
 
@@ -1722,17 +1856,58 @@ function ensureMasterResolutionStyles() {
       font-weight: 700;
     }
 
-    .rvm-master-apply-row {
+.rvm-master-apply-row {
       margin-top: 12px;
       padding-top: 10px;
       border-top: 1px solid #334155;
       display: flex;
-      align-items: center;
+      align-items: stretch;
       justify-content: flex-end;
       gap: 10px;
       flex-wrap: wrap;
       font-size: 12px;
       color: #cbd5e1;
+    }
+
+    .rvm-master-apply-scope {
+      flex: 1 1 420px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin: 0;
+      padding: 8px 10px;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      background: #0f172a;
+    }
+
+    .rvm-master-apply-scope legend {
+      padding: 0 4px;
+      color: #93c5fd;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .rvm-master-apply-scope label {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: #dbeafe;
+      font-size: 12px;
+    }
+
+    .rvm-master-apply-scope input[type="radio"] {
+      accent-color: #2563eb;
+    }
+
+    .rvm-master-apply-buttons {
+      display: flex;
+      align-items: flex-end;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
     }
 
     @media (max-width: 980px) {
@@ -1860,12 +2035,12 @@ export function showRvmMasterResolutionDialog({
       const form = activeForm();
 
       const candidateIndex = Number(form.elements.candidateIndex?.value ?? 0);
-      const applyAll = !!form.elements.applyAll?.checked;
+      const applyScope = normalizeMasterApplyScope(form.elements.applyScope?.value);
 
       const result = resolver.applyRequestResolution(rows, request, {
         action: 'candidate',
         candidateIndex,
-        applyAll,
+        applyScope,
       });
 
       applyResult(result);
