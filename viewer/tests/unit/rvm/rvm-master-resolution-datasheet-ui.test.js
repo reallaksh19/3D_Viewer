@@ -34,6 +34,23 @@ function run() {
     'showRvmMasterResolutionDialog',
     'Master Resolution Data Sheet',
     'Apply to all rows with same Pipeline Ref + Bore',
+    'extractPipingClassTokenFromPipelineRef',
+    'choosePipingClassFromPipelineRef',
+    'PCF-CLASS-CHILD-VALUE-OVERRIDDEN',
+    'PIPELINE-REF-TOKEN',
+    'Pipe properties /',
+    '<th>Kind</th>',
+    'MASTER_APPLY_SCOPES',
+    'normalizeMasterApplyScope',
+    '_samePipelineGroup',
+    'name="applyScope"',
+    'value="PIPELINE_BORE"',
+    'value="PIPELINE"',
+    'value="FULL_DATASET"',
+    'Apply to all rows with same Pipeline Ref',
+    'Apply to all rows for full data set',
+    'rvm-master-apply-scope',
+    'rvm-master-apply-buttons',
   ];
 
   for (const marker of requiredMarkers) {
@@ -46,6 +63,11 @@ function run() {
   assert.ok(
     !js.includes('name="manualConvertedBore"'),
     'manual converted bore input must not be present'
+  );
+
+assert.ok(
+    !js.includes('name="applyAll"'),
+    'old applyAll checkbox must be removed; apply scope must be radio-only'
   );
 
   assert.ok(
