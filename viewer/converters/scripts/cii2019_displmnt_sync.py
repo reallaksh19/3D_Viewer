@@ -219,12 +219,20 @@ def spec_values(spec: Spec | None) -> list[float]:
     return values
 
 
+def pack_spec(values: list[float]) -> list[str]:
+    rows = [format_reals([values[0]])]
+    for case_index in range(9):
+        start = 1 + case_index * 6
+        rows.append(format_reals(values[start:start + 6]))
+    return rows
+
+
 def build_payload(blocks: list[Block]) -> list[str]:
     rows: list[str] = []
 
     for block in blocks:
-        rows.extend(pack_reals(spec_values(block.first)))
-        rows.extend(pack_reals(spec_values(block.second)))
+        rows.extend(pack_spec(spec_values(block.first)))
+        rows.extend(pack_spec(spec_values(block.second)))
 
     return rows
 
