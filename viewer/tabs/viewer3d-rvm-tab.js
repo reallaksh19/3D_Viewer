@@ -816,7 +816,14 @@ function _syncRvmSupportScaleControls(container, scale) {
   if (display) display.textContent = `${value}×`;
 }
 
-function _applyRvmSupportScale(container, rawValue, source = 'support-scale-settings') {
+function _applyRvmSupportScale(
+  container,
+  rawValue,
+  source = 'support-scale-settings',
+  options = {}
+) {
+  const notifyUser = options.notifyUser === true;
+
   const scaleMultiplier = normalizeRvmSupportSymbolScale(rawValue);
   const settings = saveRvmSupportSymbolSettings({ scaleMultiplier });
 
@@ -830,17 +837,25 @@ function _applyRvmSupportScale(container, rawValue, source = 'support-scale-sett
       scaleMultiplier: settings.scaleMultiplier,
     });
 
-  notify({
-    type: 'info',
-    message: `Support symbol scale set to ${settings.scaleMultiplier.toFixed(2)}×.`,
-  });
+  if (notifyUser) {
+    notify({
+      type: 'info',
+      message: `Support symbol scale set to ${settings.scaleMultiplier.toFixed(2)}×.`,
+    });
+  }
 
-  emit(RuntimeEvents.RVM_TOOL_CHANGED, {
-    tool: 'support-symbol-scale',
-    source,
-    scaleMultiplier: settings.scaleMultiplier,
-    result,
-  });
+  try {
+    emit(RuntimeEvents.RVM_CONFIG_CHANGED, {
+      key: 'supportSymbolScale',
+      source,
+      scaleMultiplier: settings.scaleMultiplier,
+      result,
+    });
+  } catch (err) {
+    console.warn('[RVM] Failed to emit support symbol scale change:', err);
+  }
+
+  return result;
 }
 
 function _bindRvmSupportSymbolSettings(container) {
@@ -854,14 +869,32 @@ function _bindRvmSupportSymbolSettings(container) {
     if (!range && !number) return;
     if (!container.contains(event.target)) return;
 
-    _applyRvmSupportScale(container, event.target.value, 'support-scale-input');
+    // Live preview only. No notification spam while dragging.
+    _applyRvmSupportScale(container, event.target.value, 'support-scale-input', {
+      notifyUser: false,
+    });
+  });
+
+  container.addEventListener('change', (event) => {
+    const range = event.target.closest('[data-rvm-support-symbol-scale]');
+    const number = event.target.closest('[data-rvm-support-symbol-scale-number]');
+
+    if (!range && !number) return;
+    if (!container.contains(event.target)) return;
+
+    // Final user-facing confirmation after slider release / number edit.
+    _applyRvmSupportScale(container, event.target.value, 'support-scale-change', {
+      notifyUser: true,
+    });
   });
 
   container.addEventListener('click', (event) => {
     const reset = event.target.closest('[data-rvm-support-symbol-scale-reset]');
     if (!reset || !container.contains(reset)) return;
 
-    _applyRvmSupportScale(container, 3.0, 'support-scale-reset');
+    _applyRvmSupportScale(container, 3.0, 'support-scale-reset', {
+      notifyUser: true,
+    });
   });
 }
 

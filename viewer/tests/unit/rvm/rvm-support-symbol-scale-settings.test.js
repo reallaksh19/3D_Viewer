@@ -83,6 +83,32 @@ function run() {
     'viewer3d-rvm-tab.js must not use undefined _esc helper'
   );
 
+assert.ok(
+    !tabJs.includes('RuntimeEvents.RVM_TOOL_CHANGED, {\n      key: \'supportSymbolScale\''),
+    'support scale must not emit unregistered RuntimeEvents.RVM_TOOL_CHANGED'
+  );
+
+  assert.ok(
+    tabJs.includes('RuntimeEvents.RVM_CONFIG_CHANGED'),
+    'support scale must emit registered RuntimeEvents.RVM_CONFIG_CHANGED'
+  );
+
+  assert.ok(
+    tabJs.includes('notifyUser: false'),
+    'slider input must update silently without notification spam'
+  );
+
+  assert.ok(
+    tabJs.includes('notifyUser: true'),
+    'slider change/reset must show only final notification'
+  );
+
+  assert.ok(
+    tabJs.includes("container.addEventListener('input'") &&
+    tabJs.includes("container.addEventListener('change'"),
+    'support scale must separate live input from final change'
+  );
+
   console.log('[PASS] RVM support symbol scale settings smoke passed.');
 }
 
