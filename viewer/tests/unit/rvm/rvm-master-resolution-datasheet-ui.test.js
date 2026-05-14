@@ -51,6 +51,17 @@ function run() {
     'Apply to all rows for full data set',
     'rvm-master-apply-scope',
     'rvm-master-apply-buttons',
+    'RATING_PRIORITY_TOKENS',
+    'HIGH_PRESSURE_RATING_TOKENS',
+    'ASME_CLASS_RATING_TOKENS',
+    'extractRatingTokenFromPipelineRef',
+    'normalizeResolvedRating',
+    'pipePropertyCacheKey',
+    'bestRatingForGroup',
+    '_applyPipePropertyCache',
+    'PIPELINE-REF-RATING-GROUP',
+    'RATING-GROUP-OVERRIDE',
+    'PIPELINE-REF-TOKEN-GROUP'
   ];
 
   for (const marker of requiredMarkers) {

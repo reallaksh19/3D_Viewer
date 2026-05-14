@@ -24,6 +24,35 @@ const PIPING_CLASS_REGEX_GROUP_STORAGE_KEY = 'rvm_pcf_piping_class_regex_group';
 const RATING_REGEX_STORAGE_KEY = 'rvm_pcf_rating_regex';
 const RATING_REGEX_GROUP_STORAGE_KEY = 'rvm_pcf_rating_regex_group';
 
+const RATING_PRIORITY_TOKENS = Object.freeze([
+  '20000',
+  '15000',
+  '10000',
+  '5000',
+  '2500',
+  '1500',
+  '900',
+  '600',
+  '300',
+  '150',
+]);
+
+const HIGH_PRESSURE_RATING_TOKENS = Object.freeze([
+  '20000',
+  '15000',
+  '10000',
+  '5000',
+  '2500',
+  '1500',
+]);
+
+const ASME_CLASS_RATING_TOKENS = Object.freeze([
+  '900',
+  '600',
+  '300',
+  '150',
+]);
+
 const MASTER_APPLY_SCOPES = Object.freeze({
   PIPELINE_BORE: 'PIPELINE_BORE',
   PIPELINE: 'PIPELINE',
@@ -234,6 +263,66 @@ function extractRegexGroup(value, regexText, groupNumber) {
   return '';
 }
 
+function ratingTokenPattern(token) {
+  return new RegExp(
+    `(?:^|[^A-Z0-9])(?:CL(?:ASS)?|ANSI)?\\s*${token}\\s*(?:#|LB|LBS|CLASS)?(?=$|[^A-Z0-9])`,
+    'i'
+  );
+}
+
+function normalizeResolvedRating(value) {
+  const raw = clean(value);
+  if (!raw) return '';
+
+  const n = toNumber(raw);
+  if (n == null) return '';
+
+  const token = String(Math.round(n));
+
+  if (RATING_PRIORITY_TOKENS.includes(token)) {
+    return token;
+  }
+
+  return '';
+}
+
+function extractRatingTokenFromPipelineRef(pipelineRef) {
+  const ref = clean(pipelineRef);
+  if (!ref) return '';
+
+  for (const token of RATING_PRIORITY_TOKENS) {
+    if (ratingTokenPattern(token).test(ref)) {
+      return token;
+    }
+  }
+
+  return '';
+}
+
+function pipePropertyCacheKey(row) {
+  const pipelineRef = norm(row?.pipelineRef || row?.lineNoKey || row?.lineKey || '');
+  const bore = toNumber(row?.convertedBore);
+
+  return [
+    pipelineRef || 'NO_PIPELINE',
+    bore == null ? 'NO_BORE' : `DN${Math.round(bore)}`,
+  ].join('||');
+}
+
+function bestRatingForGroup(values = []) {
+  const found = values
+    .map(normalizeResolvedRating)
+    .filter(Boolean);
+
+  if (!found.length) return '';
+
+  for (const token of RATING_PRIORITY_TOKENS) {
+    if (found.includes(token)) return token;
+  }
+
+  return found[0] || '';
+}
+
 function extractPipingClassTokenFromPipelineRef(pipelineRef) {
   const ref = clean(pipelineRef);
   if (!ref) return '';
@@ -314,7 +403,13 @@ function extractRatingFromPipelineRef(pipelineRef, options = {}) {
       DEFAULT_RATING_REGEX_GROUP
     );
 
-  return extractRegexGroup(ref, regexText, group);
+  const regexRating = normalizeResolvedRating(
+    extractRegexGroup(ref, regexText, group)
+  );
+
+  if (regexRating) return regexRating;
+
+  return extractRatingTokenFromPipelineRef(ref);
 }
 
 function normalizeRating(value) {
@@ -432,6 +527,7 @@ function getLineListKey(row) {
 function getLineListCandidateValues(row) {
   return {
     lineNo: getLineListKey(row),
+
     pipingClass: clean(
       row.pipingClass ??
       row.PipingClass ??
@@ -440,6 +536,19 @@ function getLineListCandidateValues(row) {
       row._raw?.['Piping Class'] ??
       ''
     ),
+
+    rating: normalizeResolvedRating(
+      row.rating ??
+      row.Rating ??
+      row.RATING ??
+      row.ratingClass ??
+      row['Pressure Class'] ??
+      row._raw?.Rating ??
+      row._raw?.RATING ??
+      row._raw?.['Pressure Class'] ??
+      ''
+    ),
+
     convertedBore:
       toNumber(row.convertedBore) ??
       toNumber(row['Converted Bore']) ??
@@ -447,6 +556,7 @@ function getLineListCandidateValues(row) {
       toNumber(row.Bore) ??
       toNumber(row._raw?.['Converted Bore']) ??
       null,
+
     p1: clean(row.p1 ?? row.P1 ?? row.CA1 ?? row._raw?.P1 ?? ''),
     t1: clean(row.t1 ?? row.T1 ?? row.CA2 ?? row._raw?.T1 ?? ''),
     insThk: clean(row.insThk ?? row.InsThk ?? row.CA5 ?? row._raw?.InsThk ?? ''),
@@ -457,7 +567,8 @@ function getLineListCandidateValues(row) {
 function applyLineListValuesToRow(row, values, source) {
   if (!row.ca) row.ca = {};
 
-const refClass = extractPipingClassFromPipelineRef(row.pipelineRef);
+  const refClass = extractPipingClassFromPipelineRef(row.pipelineRef);
+  const refRating = extractRatingFromPipelineRef(row.pipelineRef);
 
   if (refClass) {
     row.pipingClass = refClass;
@@ -465,6 +576,21 @@ const refClass = extractPipingClassFromPipelineRef(row.pipelineRef);
     row.pipingClassSource = 'PIPELINE-REF-TOKEN';
   } else if (values.pipingClass) {
     row.pipingClass = values.pipingClass;
+  }
+
+  const resolvedRating = normalizeResolvedRating(
+    row.rating ||
+    row.ratingClass ||
+    row.ratingDerived ||
+    values.rating ||
+    refRating ||
+    ''
+  );
+
+  if (resolvedRating) {
+    row.rating = resolvedRating;
+    row.ratingDerived = resolvedRating;
+    row.ratingSource = 'PIPELINE-LINELIST-RATING';
   }
 
   // Keep convertedBore as read-only source/row property.
@@ -537,9 +663,103 @@ export class RvmMasterResolutionWorkflow {
     this.overrides = loadOverrides();
   }
 
+_applyPipePropertyCache(rows = [], diagnostics = []) {
+    const groups = new Map();
+
+    for (const row of rows) {
+      if (!row || row.include === false) continue;
+
+      const key = pipePropertyCacheKey(row);
+
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          pipingClasses: [],
+          ratings: [],
+          rows: [],
+        });
+      }
+
+      const group = groups.get(key);
+      group.rows.push(row);
+
+      const pipeClass =
+        extractPipingClassFromPipelineRef(row.pipelineRef, this.options) ||
+        row.pipingClassDerived ||
+        row.pipingClass ||
+        '';
+
+      if (pipeClass) {
+        group.pipingClasses.push(pipeClass);
+      }
+
+      const rating =
+        row.rating ||
+        row.ratingClass ||
+        row.ratingDerived ||
+        extractRatingFromPipelineRef(row.pipelineRef, this.options) ||
+        '';
+
+      if (rating) {
+        group.ratings.push(rating);
+      }
+    }
+
+    for (const group of groups.values()) {
+      const groupPipingClass = clean(group.pipingClasses[0] || '');
+      const groupRating = bestRatingForGroup(group.ratings);
+
+      for (const row of group.rows) {
+        if (groupPipingClass) {
+          const previous = clean(row.pipingClass);
+
+          row.pipingClass = groupPipingClass;
+          row.pipingClassDerived = groupPipingClass;
+          row.pipingClassSource = 'PIPELINE-REF-TOKEN-GROUP';
+
+          if (previous && norm(previous) !== norm(groupPipingClass)) {
+            diagnostics.push({
+              severity: 'WARNING',
+              code: 'PCF-CLASS-GROUP-OVERRIDE',
+              message: `Component piping class "${previous}" overridden by pipe-group piping class "${groupPipingClass}".`,
+              rowNo: row.rowNo,
+              componentType: row.type,
+              pipelineRef: row.pipelineRef,
+              previousPipingClass: previous,
+              derivedPipingClass: groupPipingClass,
+            });
+          }
+        }
+
+        if (groupRating) {
+          const previousRating = clean(row.rating || row.ratingClass || row.ratingDerived);
+
+          row.rating = groupRating;
+          row.ratingDerived = groupRating;
+          row.ratingSource = 'PIPELINE-REF-RATING-GROUP';
+
+          if (previousRating && normalizeResolvedRating(previousRating) !== groupRating) {
+            diagnostics.push({
+              severity: 'WARNING',
+              code: 'RATING-GROUP-OVERRIDE',
+              message: `Component rating "${previousRating}" overridden by pipe-group rating "${groupRating}".`,
+              rowNo: row.rowNo,
+              componentType: row.type,
+              pipelineRef: row.pipelineRef,
+              previousRating,
+              derivedRating: groupRating,
+            });
+          }
+        }
+      }
+    }
+  }
+
   processRows(rows = []) {
     const requests = [];
     const diagnostics = [];
+
+    this._applyPipePropertyCache(rows, diagnostics);
 
     for (const row of rows) {
       if (!row || row.include === false) continue;
@@ -653,9 +873,10 @@ const applyScope = normalizeMasterApplyScope(payload.applyScope);
         }
 
         if (payload.action === 'manual') {
-          const values = {
+const values = {
             pipingClass: clean(payload.pipingClass),
-            convertedBore: toNumber(payload.convertedBore),
+            rating: normalizeResolvedRating(payload.rating),
+            convertedBore: null,
             p1: clean(payload.p1),
             t1: clean(payload.t1),
             insThk: clean(payload.insThk),
@@ -793,10 +1014,10 @@ _resolvePipingClass(row, requests, diagnostics) {
       }
     }
 
-    if (derivedRating && !row.rating) {
+if (derivedRating) {
       row.rating = derivedRating;
       row.ratingDerived = derivedRating;
-      row.ratingSource = 'PIPELINE-REF-REGEX';
+      row.ratingSource = row.ratingSource || 'PIPELINE-REF-RATING-GROUP';
     }
 
     if (!derived) return;
@@ -973,11 +1194,17 @@ _derivedPipingClass(row) {
     );
   }
 
-  _derivedRating(row) {
-    return clean(
+_derivedRating(row) {
+    const existing = normalizeResolvedRating(
       row.rating ||
       row.ratingClass ||
       row.ratingDerived ||
+      ''
+    );
+
+    if (existing) return existing;
+
+    return normalizeResolvedRating(
       extractRatingFromPipelineRef(row.pipelineRef, this.options)
     );
   }
@@ -1027,7 +1254,7 @@ _samePipelineGroup(row, request) {
     return `${type}|${normalizeRating(rating)}|DN${Math.round(boreMm)}|L${Math.round(lengthMm)}`;
   }
 
-  _pipingClassRequest(row, derivedPipingClass, candidates, reason) {
+_pipingClassRequest(row, derivedPipingClass, candidates, reason) {
     return {
       id: requestId('PIPING_CLASS', row, derivedPipingClass),
       kind: 'PIPING_CLASS',
@@ -1041,11 +1268,12 @@ _samePipelineGroup(row, request) {
       boreMm: toNumber(row.convertedBore),
       derivedPipingClass,
       derivedRating: this._derivedRating(row),
+      rating: this._derivedRating(row),
       candidates
     };
   }
 
-  _lineListRequest(row, lookupKey, candidates, reason) {
+_lineListRequest(row, lookupKey, candidates, reason) {
     return {
       id: requestId('LINELIST', row, lookupKey),
       kind: 'LINELIST',
@@ -1059,12 +1287,13 @@ _samePipelineGroup(row, request) {
       boreMm: toNumber(row.convertedBore),
       derivedPipingClass: this._derivedPipingClass(row),
       derivedRating: this._derivedRating(row),
+      rating: this._derivedRating(row),
       lookupKey,
       candidates
     };
   }
 
-  _weightRequest(row, weightKey, candidates, reason) {
+_weightRequest(row, weightKey, candidates, reason) {
     return {
       id: requestId('WEIGHT', row, weightKey),
       kind: 'WEIGHT',
@@ -1077,7 +1306,7 @@ _samePipelineGroup(row, request) {
       lineNo: row.lineNo || row.lineNoKey || row.lineKey || '',
       weightKey,
       boreMm: toNumber(row.convertedBore),
-      rating: clean(row.rating || row.ratingClass || row.pipingClass || ''),
+      rating: this._derivedRating(row),
       derivedPipingClass: this._derivedPipingClass(row),
       derivedRating: this._derivedRating(row),
       lengthMm: resolveLengthMm(row),
@@ -1542,9 +1771,10 @@ function collectManualPayload(form, request) {
   }
 
   if (request.kind === 'LINELIST') {
-    return {
+return {
       action: 'manual',
       pipingClass: clean(form.elements.manualPipingClass?.value),
+      rating: normalizeResolvedRating(form.elements.manualRating?.value || request.rating || request.derivedRating || ''),
       // convertedBore intentionally omitted.
       p1: clean(form.elements.manualP1?.value),
       t1: clean(form.elements.manualT1?.value),
