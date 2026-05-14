@@ -16,6 +16,14 @@ const DEFAULT_PIPING_CLASS_REGEX =
 
 const DEFAULT_PIPING_CLASS_REGEX_GROUP = 1;
 
+const DEFAULT_RATING_REGEX = '';
+const DEFAULT_RATING_REGEX_GROUP = 1;
+
+const PIPING_CLASS_REGEX_STORAGE_KEY = 'rvm_pcf_piping_class_regex';
+const PIPING_CLASS_REGEX_GROUP_STORAGE_KEY = 'rvm_pcf_piping_class_regex_group';
+const RATING_REGEX_STORAGE_KEY = 'rvm_pcf_rating_regex';
+const RATING_REGEX_GROUP_STORAGE_KEY = 'rvm_pcf_rating_regex_group';
+
 const HIGH_CONFIDENCE_SCORE = 0.92;
 const MIN_FUZZY_SCORE = 0.72;
 const LENGTH_TOLERANCE_MM = 4;
@@ -192,29 +200,70 @@ function resolveLengthMm(row) {
   return null;
 }
 
+function extractRegexGroup(value, regexText, groupNumber) {
+  const text = clean(value);
+  const rxText = clean(regexText);
+  const group = Number(groupNumber || 1);
+
+  if (!text || !rxText) return '';
+
+  try {
+    const re = new RegExp(rxText);
+    const match = text.match(re);
+
+    if (match && match[group]) return clean(match[group]);
+  } catch {
+    return '';
+  }
+
+  return '';
+}
+
 function extractPipingClassFromPipelineRef(pipelineRef, options = {}) {
   const ref = clean(pipelineRef);
   if (!ref) return '';
 
   const regexText =
     options.pipingClassRegex ||
-    localStorage.getItem('rvm_pcf_piping_class_regex') ||
+    localStorage.getItem(PIPING_CLASS_REGEX_STORAGE_KEY) ||
     DEFAULT_PIPING_CLASS_REGEX;
 
   const group =
-    Number(options.pipingClassRegexGroup ?? localStorage.getItem('rvm_pcf_piping_class_regex_group') ?? DEFAULT_PIPING_CLASS_REGEX_GROUP);
+    Number(
+      options.pipingClassRegexGroup ??
+      localStorage.getItem(PIPING_CLASS_REGEX_GROUP_STORAGE_KEY) ??
+      DEFAULT_PIPING_CLASS_REGEX_GROUP
+    );
 
-  try {
-    const re = new RegExp(regexText);
-    const match = ref.match(re);
-
-    if (match && match[group]) return clean(match[group]);
-  } catch {
-    // fallback below
-  }
+  const regexValue = extractRegexGroup(ref, regexText, group);
+  if (regexValue) return regexValue;
 
   const parts = ref.replace(/^\/+/, '').split(/[/-]+/).filter(Boolean);
+
+  // Example:
+  // /BTRM-1000-10"-P1710011-66620M0-01/B1
+  // parts = BTRM, 1000, 10", P1710011, 66620M0, 01, B1
+  // piping class = 66620M0
   return clean(parts[4] || '');
+}
+
+function extractRatingFromPipelineRef(pipelineRef, options = {}) {
+  const ref = clean(pipelineRef);
+  if (!ref) return '';
+
+  const regexText =
+    options.ratingRegex ||
+    localStorage.getItem(RATING_REGEX_STORAGE_KEY) ||
+    DEFAULT_RATING_REGEX;
+
+  const group =
+    Number(
+      options.ratingRegexGroup ??
+      localStorage.getItem(RATING_REGEX_GROUP_STORAGE_KEY) ??
+      DEFAULT_RATING_REGEX_GROUP
+    );
+
+  return extractRegexGroup(ref, regexText, group);
 }
 
 function normalizeRating(value) {
@@ -631,6 +680,20 @@ export class RvmMasterResolutionWorkflow {
 
   _resolvePipingClass(row, requests, diagnostics) {
     const derived = this._derivedPipingClass(row);
+    const derivedRating = this._derivedRating(row);
+
+    if (derived && !row.pipingClass) {
+      row.pipingClass = derived;
+      row.pipingClassDerived = derived;
+      row.pipingClassSource = 'PIPELINE-REF-REGEX';
+    }
+
+    if (derivedRating && !row.rating) {
+      row.rating = derivedRating;
+      row.ratingDerived = derivedRating;
+      row.ratingSource = 'PIPELINE-REF-REGEX';
+    }
+
     if (!derived) return;
 
     const override = this.overrides?.pipingClass?.[norm(derived)];
@@ -799,6 +862,15 @@ export class RvmMasterResolutionWorkflow {
     );
   }
 
+  _derivedRating(row) {
+    return clean(
+      row.rating ||
+      row.ratingClass ||
+      row.ratingDerived ||
+      extractRatingFromPipelineRef(row.pipelineRef, this.options)
+    );
+  }
+
   _lineListLookupKey(row) {
     return clean(row.lineNoKey || row.lineKey || row.pipelineRef || row.name || row.sourcePath || '');
   }
@@ -824,8 +896,12 @@ export class RvmMasterResolutionWorkflow {
       rowId: String(row.sourceCanonicalId || row.rowNo),
       rowNo: row.rowNo,
       componentType: row.type,
+      name: row.name || row.componentName || '',
       pipelineRef: row.pipelineRef || '',
+      lineNo: row.lineNo || row.lineNoKey || row.lineKey || '',
+      boreMm: toNumber(row.convertedBore),
       derivedPipingClass,
+      derivedRating: this._derivedRating(row),
       candidates
     };
   }
@@ -838,7 +914,12 @@ export class RvmMasterResolutionWorkflow {
       rowId: String(row.sourceCanonicalId || row.rowNo),
       rowNo: row.rowNo,
       componentType: row.type,
+      name: row.name || row.componentName || '',
       pipelineRef: row.pipelineRef || '',
+      lineNo: row.lineNo || row.lineNoKey || row.lineKey || '',
+      boreMm: toNumber(row.convertedBore),
+      derivedPipingClass: this._derivedPipingClass(row),
+      derivedRating: this._derivedRating(row),
       lookupKey,
       candidates
     };
@@ -852,10 +933,14 @@ export class RvmMasterResolutionWorkflow {
       rowId: String(row.sourceCanonicalId || row.rowNo),
       rowNo: row.rowNo,
       componentType: row.type,
+      name: row.name || row.componentName || '',
       pipelineRef: row.pipelineRef || '',
+      lineNo: row.lineNo || row.lineNoKey || row.lineKey || '',
       weightKey,
       boreMm: toNumber(row.convertedBore),
       rating: clean(row.rating || row.ratingClass || row.pipingClass || ''),
+      derivedPipingClass: this._derivedPipingClass(row),
+      derivedRating: this._derivedRating(row),
       lengthMm: resolveLengthMm(row),
       candidates
     };
@@ -868,7 +953,7 @@ function requestTitle(request) {
   }
 
   if (request.kind === 'LINELIST') {
-    return `Line list resolution — ${request.lookupKey || '(blank)'}`;
+    return `Line list resolution — ${request.lookupKey || request.pipelineRef || '(blank)'}`;
   }
 
   if (request.kind === 'WEIGHT') {
@@ -878,34 +963,204 @@ function requestTitle(request) {
   return 'Master resolution';
 }
 
+function requestBoreLabel(request) {
+  const bore = toNumber(request.boreMm);
+  return bore == null ? '—' : `${Math.round(bore)} DN`;
+}
+
+function requestPipeClassLabel(request) {
+  return clean(
+    request.derivedPipingClass ||
+    request.pipingClass ||
+    ''
+  ) || '—';
+}
+
+function requestRatingLabel(request) {
+  return clean(
+    request.derivedRating ||
+    request.rating ||
+    ''
+  ) || '—';
+}
+
+function requestLineLabel(request) {
+  return clean(
+    request.lineNo ||
+    request.lookupKey ||
+    request.pipelineRef ||
+    ''
+  ) || '—';
+}
+
+function masterResolutionGroupKey(request) {
+  return [
+    request.pipelineRef || '(no pipeline)',
+    requestBoreLabel(request),
+    request.kind || 'UNKNOWN',
+    requestPipeClassLabel(request),
+    requestRatingLabel(request),
+    request.reason || '',
+  ].join('||');
+}
+
+function groupMasterRequests(requests = []) {
+  const groups = [];
+  const map = new Map();
+
+  for (let i = 0; i < requests.length; i += 1) {
+    const request = requests[i];
+    const key = masterResolutionGroupKey(request);
+
+    if (!map.has(key)) {
+      const group = {
+        key,
+        pipelineRef: request.pipelineRef || '(no pipeline)',
+        bore: requestBoreLabel(request),
+        kind: request.kind,
+        pipingClass: requestPipeClassLabel(request),
+        rating: requestRatingLabel(request),
+        reason: request.reason || '',
+        requests: [],
+      };
+
+      map.set(key, group);
+      groups.push(group);
+    }
+
+    map.get(key).requests.push({
+      request,
+      index: i,
+    });
+  }
+
+  return groups.sort((a, b) => {
+    return String(a.pipelineRef).localeCompare(String(b.pipelineRef)) ||
+      String(a.bore).localeCompare(String(b.bore)) ||
+      String(a.kind).localeCompare(String(b.kind));
+  });
+}
+
+function renderRegexHeader(activeRequest) {
+  const currentPipingRegex =
+    localStorage.getItem(PIPING_CLASS_REGEX_STORAGE_KEY) ||
+    DEFAULT_PIPING_CLASS_REGEX;
+
+  const currentPipingGroup =
+    Number(localStorage.getItem(PIPING_CLASS_REGEX_GROUP_STORAGE_KEY) || DEFAULT_PIPING_CLASS_REGEX_GROUP);
+
+  const currentRatingRegex =
+    localStorage.getItem(RATING_REGEX_STORAGE_KEY) ||
+    DEFAULT_RATING_REGEX;
+
+  const currentRatingGroup =
+    Number(localStorage.getItem(RATING_REGEX_GROUP_STORAGE_KEY) || DEFAULT_RATING_REGEX_GROUP);
+
+  const pipelineRef = activeRequest?.pipelineRef || '';
+  const previewPipingClass = extractPipingClassFromPipelineRef(pipelineRef, {
+    pipingClassRegex: currentPipingRegex,
+    pipingClassRegexGroup: currentPipingGroup,
+  });
+
+  const previewRating = extractRatingFromPipelineRef(pipelineRef, {
+    ratingRegex: currentRatingRegex,
+    ratingRegexGroup: currentRatingGroup,
+  });
+
+  return `
+    <div class="rvm-master-regex-header">
+      <div class="rvm-master-regex-title">Pipeline Reference Extraction</div>
+
+      <div class="rvm-master-regex-preview">
+        <div><b>Pipeline Ref</b></div>
+        <div>${esc(pipelineRef || '—')}</div>
+        <div><b>Derived Piping Class</b></div>
+        <div data-regex-preview-piping-class>${esc(previewPipingClass || '—')}</div>
+        <div><b>Derived Rating</b></div>
+        <div data-regex-preview-rating>${esc(previewRating || '—')}</div>
+      </div>
+
+      <div class="rvm-master-regex-grid">
+        <label>
+          <span>Piping Class Extraction Regex</span>
+          <input data-regex-key="pipingClassRegex" type="text" value="${esc(currentPipingRegex)}"
+            placeholder="e.g. (?:^|\\/)[^-\\/]+-[^-]+-[^-]+-[^-]+-([A-Z0-9]+)-[^\\/]+">
+        </label>
+
+        <label>
+          <span>Group</span>
+          <input data-regex-key="pipingClassRegexGroup" type="number" min="1" step="1" value="${esc(currentPipingGroup)}">
+        </label>
+
+        <label>
+          <span>Rating Extraction Regex (Optional)</span>
+          <input data-regex-key="ratingRegex" type="text" value="${esc(currentRatingRegex)}"
+            placeholder="e.g. (\\d+)#">
+        </label>
+
+        <label>
+          <span>Group</span>
+          <input data-regex-key="ratingRegexGroup" type="number" min="1" step="1" value="${esc(currentRatingGroup)}">
+        </label>
+      </div>
+
+      <div class="rvm-master-regex-actions">
+        <button type="button" data-action="save-regex">Save Regex</button>
+        <span data-regex-status>Saved regex is applied on next Rebuild 2D CSV / PCF build.</span>
+      </div>
+    </div>
+  `;
+}
+
+function candidateCellText(request, candidate) {
+  if (!candidate) return '';
+
+  if (request.kind === 'PIPING_CLASS') {
+    const rating = getRatingFromMasterRow(candidate.row);
+    return `${candidate.pipingClass || getPipingClassFromMasterRow(candidate.row)}${rating ? ` | Rating ${rating}` : ''} | Score ${(candidate.score || 0).toFixed(3)}`;
+  }
+
+  if (request.kind === 'LINELIST') {
+    const values = getLineListCandidateValues(candidate.row);
+    return `${values.lineNo || candidate.key || ''} | PC ${values.pipingClass || '—'} | Bore ${values.convertedBore ?? '—'} | Score ${(candidate.score || 0).toFixed(3)}`;
+  }
+
+  if (request.kind === 'WEIGHT') {
+    return `${candidate.description || ''} | Bore ${candidate.bore ?? '—'} | Rating ${candidate.rating || '—'} | Length ${candidate.length ?? '—'} | Weight ${candidate.weight ?? '—'}`;
+  }
+
+  return JSON.stringify(candidate.row || candidate);
+}
+
 function renderCandidateRows(request) {
   const candidates = request.candidates || [];
 
   if (!candidates.length) {
-    return `<div style="font-size:12px;color:#fca5a5;margin:8px 0;">No candidates found. Use manual entry.</div>`;
+    return `<div class="rvm-master-empty">No candidates found. Use manual entry.</div>`;
   }
 
   return `
-    <div style="max-height:220px;overflow:auto;border:1px solid #334155;border-radius:8px;">
-      ${candidates.map((c, index) => {
-        let text = '';
-
-        if (request.kind === 'PIPING_CLASS') {
-          text = `${c.pipingClass || getPipingClassFromMasterRow(c.row)} | rating=${getRatingFromMasterRow(c.row) || '-'} | score=${Number(c.score || 0).toFixed(3)}`;
-        } else if (request.kind === 'LINELIST') {
-          const v = getLineListCandidateValues(c.row);
-          text = `${c.key || v.lineNo || '-'} | PC=${v.pipingClass || '-'} | Bore=${v.convertedBore ?? '-'} | CA1=${v.p1 || '-'} | score=${Number(c.score || 0).toFixed(3)}`;
-        } else if (request.kind === 'WEIGHT') {
-          text = `Rating=${c.rating || '-'} | Bore=${c.bore ?? '-'} | Length=${c.length ?? '-'} | Weight=${c.weight ?? '-'} | ${c.description || ''}`;
-        }
-
-        return `
-          <label style="display:block;padding:8px 10px;border-bottom:1px solid #1e293b;cursor:pointer;font-size:12px;">
-            <input type="radio" name="candidate-${esc(request.id)}" value="${index}" ${index === 0 ? 'checked' : ''}>
-            <span>${esc(text)}</span>
-          </label>
-        `;
-      }).join('')}
+    <div class="rvm-master-candidate-sheet">
+      <table>
+        <thead>
+          <tr>
+            <th>Select</th>
+            <th>Candidate</th>
+            <th>Score</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${candidates.map((candidate, index) => `
+            <tr>
+              <td>
+                <input type="radio" name="candidateIndex" value="${index}" ${index === 0 ? 'checked' : ''}>
+              </td>
+              <td>${esc(candidateCellText(request, candidate))}</td>
+              <td>${esc(candidate.score != null ? Number(candidate.score).toFixed(3) : '—')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
     </div>
   `;
 }
@@ -913,12 +1168,15 @@ function renderCandidateRows(request) {
 function renderManualFields(request) {
   if (request.kind === 'PIPING_CLASS') {
     return `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">
-        <label style="font-size:12px;">Piping Class
-          <input data-manual="pipingClass" value="${esc(request.derivedPipingClass || '')}" style="width:100%;box-sizing:border-box;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px;">
+      <div class="rvm-master-manual-grid">
+        <label>
+          <span>Piping Class</span>
+          <input name="manualPipingClass" value="${esc(request.derivedPipingClass || '')}" placeholder="e.g. 66620M0">
         </label>
-        <label style="font-size:12px;">Rating
-          <input data-manual="rating" value="" style="width:100%;box-sizing:border-box;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px;">
+
+        <label>
+          <span>Rating</span>
+          <input name="manualRating" value="${esc(request.derivedRating || request.rating || '')}" placeholder="e.g. 150 / 300 / 600 / 150#">
         </label>
       </div>
     `;
@@ -926,24 +1184,41 @@ function renderManualFields(request) {
 
   if (request.kind === 'LINELIST') {
     return `
-      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px;">
-        <label style="font-size:12px;">Piping Class
-          <input data-manual="pipingClass" value="" style="width:100%;box-sizing:border-box;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px;">
+      <div class="rvm-master-readonly-strip">
+        <div><b>Pipeline Ref</b><span>${esc(request.pipelineRef || '—')}</span></div>
+        <div><b>Bore</b><span>${esc(requestBoreLabel(request))}</span></div>
+        <div><b>Derived Piping Class</b><span>${esc(requestPipeClassLabel(request))}</span></div>
+        <div><b>Derived Rating</b><span>${esc(requestRatingLabel(request))}</span></div>
+      </div>
+
+      <div class="rvm-master-note">
+        Converted Bore is not required as manual input because bore is already available from the selected row.
+      </div>
+
+      <div class="rvm-master-manual-grid">
+        <label>
+          <span>Piping Class Override (optional)</span>
+          <input name="manualPipingClass" value="${esc(request.derivedPipingClass || '')}" placeholder="leave blank to keep derived">
         </label>
-        <label style="font-size:12px;">Converted Bore
-          <input data-manual="convertedBore" value="${esc(request.boreMm ?? '')}" style="width:100%;box-sizing:border-box;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px;">
+
+        <label>
+          <span>CA1 / P1</span>
+          <input name="manualP1" placeholder="e.g. kPa with unit">
         </label>
-        <label style="font-size:12px;">P1 / CA1
-          <input data-manual="p1" value="" style="width:100%;box-sizing:border-box;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px;">
+
+        <label>
+          <span>CA2 / T1</span>
+          <input name="manualT1" placeholder="e.g. °C with unit">
         </label>
-        <label style="font-size:12px;">T1 / CA2
-          <input data-manual="t1" value="" style="width:100%;box-sizing:border-box;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px;">
+
+        <label>
+          <span>CA5 / Insulation Thickness</span>
+          <input name="manualInsThk" placeholder="e.g. 45 mm">
         </label>
-        <label style="font-size:12px;">InsThk / CA5
-          <input data-manual="insThk" value="" style="width:100%;box-sizing:border-box;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px;">
-        </label>
-        <label style="font-size:12px;">HP / CA10
-          <input data-manual="hp" value="" style="width:100%;box-sizing:border-box;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px;">
+
+        <label>
+          <span>CA10 / HP</span>
+          <input name="manualHp" placeholder="e.g. kPa with unit">
         </label>
       </div>
     `;
@@ -951,9 +1226,17 @@ function renderManualFields(request) {
 
   if (request.kind === 'WEIGHT') {
     return `
-      <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-top:8px;">
-        <label style="font-size:12px;">Manual Weight / CA8
-          <input data-manual="weight" value="" style="width:100%;box-sizing:border-box;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px;">
+      <div class="rvm-master-readonly-strip">
+        <div><b>Pipeline Ref</b><span>${esc(request.pipelineRef || '—')}</span></div>
+        <div><b>Bore</b><span>${esc(requestBoreLabel(request))}</span></div>
+        <div><b>Rating</b><span>${esc(request.rating || request.derivedRating || request.derivedPipingClass || '—')}</span></div>
+        <div><b>Length</b><span>${esc(request.lengthMm != null ? `${Math.round(request.lengthMm)} mm` : '—')}</span></div>
+      </div>
+
+      <div class="rvm-master-manual-grid">
+        <label>
+          <span>Manual Weight / CA8</span>
+          <input name="manualWeight" type="number" step="0.001" placeholder="kg">
         </label>
       </div>
     `;
@@ -962,162 +1245,596 @@ function renderManualFields(request) {
   return '';
 }
 
+function renderGroupedDataSheet(requests, activeIndex) {
+  const groups = groupMasterRequests(requests);
+
+  return `
+    <div class="rvm-master-sheet">
+      ${groups.map(group => `
+        <div class="rvm-master-group">
+          <div class="rvm-master-group-title">
+            <span>${esc(group.pipelineRef)}</span>
+            <b>→ Bore ${esc(group.bore)}</b>
+            <em>${esc(group.kind)} / ${esc(group.reason)} / ${group.requests.length} row(s)</em>
+          </div>
+
+          <table class="rvm-master-sheet-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>Row</th>
+                <th>Type</th>
+                <th>Line / Lookup</th>
+                <th>Piping Class</th>
+                <th>Rating</th>
+                <th>Reason</th>
+                <th>Candidates</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${group.requests.map(({ request, index }) => `
+                <tr class="${index === activeIndex ? 'is-active' : ''}">
+                  <td>
+                    <button type="button" data-select-request="${index}">Open</button>
+                  </td>
+                  <td>${esc(request.rowNo || '—')}</td>
+                  <td>${esc(request.componentType || '—')}</td>
+                  <td>${esc(requestLineLabel(request))}</td>
+                  <td>${esc(requestPipeClassLabel(request))}</td>
+                  <td>${esc(requestRatingLabel(request))}</td>
+                  <td>${esc(request.reason || '—')}</td>
+                  <td>${esc((request.candidates || []).length)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderRequestDetail(request, index, total) {
+  return `
+    <div class="rvm-master-detail">
+      <div class="rvm-master-detail-title">
+        <span>${esc(requestTitle(request))}</span>
+        <em>${index + 1} / ${total}</em>
+      </div>
+
+      <div class="rvm-master-detail-kv">
+        <div>Reason</div><div>${esc(request.reason)}</div>
+        <div>Row</div><div>${esc(request.rowNo)}</div>
+        <div>Type</div><div>${esc(request.componentType)}</div>
+        <div>Pipeline Ref</div><div>${esc(request.pipelineRef)}</div>
+        <div>Bore</div><div>${esc(requestBoreLabel(request))}</div>
+        <div>Derived Piping Class</div><div>${esc(requestPipeClassLabel(request))}</div>
+        <div>Derived Rating</div><div>${esc(requestRatingLabel(request))}</div>
+      </div>
+
+      <div class="rvm-master-section-title">Candidate Data Sheet</div>
+      ${renderCandidateRows(request)}
+
+      <div class="rvm-master-section-title">Manual Entry</div>
+      ${renderManualFields(request)}
+
+      <div class="rvm-master-apply-row">
+        <label>
+          <input type="checkbox" name="applyAll" checked>
+          Apply to all matching rows in this group
+        </label>
+
+        <button type="button" data-action="apply-candidate" ${request.candidates?.length ? '' : 'disabled'}>
+          Apply Selected Candidate
+        </button>
+
+        <button type="button" data-action="apply-manual">
+          Apply Manual
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function collectManualPayload(form, request) {
+  if (request.kind === 'PIPING_CLASS') {
+    return {
+      action: 'manual',
+      pipingClass: clean(form.elements.manualPipingClass?.value),
+      rating: clean(form.elements.manualRating?.value),
+      applyAll: !!form.elements.applyAll?.checked,
+    };
+  }
+
+  if (request.kind === 'LINELIST') {
+    return {
+      action: 'manual',
+      pipingClass: clean(form.elements.manualPipingClass?.value),
+      // convertedBore intentionally omitted.
+      p1: clean(form.elements.manualP1?.value),
+      t1: clean(form.elements.manualT1?.value),
+      insThk: clean(form.elements.manualInsThk?.value),
+      hp: clean(form.elements.manualHp?.value),
+      applyAll: !!form.elements.applyAll?.checked,
+    };
+  }
+
+  if (request.kind === 'WEIGHT') {
+    return {
+      action: 'manual',
+      weight: toNumber(form.elements.manualWeight?.value),
+      applyAll: !!form.elements.applyAll?.checked,
+    };
+  }
+
+  return {
+    action: 'manual',
+    applyAll: !!form.elements.applyAll?.checked,
+  };
+}
+
+function ensureMasterResolutionStyles() {
+  if (document.getElementById('rvm-master-resolution-datasheet-styles')) return;
+
+  const style = document.createElement('style');
+  style.id = 'rvm-master-resolution-datasheet-styles';
+  style.textContent = `
+    .rvm-master-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: rgba(0, 0, 0, 0.58);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #dbeafe;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .rvm-master-dialog {
+      width: min(1180px, 96vw);
+      max-height: 92vh;
+      background: #111827;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .rvm-master-topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-bottom: 1px solid #334155;
+      background: #0f172a;
+    }
+
+    .rvm-master-topbar h3 {
+      margin: 0;
+      font-size: 14px;
+      color: #f8fafc;
+    }
+
+    .rvm-master-topbar button,
+    .rvm-master-apply-row button,
+    .rvm-master-sheet-table button,
+    .rvm-master-regex-actions button {
+      background: #2563eb;
+      color: #fff;
+      border: 1px solid #60a5fa;
+      border-radius: 6px;
+      padding: 5px 9px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .rvm-master-topbar button:hover,
+    .rvm-master-apply-row button:hover,
+    .rvm-master-sheet-table button:hover,
+    .rvm-master-regex-actions button:hover {
+      background: #1d4ed8;
+    }
+
+    .rvm-master-apply-row button:disabled,
+    .rvm-master-sheet-table button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .rvm-master-body {
+      overflow: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .rvm-master-regex-header {
+      border: 1px solid #334155;
+      border-radius: 10px;
+      background: #162033;
+      padding: 10px;
+    }
+
+    .rvm-master-regex-title,
+    .rvm-master-section-title {
+      color: #bfdbfe;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-size: 11px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    .rvm-master-regex-preview,
+    .rvm-master-detail-kv {
+      display: grid;
+      grid-template-columns: 160px 1fr;
+      gap: 5px 10px;
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+
+    .rvm-master-regex-preview > div:nth-child(odd),
+    .rvm-master-detail-kv > div:nth-child(odd) {
+      color: #93a4bd;
+    }
+
+    .rvm-master-regex-grid,
+    .rvm-master-manual-grid {
+      display: grid;
+      grid-template-columns: 1fr 90px 1fr 90px;
+      gap: 8px;
+      align-items: end;
+    }
+
+    .rvm-master-manual-grid {
+      grid-template-columns: repeat(2, minmax(220px, 1fr));
+    }
+
+    .rvm-master-regex-grid label,
+    .rvm-master-manual-grid label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 11px;
+      color: #9fb0c8;
+    }
+
+    .rvm-master-regex-grid input,
+    .rvm-master-manual-grid input {
+      background: #0f172a;
+      border: 1px solid #334155;
+      color: #e2e8f0;
+      border-radius: 6px;
+      padding: 6px 8px;
+    }
+
+    .rvm-master-regex-actions {
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 11px;
+      color: #93a4bd;
+    }
+
+    .rvm-master-content-grid {
+      display: grid;
+      grid-template-columns: minmax(520px, 1.2fr) minmax(360px, 0.8fr);
+      gap: 12px;
+      min-height: 0;
+    }
+
+    .rvm-master-sheet,
+    .rvm-master-detail {
+      border: 1px solid #334155;
+      border-radius: 10px;
+      background: #111c2f;
+      overflow: auto;
+    }
+
+    .rvm-master-group {
+      border-bottom: 1px solid #26364e;
+    }
+
+    .rvm-master-group-title {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 10px;
+      background: #17243a;
+      font-size: 12px;
+      color: #e2e8f0;
+    }
+
+    .rvm-master-group-title span {
+      font-weight: 800;
+      color: #bfdbfe;
+    }
+
+    .rvm-master-group-title b {
+      color: #7ddc9a;
+    }
+
+    .rvm-master-group-title em {
+      color: #93a4bd;
+      font-style: normal;
+      margin-left: auto;
+    }
+
+    .rvm-master-sheet-table,
+    .rvm-master-candidate-sheet table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+    }
+
+    .rvm-master-sheet-table th,
+    .rvm-master-sheet-table td,
+    .rvm-master-candidate-sheet th,
+    .rvm-master-candidate-sheet td {
+      border-top: 1px solid #26364e;
+      padding: 6px 7px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .rvm-master-sheet-table th,
+    .rvm-master-candidate-sheet th {
+      color: #93c5fd;
+      background: #0f172a;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    .rvm-master-sheet-table tr.is-active {
+      background: rgba(37, 99, 235, 0.18);
+      outline: 1px solid rgba(96, 165, 250, 0.45);
+    }
+
+    .rvm-master-detail {
+      padding: 10px;
+      overflow: auto;
+    }
+
+    .rvm-master-detail-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 13px;
+      font-weight: 800;
+      color: #f8fafc;
+      margin-bottom: 10px;
+    }
+
+    .rvm-master-detail-title em {
+      color: #93a4bd;
+      font-style: normal;
+      font-weight: 600;
+    }
+
+    .rvm-master-empty,
+    .rvm-master-note {
+      padding: 8px 10px;
+      border: 1px dashed #475569;
+      border-radius: 8px;
+      color: #fca5a5;
+      background: rgba(127, 29, 29, 0.12);
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+
+    .rvm-master-note {
+      color: #facc15;
+      background: rgba(161, 98, 7, 0.12);
+    }
+
+    .rvm-master-readonly-strip {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(180px, 1fr));
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .rvm-master-readonly-strip div {
+      background: #0f172a;
+      border: 1px solid #26364e;
+      border-radius: 7px;
+      padding: 6px 8px;
+      font-size: 11px;
+    }
+
+    .rvm-master-readonly-strip b {
+      display: block;
+      color: #93a4bd;
+      margin-bottom: 2px;
+    }
+
+    .rvm-master-readonly-strip span {
+      color: #dbeafe;
+      font-weight: 700;
+    }
+
+    .rvm-master-apply-row {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid #334155;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+      font-size: 12px;
+      color: #cbd5e1;
+    }
+
+    @media (max-width: 980px) {
+      .rvm-master-content-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .rvm-master-regex-grid,
+      .rvm-master-manual-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  `;
+
+  document.head.appendChild(style);
+}
+
+function saveRegexConfigFromDialog(dialog, activeRequest) {
+  const get = key => dialog.querySelector(`[data-regex-key="${key}"]`)?.value ?? '';
+
+  const pipingRegex = get('pipingClassRegex');
+  const pipingGroup = Number(get('pipingClassRegexGroup') || 1);
+  const ratingRegex = get('ratingRegex');
+  const ratingGroup = Number(get('ratingRegexGroup') || 1);
+
+  localStorage.setItem(PIPING_CLASS_REGEX_STORAGE_KEY, pipingRegex);
+  localStorage.setItem(PIPING_CLASS_REGEX_GROUP_STORAGE_KEY, String(pipingGroup || 1));
+  localStorage.setItem(RATING_REGEX_STORAGE_KEY, ratingRegex);
+  localStorage.setItem(RATING_REGEX_GROUP_STORAGE_KEY, String(ratingGroup || 1));
+
+  const pipelineRef = activeRequest?.pipelineRef || '';
+  const pc = extractPipingClassFromPipelineRef(pipelineRef, {
+    pipingClassRegex: pipingRegex,
+    pipingClassRegexGroup: pipingGroup || 1,
+  });
+
+  const rating = extractRatingFromPipelineRef(pipelineRef, {
+    ratingRegex,
+    ratingRegexGroup: ratingGroup || 1,
+  });
+
+  const pcEl = dialog.querySelector('[data-regex-preview-piping-class]');
+  const ratingEl = dialog.querySelector('[data-regex-preview-rating]');
+  const statusEl = dialog.querySelector('[data-regex-status]');
+
+  if (pcEl) pcEl.textContent = pc || '—';
+  if (ratingEl) ratingEl.textContent = rating || '—';
+  if (statusEl) statusEl.textContent = 'Saved. Rebuild 2D CSV / PCF to apply to all rows.';
+}
+
 export function showRvmMasterResolutionDialog({
   requests = [],
   rows = [],
   resolver,
   onApplied
 } = {}) {
-  if (typeof document === 'undefined') return;
   if (!requests.length || !resolver) return;
 
-  const existing = document.getElementById('rvm-master-resolution-dialog');
-  if (existing) existing.remove();
+  ensureMasterResolutionStyles();
 
-  let index = 0;
+  let activeIndex = 0;
 
   const overlay = document.createElement('div');
-  overlay.id = 'rvm-master-resolution-dialog';
-  overlay.style.cssText = `
-    position:fixed;
-    inset:0;
-    background:rgba(2,6,23,.74);
-    z-index:99999;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    color:#e2e8f0;
-    font-family:Inter,Arial,sans-serif;
-  `;
+  overlay.className = 'rvm-master-overlay';
 
-  const shell = document.createElement('div');
-  shell.style.cssText = `
-    width:min(960px,calc(100vw - 48px));
-    max-height:calc(100vh - 48px);
-    background:#0f172a;
-    border:1px solid #334155;
-    border-radius:14px;
-    box-shadow:0 24px 80px rgba(0,0,0,.45);
-    display:flex;
-    flex-direction:column;
-    overflow:hidden;
-  `;
+  function render() {
+    const activeRequest = requests[activeIndex] || requests[0];
 
-  overlay.appendChild(shell);
-  document.body.appendChild(overlay);
-
-  const render = () => {
-    const request = requests[index];
-    const hasCandidates = (request.candidates || []).length > 0;
-
-    shell.innerHTML = `
-      <div style="padding:14px 16px;border-bottom:1px solid #334155;display:flex;align-items:center;gap:10px;">
-        <div style="font-weight:700;font-size:15px;">${esc(requestTitle(request))}</div>
-        <div style="margin-left:auto;font-size:12px;color:#94a3b8;">${index + 1} / ${requests.length}</div>
-        <button data-close style="background:transparent;color:#cbd5e1;border:1px solid #475569;border-radius:8px;padding:5px 9px;cursor:pointer;">Close</button>
-      </div>
-
-      <div style="padding:14px 16px;overflow:auto;">
-        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:12px;font-size:12px;">
-          <div><b>Reason</b><br>${esc(request.reason)}</div>
-          <div><b>Row</b><br>${esc(request.rowNo)}</div>
-          <div><b>Type</b><br>${esc(request.componentType)}</div>
-          <div><b>Pipeline Ref</b><br>${esc(request.pipelineRef || '-')}</div>
+    overlay.innerHTML = `
+      <div class="rvm-master-dialog" role="dialog" aria-modal="true">
+        <div class="rvm-master-topbar">
+          <h3>Master Resolution Data Sheet — ${requests.length} pending item(s)</h3>
+          <button type="button" data-action="close">Close</button>
         </div>
 
-        ${request.kind === 'WEIGHT' ? `
-          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:12px;font-size:12px;">
-            <div><b>Bore</b><br>${esc(request.boreMm ?? '-')}</div>
-            <div><b>Rating / Class</b><br>${esc(request.rating || '-')}</div>
-            <div><b>Length</b><br>${esc(request.lengthMm != null ? Number(request.lengthMm).toFixed(2) : '-')}</div>
+        <form class="rvm-master-body">
+          ${renderRegexHeader(activeRequest)}
+
+          <div class="rvm-master-content-grid">
+            ${renderGroupedDataSheet(requests, activeIndex)}
+            ${renderRequestDetail(activeRequest, activeIndex, requests.length)}
           </div>
-        ` : ''}
-
-        ${renderCandidateRows(request)}
-
-        <div style="margin-top:12px;padding:10px;border:1px solid #334155;border-radius:8px;background:#111827;">
-          <div style="font-weight:700;font-size:12px;color:#fbbf24;margin-bottom:6px;">Manual entry</div>
-          ${renderManualFields(request)}
-        </div>
-
-        <label style="display:flex;align-items:center;gap:7px;margin-top:12px;font-size:12px;color:#cbd5e1;">
-          <input type="checkbox" data-apply-all checked>
-          Apply to all rows with same unresolved key
-        </label>
-      </div>
-
-      <div style="padding:12px 16px;border-top:1px solid #334155;display:flex;gap:8px;justify-content:flex-end;">
-        <button data-prev ${index === 0 ? 'disabled' : ''} style="padding:7px 12px;border-radius:8px;border:1px solid #475569;background:#020617;color:#e2e8f0;cursor:pointer;">Previous</button>
-        <button data-use-candidate ${hasCandidates ? '' : 'disabled'} style="padding:7px 12px;border-radius:8px;border:1px solid #2563eb;background:#2563eb;color:white;cursor:pointer;">Use selected candidate</button>
-        <button data-use-manual style="padding:7px 12px;border-radius:8px;border:1px solid #d97706;background:#d97706;color:white;cursor:pointer;">Use manual entry</button>
-        <button data-skip style="padding:7px 12px;border-radius:8px;border:1px solid #475569;background:#020617;color:#e2e8f0;cursor:pointer;">Skip</button>
-        <button data-next ${index >= requests.length - 1 ? 'disabled' : ''} style="padding:7px 12px;border-radius:8px;border:1px solid #475569;background:#020617;color:#e2e8f0;cursor:pointer;">Next</button>
+        </form>
       </div>
     `;
+  }
 
-    shell.querySelector('[data-close]')?.addEventListener('click', () => overlay.remove());
+  function activeRequest() {
+    return requests[activeIndex] || requests[0];
+  }
 
-    shell.querySelector('[data-prev]')?.addEventListener('click', () => {
-      index = Math.max(0, index - 1);
+  function activeForm() {
+    return overlay.querySelector('form');
+  }
+
+  function applyResult(result) {
+    if (typeof onApplied === 'function') {
+      onApplied(result);
+    }
+  }
+
+  overlay.addEventListener('click', event => {
+    const closeBtn = event.target.closest('[data-action="close"]');
+    if (closeBtn) {
+      overlay.remove();
+      return;
+    }
+
+    const selectBtn = event.target.closest('[data-select-request]');
+    if (selectBtn) {
+      activeIndex = Number(selectBtn.getAttribute('data-select-request') || 0);
       render();
-    });
+      return;
+    }
 
-    shell.querySelector('[data-next]')?.addEventListener('click', () => {
-      index = Math.min(requests.length - 1, index + 1);
-      render();
-    });
+    const saveRegexBtn = event.target.closest('[data-action="save-regex"]');
+    if (saveRegexBtn) {
+      saveRegexConfigFromDialog(overlay, activeRequest());
+      return;
+    }
 
-    shell.querySelector('[data-skip]')?.addEventListener('click', () => {
-      if (index < requests.length - 1) {
-        index += 1;
-        render();
-      } else {
-        overlay.remove();
-      }
-    });
+    const applyCandidateBtn = event.target.closest('[data-action="apply-candidate"]');
+    if (applyCandidateBtn) {
+      const request = activeRequest();
+      const form = activeForm();
 
-    shell.querySelector('[data-use-candidate]')?.addEventListener('click', () => {
-      const selected = shell.querySelector(`input[name="candidate-${CSS.escape(request.id)}"]:checked`);
-      const candidateIndex = Number(selected?.value ?? 0);
-      const applyAll = shell.querySelector('[data-apply-all]')?.checked !== false;
+      const candidateIndex = Number(form.elements.candidateIndex?.value ?? 0);
+      const applyAll = !!form.elements.applyAll?.checked;
 
       const result = resolver.applyRequestResolution(rows, request, {
         action: 'candidate',
         candidateIndex,
-        applyAll
+        applyAll,
       });
 
-      if (onApplied) onApplied(result);
+      applyResult(result);
+      overlay.remove();
+      return;
+    }
 
-      if (index < requests.length - 1) {
-        index += 1;
-        render();
-      } else {
-        overlay.remove();
-      }
-    });
-
-    shell.querySelector('[data-use-manual]')?.addEventListener('click', () => {
-      const applyAll = shell.querySelector('[data-apply-all]')?.checked !== false;
-      const inputs = Array.from(shell.querySelectorAll('[data-manual]'));
-      const payload = { action: 'manual', applyAll };
-
-      for (const input of inputs) {
-        payload[input.dataset.manual] = input.value;
-      }
+    const applyManualBtn = event.target.closest('[data-action="apply-manual"]');
+    if (applyManualBtn) {
+      const request = activeRequest();
+      const form = activeForm();
+      const payload = collectManualPayload(form, request);
 
       const result = resolver.applyRequestResolution(rows, request, payload);
 
-      if (onApplied) onApplied(result);
+      applyResult(result);
+      overlay.remove();
+    }
+  });
 
-      if (index < requests.length - 1) {
-        index += 1;
-        render();
-      } else {
-        overlay.remove();
-      }
-    });
-  };
+  overlay.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      overlay.remove();
+    }
+  });
 
   render();
+  document.body.appendChild(overlay);
+
+  const firstOpen = overlay.querySelector('[data-select-request]');
+  if (firstOpen) firstOpen.focus();
 }
