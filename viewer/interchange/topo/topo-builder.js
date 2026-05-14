@@ -352,6 +352,14 @@ export function buildCanonicalProjectFromTopoSource({
   for (let index = 0; index < segments.length; index += 1) {
     const sourceSegment = segments[index];
     const raw = withAliasedKeys(sourceSegment?.rawAttributes || {});
+    const typeUpper = String(sourceSegment?.type || 'PIPE').toUpperCase();
+    const isTeeType = typeUpper === 'TEE';
+    const isOletType = typeUpper === 'OLET' || typeUpper === 'WELDOLET' || typeUpper === 'SOCKOLET';
+
+    // Extract cp/bp early — they influence ep1/ep2 resolution for TEE and OLET types.
+    const cp = toPoint(sourceSegment?.cp);
+    const bp = toPoint(sourceSegment?.bp);
+
     let ep1 = toPoint(sourceSegment?.ep1);
     let ep2 = toPoint(sourceSegment?.ep2);
 
@@ -360,6 +368,14 @@ export function buildCanonicalProjectFromTopoSource({
     }
     if (!ep2 && sourceSegment?.toRef) {
       ep2 = toPoint(solvedRefs.get(String(sourceSegment.toRef)));
+    }
+
+    // For OLET types, cp (header tap onto the header pipe) and bp (branch outlet) are
+    // the semantic connectivity endpoints. Override ep1/ep2 so the topology graph uses
+    // the correct junction points rather than generic PCF end-point fields.
+    if (isOletType) {
+      if (cp) ep1 = { x: cp.x, y: cp.y, z: cp.z };
+      if (bp) ep2 = { x: bp.x, y: bp.y, z: bp.z };
     }
 
     if (!ep1 || !ep2) {
@@ -379,8 +395,20 @@ export function buildCanonicalProjectFromTopoSource({
     registerDegree(fromNode.id);
     registerDegree(toNode.id);
 
-    const cp = toPoint(sourceSegment?.cp);
-    const bp = toPoint(sourceSegment?.bp);
+    // For TEE components, bp is the third connection port (branch outlet).
+    // Register it as an independent topology node so branch pipes can connect to it.
+    let bpNode = null;
+    if (isTeeType) {
+      if (bp) {
+        bpNode = nodeRegistry.register(bp, assembly.id, sourceRefs[0]);
+        registerDegree(bpNode.id);
+      } else {
+        project.diagnostics.warn('TOPO_TEE_BRANCH_MISSING',
+          'TEE component has no branch point (bp); branch connectivity cannot be established.',
+          { sourceId: sourceSegment?.id || null });
+      }
+    }
+
     const derived = computeDerived(ep1, ep2, cp, bp);
 
     const segment = new CanonicalSegment({
@@ -393,7 +421,7 @@ export function buildCanonicalProjectFromTopoSource({
       rawAttributes: raw,
       derivedAttributes: derived,
       normalized: {
-        componentType: String(sourceSegment?.type || 'PIPE').toUpperCase(),
+        componentType: typeUpper,
         lineNoKey: map.lineNoKey,
         pipelineRef: map.pipelineRef,
         sKey: map.sKey,
@@ -410,11 +438,14 @@ export function buildCanonicalProjectFromTopoSource({
     project.segments.push(segment);
     assembly.segmentIds.push(segment.id);
 
+    const anchorNodeIds = [fromNode.id, toNode.id];
+    if (bpNode) anchorNodeIds.push(bpNode.id);
+
     const component = new CanonicalComponent({
       id: `CMP-${componentCounter}`,
       assemblyId: assembly.id,
-      type: String(sourceSegment?.type || 'PIPE').toUpperCase(),
-      anchorNodeIds: [fromNode.id, toNode.id],
+      type: typeUpper,
+      anchorNodeIds,
       hostSegmentIds: [segment.id],
       rawAttributes: raw,
       derivedAttributes: derived,
@@ -456,8 +487,10 @@ export function buildCanonicalProjectFromTopoSource({
       componentId: component.id,
       ep1NodeId: fromNode.id,
       ep2NodeId: toNode.id,
-      cpNodeId: null,
-      bpNodeId: null,
+      // For OLET: fromNode is at the cp (header-tap) position after the override above.
+      // For TEE: bpNode is the registered branch node.
+      cpNodeId: isOletType && cp ? fromNode.id : null,
+      bpNodeId: bpNode ? bpNode.id : null,
     });
     topoGraph.sourceRefs.push(...sourceRefs);
 
