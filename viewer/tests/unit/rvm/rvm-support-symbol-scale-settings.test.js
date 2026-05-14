@@ -48,6 +48,7 @@ function run() {
     '_bindRvmSupportSymbolSettings',
     '_applyRvmSupportScale',
     '_ensureRvmSupportSettings',
+    '_rvmUiEsc(scale)',
     'data-rvm-support-symbol-scale',
     'data-rvm-support-symbol-scale-number',
     'data-rvm-support-symbol-scale-reset',
@@ -75,6 +76,12 @@ function run() {
       `viewer3d-rvm-tab.css missing marker: ${marker}`
     );
   }
+
+
+  assert.ok(
+    !tabJs.includes('_esc('),
+    'viewer3d-rvm-tab.js must not use undefined _esc helper'
+  );
 
   console.log('[PASS] RVM support symbol scale settings smoke passed.');
 }

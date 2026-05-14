@@ -766,7 +766,7 @@ function _ensureRvmSupportSymbolSettings(container) {
           min="0.25"
           max="4"
           step="0.05"
-          value="${_esc(scale)}"
+          value="${_rvmUiEsc(scale)}"
           title="Scale support symbols"
         >
 
@@ -776,7 +776,7 @@ function _ensureRvmSupportSymbolSettings(container) {
           min="0.25"
           max="4"
           step="0.05"
-          value="${_esc(scale)}"
+          value="${_rvmUiEsc(scale)}"
           title="Support symbol scale multiplier"
         >
 
@@ -791,7 +791,7 @@ function _ensureRvmSupportSymbolSettings(container) {
       </div>
 
       <div class="rvm-support-scale-hint">
-        Current multiplier: <b data-rvm-support-symbol-scale-value>${_esc(scale)}×</b>
+        Current multiplier: <b data-rvm-support-symbol-scale-value>${_rvmUiEsc(scale)}×</b>
       </div>
     </div>
   `;
