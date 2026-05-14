@@ -37,6 +37,7 @@ const REQUIRED_MODULES = Object.freeze([
   'viewer/rvm-pcf-extract/RvmUxmlTopologyDiagnosticsPanel.js',
   'viewer/rvm-pcf-extract/RvmPcfExportGuard.js',
   'viewer/rvm-pcf-extract/RvmPcfAcceptedTopologyHandoff.js',
+  'viewer/uxml/UxmlRouteHandoffPolicy.js',
 ]);
 
 const REQUIRED_TESTS = Object.freeze([
@@ -56,6 +57,7 @@ const REQUIRED_TESTS = Object.freeze([
   'viewer/tests/rvm-pcf-export-guard.test.js',
   'viewer/tests/rvm-pcf-accepted-topology-handoff.test.js',
   'viewer/tests/rvm-pcf-uxml-mode-e2e-smoke.test.js',
+  'viewer/tests/uxml-route-handoff-policy.test.js',
 ]);
 
 const REQUIRED_EXPORT_MARKERS = Object.freeze([
@@ -144,6 +146,14 @@ const REQUIRED_EXPORT_MARKERS = Object.freeze([
       'buildRvmPcfAcceptedTopologyHandoff',
       'annotateRowsWithAcceptedTopologyHandoff',
       'createRvmPcfAcceptedTopologyHandoff',
+    ],
+  },
+  {
+    file: 'viewer/uxml/UxmlRouteHandoffPolicy.js',
+    markers: [
+      'evaluateUxmlRouteHandoffPolicy',
+      'createUxmlRouteHandoffPayload',
+      'summarizeUxmlRouteHandoff',
     ],
   },
 ]);
