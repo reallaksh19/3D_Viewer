@@ -1,5 +1,9 @@
 # Schema Audit: 1001-P COPY_INPUT.XML
 
+## Root Tag and Namespace Report
+- Root tag: `<CAESARII>`
+- No namespaces are defined in the document.
+
 ## Top Tag Frequency
 - CAESARII: 1
 - PIPINGMODEL: 1
@@ -36,15 +40,336 @@
 - DIAMETER: 1
 - THICKNESS: 1
 
+## Attribute Catalog by Tag
+### CAESARII
+- xmlns: 1
+- VERSION: 1
+- XML_TYPE: 1
+
+### PIPINGMODEL
+- xmlns: 1
+- JOBNAME: 1
+- TIME: 1
+- ISSUE_NO: 1
+- NUMELT: 1
+- NUMNOZ: 1
+- NOHGRS: 1
+- NUMBEND: 1
+- NUMRIGID: 1
+- NUMEXPJNT: 1
+- NUMREST: 1
+- NUMFORCMNT: 1
+- NUMUNFLOAD: 1
+- NUMWIND: 1
+- NUMELEOFF: 1
+- NUMALLOW: 1
+- NUMISECT: 1
+- NORTH_Z: 1
+- NORTH_Y: 1
+- NORTH_X: 1
+
+### PIPINGELEMENT
+- FROM_NODE: 22
+- TO_NODE: 22
+- DELTA_X: 22
+- DELTA_Y: 22
+- DELTA_Z: 22
+- DIAMETER: 22
+- WALL_THICK: 22
+- INSUL_THICK: 22
+- CORR_ALLOW: 22
+- TEMP_EXP_C1: 22
+- TEMP_EXP_C2: 22
+- TEMP_EXP_C3: 22
+- TEMP_EXP_C4: 22
+- TEMP_EXP_C5: 22
+- TEMP_EXP_C6: 22
+- TEMP_EXP_C7: 22
+- TEMP_EXP_C8: 22
+- TEMP_EXP_C9: 22
+- PRESSURE1: 22
+- PRESSURE2: 22
+- PRESSURE3: 22
+- PRESSURE4: 22
+- PRESSURE5: 22
+- PRESSURE6: 22
+- PRESSURE7: 22
+- PRESSURE8: 22
+- PRESSURE9: 22
+- HYDRO_PRESSURE: 22
+- MODULUS: 22
+- HOT_MOD1: 22
+- HOT_MOD2: 22
+- HOT_MOD3: 22
+- HOT_MOD4: 22
+- HOT_MOD5: 22
+- HOT_MOD6: 22
+- HOT_MOD7: 22
+- HOT_MOD8: 22
+- HOT_MOD9: 22
+- POISSONS: 22
+- PIPE_DENSITY: 22
+- INSUL_DENSITY: 22
+- FLUID_DENSITY: 22
+- REFRACTORY_DENSITY: 22
+- REFRACTORY_THK: 22
+- CLADDING_DEN: 22
+- CLADDING_THK: 22
+- INSUL_CLAD_UNIT_WEIGHT: 22
+- MATERIAL_NUM: 22
+- MATERIAL_NAME: 22
+- MILL_TOL_PLUS: 22
+- MILL_TOL_MINUS: 22
+- SEAM_WELD: 22
+- NAME: 22
+
+### RIGID
+- WEIGHT: 6
+- TYPE: 6
+
+### DISPLACEMENTS
+- DISP_NUM: 6
+- NODE_NUM: 6
+
+### VECTOR
+- NUMBER: 51
+- DX: 51
+- DY: 51
+- DZ: 51
+- RX: 51
+- RY: 51
+- RZ: 51
+
+### ALLOWABLESTRESS
+- ALLOWBL_STRESS_INDICATOR: 1
+- DESIGN_FACTOR: 1
+- HOOP_STRESS_FACTOR: 1
+- COLD_ALLOW: 1
+- EFF: 1
+- SY: 1
+- SU: 1
+- FAC: 1
+- PMAX: 1
+- PIPING_CODE: 1
+- SUPP_RQR: 1
+- MAT_LP: 1
+- ALPHA_H: 1
+- ALPHA_FAB: 1
+- BURST_OPE: 1
+- BURST_TEST: 1
+- COLLAPSE: 1
+- PROPBUCK: 1
+- LCC: 1
+- DCC: 1
+- GAMMA_C: 1
+- R: 1
+- ALPHA_GW: 1
+- DESIGN_LT: 1
+- CHEMICAL_RES: 1
+- CURVE_RADIUS: 1
+- BURIED: 1
+- EHB: 1
+- DF: 1
+- YD: 1
+
+### CASE
+- NUM: 9
+- HOT_ALLOW: 9
+- HOT_SY: 9
+- HOT_SU: 9
+- CYC_RED_FACTOR: 9
+- BUTTWELDCYCLES: 9
+- BUTTWELDSTRESS: 9
+- FILLETWELDCYCLES: 9
+- FILLETWELDSTRESS: 9
+- APP_P_OPE_ALL_REDUCTION: 9
+- CLASSWCYCLES: 9
+- CLASSWSTRESS: 9
+- CLASSGCYCLES: 9
+- CLASSGSTRESS: 9
+- CLASSFCYCLES: 9
+- CLASSFSTRESS: 9
+
+### BEND
+- RADIUS: 6
+- TYPE: 6
+- ANGLE1: 6
+- NODE1: 6
+- ANGLE2: 6
+- NODE2: 6
+- ANGLE3: 6
+- NODE3: 6
+- NUM_MITER: 6
+- FITTINGTHICKNESS: 6
+- KFACTOR: 6
+
+### HANGER
+- NODE: 3
+- CNODE: 3
+- CONST_EFF_LOAD: 3
+- LOAD_VAR: 3
+- RIGID_SUP: 3
+- AVAIL_SPACE: 3
+- COLD_LOAD: 3
+- HOT_LOAD: 3
+- MAX_TRAVEL: 3
+- MULTI_LC: 3
+- FREEANCHOR1: 3
+- FREEANCHOR2: 3
+- DOFTYPE1: 3
+- NUM_HGR: 3
+- HGR_TABLE: 3
+- SHORT_RANGE: 3
+- TAG: 3
+- GUID: 3
+
+### RESTRAINT
+- NUM: 12
+- NODE: 12
+- TYPE: 12
+- STIFFNESS: 12
+- GAP: 12
+- FRIC_COEF: 12
+- CNODE: 12
+- XCOSINE: 12
+- YCOSINE: 12
+- ZCOSINE: 12
+- TAG: 12
+- GUID: 12
+
+### SIF
+- SIF_NUM: 2
+- NODE: 2
+- TYPE: 2
+- SIF_IN: 2
+- SIF_OUT: 2
+- SIF_TORSION: 2
+- SIF_AXIAL: 2
+- SIF_PRESSURE: 2
+- STRESSINDEX_Iin: 2
+- STRESSINDEX_Iout: 2
+- STRESSINDEX_It: 2
+- STRESSINDEX_Ia: 2
+- STRESSINDEX_Ipr: 2
+- WELD_D: 2
+- FILLET: 2
+- PAD_THK: 2
+- FTG_RO: 2
+- CROTCH: 2
+- WELD_ID: 2
+- B1: 2
+- B2: 2
+
+### UNITS
+- LABEL: 1
+- FACTOR: 1
+
+### LENGTH
+- LABEL: 1
+- FACTOR: 1
+
+### FORCE
+- LABEL: 1
+- FACTOR: 1
+
+### MASS-DYNAMICS
+- LABEL: 1
+- FACTOR: 1
+
+### MOMENT-INPUT
+- LABEL: 1
+- FACTOR: 1
+
+### MOMENT-OUTPUT
+- LABEL: 1
+- FACTOR: 1
+
+### STRESS
+- LABEL: 1
+- FACTOR: 1
+
+### TEMP
+- LABEL: 1
+- FACTOR: 1
+
+### PRESSURE
+- LABEL: 1
+- FACTOR: 1
+
+### EMOD
+- LABEL: 1
+- FACTOR: 1
+
+### PDENS
+- LABEL: 1
+- FACTOR: 1
+
+### IDENS
+- LABEL: 1
+- FACTOR: 1
+
+### FDENS
+- LABEL: 1
+- FACTOR: 1
+
+### TRANS_STIFF
+- LABEL: 1
+- FACTOR: 1
+
+### ROTL_STIFF
+- LABEL: 1
+- FACTOR: 1
+
+### UNIF_LOAD
+- LABEL: 1
+- FACTOR: 1
+
+### G_LOAD
+- LABEL: 1
+- FACTOR: 1
+
+### WIND_LOAD
+- LABEL: 1
+- FACTOR: 1
+
+### ELEVATION
+- LABEL: 1
+- FACTOR: 1
+
+### COMPOUND_LENGTH
+- LABEL: 1
+- FACTOR: 1
+
+### DIAMETER
+- LABEL: 1
+- FACTOR: 1
+
+### THICKNESS
+- LABEL: 1
+- FACTOR: 1
+
 ## Candidate Tags
 
-- Pipeline/Line: PIPINGMODEL (has NAME)
-- Components: PIPINGELEMENT (acts as pipe and fitting container)
-- Supports: SUPPORT (child of PIPINGELEMENT)
-- Coordinates: FROM_NODE, TO_NODE, DELTA_X, DELTA_Y, DELTA_Z on PIPINGELEMENT
-- Bores/Sizes: DIAMETER, WALL_THICK
+### Pipeline/Line Tags
+- PIPINGMODEL (acts as the overall container, has NAME attribute)
 
-## Candidate Bores/Sizes/Rating/Class/Ref/Seq Fields
+### Component Tags
+- PIPINGELEMENT (acts as pipe and fitting container)
+- RIGID (contains TYPE="Valve" or TYPE="Flange Pair")
+
+### Coordinate/Node Tags
+- No distinct Node list.
+- Embedded in PIPINGELEMENT via FROM_NODE, TO_NODE, DELTA_X, DELTA_Y, DELTA_Z.
+
+### Support Tags
+- HANGER
+- RESTRAINT
+
+### Branch/Tee/Olet Tags
+- SIF (contains TYPE="Tee", TYPE="Weldolet")
+- BEND
+
+### Bore/Size/Rating/Class/Ref/Seq Fields
 - Bores: DIAMETER, WALL_THICK
 - Ref: NAME
 - Rating/Class: MATERIAL_NAME, MATERIAL_NUM
@@ -70,11 +395,12 @@
 - Segments: ~15
 - Supports: 0
 
-## Observations
+## Gaps/Ambiguities Requiring Fallback Logic
 Unlike standard AVEVA InputXML which uses `<Element type="PIPE">` with `<Node>` lists, this file uses a CAESAR II specific format:
 - Root is `<CAESARII>` -> `<PIPINGMODEL>`
 - Elements are `<PIPINGELEMENT>`
-- No explicit `<Node>` coordinate dictionary. Instead, it uses `FROM_NODE`, `TO_NODE`, and `DELTA_X/Y/Z`.
+- No explicit `<Node>` coordinate dictionary. Instead, it uses `FROM_NODE`, `TO_NODE`, and `DELTA_X/Y/Z`. This requires calculating absolute coordinates incrementally or using the relative delta values if an origin is established.
 - Components like Valves and Flanges are declared via `<RIGID TYPE="Valve">` children inside a `<PIPINGELEMENT>`.
+- SIF tags are used for Tees.
 
-This requires a completely custom mapper (Agent 20), as the Agent 18 adaptive mapper will not find any coordinates.
+This requires a completely custom mapper (Agent 20), as the Agent 18 adaptive mapper will not find any coordinates or traditional component structures.

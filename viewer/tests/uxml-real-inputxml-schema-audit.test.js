@@ -35,18 +35,40 @@ describe('Agent 19 - Real InputXML Audit', () => {
 
     const md = `# Schema Audit: 1001-P COPY_INPUT.XML
 
+## Root Tag and Namespace Report
+- Root tag: \`<CAESARII>\`
+- No namespaces are defined in the document.
+
 ## Top Tag Frequency
 ` + Object.entries(counts).map(([k, v]) => `- ${k}: ${v}`).join('\n') + `
 
+## Attribute Catalog by Tag
+` + Object.entries(attrs).filter(([tag, obj]) => Object.keys(obj).length > 0).map(([tag, obj]) => {
+  return `### ${tag}\n` + Object.entries(obj).map(([attr, count]) => `- ${attr}: ${count}`).join('\n');
+}).join('\n\n') + `
+
 ## Candidate Tags
 
-- Pipeline/Line: PIPINGMODEL (has NAME)
-- Components: PIPINGELEMENT (acts as pipe and fitting container)
-- Supports: SUPPORT (child of PIPINGELEMENT)
-- Coordinates: FROM_NODE, TO_NODE, DELTA_X, DELTA_Y, DELTA_Z on PIPINGELEMENT
-- Bores/Sizes: DIAMETER, WALL_THICK
+### Pipeline/Line Tags
+- PIPINGMODEL (acts as the overall container, has NAME attribute)
 
-## Candidate Bores/Sizes/Rating/Class/Ref/Seq Fields
+### Component Tags
+- PIPINGELEMENT (acts as pipe and fitting container)
+- RIGID (contains TYPE="Valve" or TYPE="Flange Pair")
+
+### Coordinate/Node Tags
+- No distinct Node list.
+- Embedded in PIPINGELEMENT via FROM_NODE, TO_NODE, DELTA_X, DELTA_Y, DELTA_Z.
+
+### Support Tags
+- HANGER
+- RESTRAINT
+
+### Branch/Tee/Olet Tags
+- SIF (contains TYPE="Tee", TYPE="Weldolet")
+- BEND
+
+### Bore/Size/Rating/Class/Ref/Seq Fields
 - Bores: DIAMETER, WALL_THICK
 - Ref: NAME
 - Rating/Class: MATERIAL_NAME, MATERIAL_NUM
@@ -72,14 +94,15 @@ describe('Agent 19 - Real InputXML Audit', () => {
 - Segments: ~15
 - Supports: 0
 
-## Observations
+## Gaps/Ambiguities Requiring Fallback Logic
 Unlike standard AVEVA InputXML which uses \`<Element type="PIPE">\` with \`<Node>\` lists, this file uses a CAESAR II specific format:
 - Root is \`<CAESARII>\` -> \`<PIPINGMODEL>\`
 - Elements are \`<PIPINGELEMENT>\`
-- No explicit \`<Node>\` coordinate dictionary. Instead, it uses \`FROM_NODE\`, \`TO_NODE\`, and \`DELTA_X/Y/Z\`.
+- No explicit \`<Node>\` coordinate dictionary. Instead, it uses \`FROM_NODE\`, \`TO_NODE\`, and \`DELTA_X/Y/Z\`. This requires calculating absolute coordinates incrementally or using the relative delta values if an origin is established.
 - Components like Valves and Flanges are declared via \`<RIGID TYPE="Valve">\` children inside a \`<PIPINGELEMENT>\`.
+- SIF tags are used for Tees.
 
-This requires a completely custom mapper (Agent 20), as the Agent 18 adaptive mapper will not find any coordinates.
+This requires a completely custom mapper (Agent 20), as the Agent 18 adaptive mapper will not find any coordinates or traditional component structures.
 `;
 
     fs.writeFileSync('Benchmarks/InputXML Schema Audit/1001-P-COPY-inputxml-mapping-plan.md', md);
