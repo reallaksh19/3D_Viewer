@@ -103,6 +103,26 @@ assert.ok(
     'derived piping class must be applied to row'
   );
 
+  assert.ok(
+    !js.includes('\nconst applyScope = normalizeMasterApplyScope(payload.applyScope);'),
+    'applyScope line must be indented inside applyRequestResolution'
+  );
+
+  assert.ok(
+    !js.includes('\nconst values = {\n            pipingClass: clean(payload.pipingClass),'),
+    'LINELIST manual values block must be indented'
+  );
+
+  assert.ok(
+    !js.includes('\n_resolvePipingClass(row, requests, diagnostics) {'),
+    '_resolvePipingClass must be indented as a class method'
+  );
+
+  assert.ok(
+    !js.includes('\n_samePipelineGroup(row, request) {'),
+    '_samePipelineGroup must be indented as a class method'
+  );
+
   console.log('[PASS] RVM master resolution data-sheet UI smoke passed.');
 }
 

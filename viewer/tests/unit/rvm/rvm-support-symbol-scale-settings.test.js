@@ -84,19 +84,15 @@ function run() {
   );
 
 assert.ok(
-    !tabJs.includes('RuntimeEvents.RVM_TOOL_CHANGED, {\n      key: \'supportSymbolScale\''),
-    'support scale must not emit unregistered RuntimeEvents.RVM_TOOL_CHANGED'
-  );
+  !tabJs.includes('RuntimeEvents.RVM_TOOL_CHANGED'),
+  'support scale must not emit unregistered RuntimeEvents.RVM_TOOL_CHANGED'
+);
 
   assert.ok(
     tabJs.includes('RuntimeEvents.RVM_CONFIG_CHANGED'),
     'support scale must emit registered RuntimeEvents.RVM_CONFIG_CHANGED'
   );
 
-  assert.ok(
-    tabJs.includes('notifyUser: false'),
-    'slider input must update silently without notification spam'
-  );
 
   assert.ok(
     tabJs.includes('notifyUser: true'),
@@ -107,6 +103,21 @@ assert.ok(
     tabJs.includes("container.addEventListener('input'") &&
     tabJs.includes("container.addEventListener('change'"),
     'support scale must separate live input from final change'
+  );
+
+  assert.ok(
+    tabJs.includes('_previewRvmSupportScaleControls'),
+    'slider input must preview scale without rebuilding symbols continuously'
+  );
+
+  assert.ok(
+    tabJs.includes("'support-scale-change'"),
+    'support symbols must rebuild on change/release'
+  );
+
+  assert.ok(
+    !tabJs.includes("'support-scale-input'"),
+    'support symbols must not rebuild continuously on input'
   );
 
   console.log('[PASS] RVM support symbol scale settings smoke passed.');

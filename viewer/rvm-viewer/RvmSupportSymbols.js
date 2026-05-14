@@ -347,7 +347,6 @@ export function addRvmSupportSymbols(viewer, options = {}) {
 
 opts.scaleMultiplier = normalizeRvmSupportSymbolScale(opts.scaleMultiplier);
   const existing = viewer.scene.getObjectByName(SUPPORT_SYMBOL_GROUP_NAME);
-  if (existing) { viewer.scene.remove(existing); disposeObject(existing); }
   const symbolRoot = new THREE.Group();
   symbolRoot.name = SUPPORT_SYMBOL_GROUP_NAME;
   symbolRoot.userData.supportSymbolRoot = true;
@@ -373,15 +372,59 @@ opts.scaleMultiplier = normalizeRvmSupportSymbolScale(opts.scaleMultiplier);
     scanned += 1;
     symbolRoot.add(buildSymbol(kind, pos, attrs, obj, scale, viewer, opts));
   });
-  if (symbolRoot.children.length > 0) viewer.scene.add(symbolRoot);
+  const created = symbolRoot.children.length;
+
+  if (created > 0) {
+    if (existing) {
+      viewer.scene.remove(existing);
+      disposeObject(existing);
+    }
+
+    viewer.scene.add(symbolRoot);
+
+    return {
+      created,
+      scanned,
+      labelsVisible: opts.labelsVisible,
+      scale,
+      scaleMultiplier: opts.scaleMultiplier,
+      minScale: opts.minScale,
+      maxScale: opts.maxScale,
+      preservedExisting: false,
+    };
+  }
+
+  // Important safety rule:
+  // Do not remove existing symbols if rebuild found zero.
+  // This prevents support symbols disappearing during scale adjustment.
+  disposeObject(symbolRoot);
+
+  if (existing) {
+    existing.visible = true;
+
+    return {
+      created: existing.children?.length || 0,
+      scanned,
+      labelsVisible: opts.labelsVisible,
+      scale,
+      scaleMultiplier: opts.scaleMultiplier,
+      minScale: opts.minScale,
+      maxScale: opts.maxScale,
+      preservedExisting: true,
+      skipped: 'REBUILD_FOUND_ZERO_SUPPORTS_KEPT_EXISTING',
+    };
+  }
+
   return {
-    created: symbolRoot.children.length,
+    created: 0,
     scanned,
     labelsVisible: opts.labelsVisible,
     scale,
     scaleMultiplier: opts.scaleMultiplier,
     minScale: opts.minScale,
     maxScale: opts.maxScale,
+    preservedExisting: false,
+    skipped: 'NO_SUPPORT_SYMBOLS_FOUND',
   };
 }
 export function installRvmSupportSymbolPatch() {
