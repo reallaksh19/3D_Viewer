@@ -45,9 +45,6 @@ import {
   detectUxmlProfile,
 } from './UxmlProfileDetector.js';
 
-import { mapInputXmlToUxml } from './UxmlInputXmlSchemaMapper.js';
-import { mapStandardXmlToUxml } from './UxmlStandardXmlSchemaMapper.js';
-
 const NORMALIZER_SCHEMA = 'uxml-normalizer/v1';
 
 function clean(value) {
@@ -447,37 +444,186 @@ function extractStandardComponentPoints(attrs, inner) {
   return points;
 }
 
-function normalizeStandardXml(xmlText, doc, sourceId, options = {}) {
-  const result = mapStandardXmlToUxml(xmlText, doc, sourceId, options);
+function normalizeStandardXml(xmlText, doc, sourceId) {
+  addMapping(doc, 'Component', 'components[]', XML_PROFILES.STANDARD_XML);
+  addMapping(doc, 'EndPoint/EP1', 'anchors[role=EP1]', XML_PROFILES.STANDARD_XML);
+  addMapping(doc, 'EndPoint/EP2', 'anchors[role=EP2]', XML_PROFILES.STANDARD_XML);
+  addMapping(doc, 'CentrePoint/CP', 'anchors[role=CP]', XML_PROFILES.STANDARD_XML);
+  addMapping(doc, 'BranchPoint/BP', 'anchors[role=BP]', XML_PROFILES.STANDARD_XML);
 
-  pushDiagnostic(doc, {
-    severity: result.ok ? 'INFO' : 'WARNING',
-    code: result.ok
-      ? 'UXML-NORMALIZER-STANDARDXML-MAPPER-OK'
-      : 'UXML-NORMALIZER-STANDARDXML-MAPPER-PARTIAL',
-    message: result.ok
-      ? `Standard XML mapper completed. Components=${result.stats.componentCount}.`
-      : 'Standard XML mapper completed with no components. Schema-specific mapping may be required.',
-    sourceId,
-    details: result.stats,
+  const componentTags = [
+    ...findElements(xmlText, 'Component'),
+    ...findElements(xmlText, 'Pipe'),
+    ...findElements(xmlText, 'Fitting'),
+    ...findElements(xmlText, 'Support'),
+  ];
+
+  const seenRaw = new Set();
+  const uniqueTags = componentTags.filter(tag => {
+    if (seenRaw.has(tag.raw)) return false;
+    seenRaw.add(tag.raw);
+    return true;
+  });
+
+  if (!uniqueTags.length) {
+    pushDiagnostic(doc, {
+      severity: 'WARNING',
+      code: 'UXML-NORMALIZER-STANDARD-NO-COMPONENTS',
+      message: 'STANDARD_XML profile detected but no Component/Pipe/Fitting/Support tags were extracted.',
+      sourceId,
+    });
+  }
+
+  uniqueTags.forEach((tag, index) => {
+    const attrs = tag.attrs;
+    const explicitType = attrValue(attrs, 'type', 'componentType', 'component-type', 'class', 'skey') || tag.open.match(/^<\s*([\w:.-]+)/)?.[1];
+    const normalizedType = detectComponentType(explicitType);
+    const id = safeId(attrValue(attrs, 'id', 'componentId', 'refNo', 'ref'), `C-${pad(index + 1)}`);
+    const pipelineRef = attrValue(attrs, 'pipelineRef', 'pipeline-ref', 'pipeline', 'line', 'lineRef');
+    const lineKey = attrValue(attrs, 'lineKey', 'line-key', 'lineNo', 'line-no');
+
+    ensurePipeline(doc, pipelineRef, lineKey);
+
+    const component = createUxmlComponent({
+      id,
+      sourceRefs: [sourceId],
+      type: clean(explicitType) || normalizedType,
+      normalizedType,
+      pipelineRef,
+      lineKey,
+      refNo: attrValue(attrs, 'refNo', 'ref-no', 'ca97', 'CA97', 'ref'),
+      seqNo: attrValue(attrs, 'seqNo', 'seq-no', 'ca98', 'CA98', 'sequence'),
+      name: attrValue(attrs, 'name', 'tag'),
+      bore: numberOrNull(attrValue(attrs, 'bore', 'convertedBore', 'size', 'nps')),
+      branchBore: numberOrNull(attrValue(attrs, 'branchBore', 'branchConvertedBore', 'branch-size')),
+      skey: attrValue(attrs, 'skey', 'SKEY'),
+      rawAttributes: { ...attrs },
+      confidence: CONFIDENCE_LEVELS.ALIASED_SOURCE,
+    });
+
+    const points = extractStandardComponentPoints(attrs, tag.inner);
+
+    addAnchorPort(doc, component, ANCHOR_ROLES.EP1, points.ep1, 'EP1');
+    addAnchorPort(doc, component, ANCHOR_ROLES.EP2, points.ep2, 'EP2');
+    addAnchorPort(doc, component, ANCHOR_ROLES.CP, points.cp, 'CP', normalizedType === COMPONENT_TYPES.OLET ? 'SEGMENT' : 'ENDPOINT');
+    addAnchorPort(doc, component, ANCHOR_ROLES.BP, points.bp, 'BP');
+
+    addSegmentIfPossible(doc, component);
+
+    if (normalizedType === COMPONENT_TYPES.TEE && !points.bp) {
+      pushLoss(doc, {
+        severity: 'WARNING',
+        code: 'UXML-TEE-BP-MISSING',
+        componentId: component.id,
+        sourceId,
+        message: 'TEE component has no BP/branch point in STANDARD_XML extraction.',
+      });
+    }
+
+    if (
+      [COMPONENT_TYPES.OLET, COMPONENT_TYPES.WELDOLET, COMPONENT_TYPES.SOCKOLET].includes(normalizedType) &&
+      (!points.cp || !points.bp)
+    ) {
+      pushLoss(doc, {
+        severity: 'WARNING',
+        code: 'UXML-OLET-CP-BP-INCOMPLETE',
+        componentId: component.id,
+        sourceId,
+        message: 'OLET component needs CP and BP for robust branch topology.',
+      });
+    }
+
+    doc.components.push(component);
   });
 
   return doc;
 }
 
-function normalizeInputXml(xmlText, doc, sourceId, options = {}) {
-  const result = mapInputXmlToUxml(xmlText, doc, sourceId, options);
+function normalizeInputXml(xmlText, doc, sourceId) {
+  addMapping(doc, 'Node', 'anchors[]', XML_PROFILES.INPUT_XML);
+  addMapping(doc, 'Element', 'components[]/segments[]', XML_PROFILES.INPUT_XML);
+
+  const nodeMap = new Map();
+
+  for (const nodeTag of findElements(xmlText, 'Node')) {
+    const attrs = nodeTag.attrs;
+    const id = attrValue(attrs, 'id', 'name', 'number', 'nodeNo', 'node-no');
+    const point = parsePointAttrs(attrs) || parsePointText(clean(nodeTag.inner));
+
+    if (id && point) {
+      nodeMap.set(id, point);
+    }
+  }
+
+  const elementTags = [
+    ...findElements(xmlText, 'Element'),
+    ...findElements(xmlText, 'PipeElement'),
+    ...findElements(xmlText, 'Member'),
+  ];
+
+  if (!elementTags.length) {
+    pushDiagnostic(doc, {
+      severity: 'WARNING',
+      code: 'UXML-NORMALIZER-INPUTXML-NO-ELEMENTS',
+      message: 'INPUT_XML profile detected but no Element/PipeElement/Member tags were extracted.',
+      sourceId,
+    });
+  }
+
+  elementTags.forEach((tag, index) => {
+    const attrs = tag.attrs;
+    const id = safeId(attrValue(attrs, 'id', 'elementNo', 'element-no', 'number'), `E-${pad(index + 1)}`);
+    const type = detectComponentType(attrValue(attrs, 'type', 'componentType', 'kind') || 'PIPE');
+    const startNode = attrValue(attrs, 'startNode', 'start-node', 'from', 'fromNode', 'node1', 'start');
+    const endNode = attrValue(attrs, 'endNode', 'end-node', 'to', 'toNode', 'node2', 'end');
+
+    const ep1 = nodeMap.get(startNode) || parsePointFromComponentAttr(attrs, 'ep1', 'startPoint');
+    const ep2 = nodeMap.get(endNode) || parsePointFromComponentAttr(attrs, 'ep2', 'endPoint');
+
+    const pipelineRef = attrValue(attrs, 'pipelineRef', 'pipeline-ref', 'line', 'lineNo');
+    ensurePipeline(doc, pipelineRef, attrValue(attrs, 'lineKey', 'lineNo'));
+
+    const component = createUxmlComponent({
+      id,
+      sourceRefs: [sourceId],
+      type,
+      normalizedType: type,
+      pipelineRef,
+      lineKey: attrValue(attrs, 'lineKey', 'lineNo'),
+      refNo: attrValue(attrs, 'refNo', 'ca97'),
+      seqNo: attrValue(attrs, 'seqNo', 'ca98', 'number'),
+      bore: numberOrNull(attrValue(attrs, 'bore', 'diameter', 'size')),
+      rawAttributes: {
+        ...attrs,
+        startNode,
+        endNode,
+      },
+      confidence: CONFIDENCE_LEVELS.ALIASED_SOURCE,
+    });
+
+    addAnchorPort(doc, component, ANCHOR_ROLES.EP1, ep1, startNode ? `Node:${startNode}` : 'EP1');
+    addAnchorPort(doc, component, ANCHOR_ROLES.EP2, ep2, endNode ? `Node:${endNode}` : 'EP2');
+    addSegmentIfPossible(doc, component);
+
+    if (!ep1 || !ep2) {
+      pushLoss(doc, {
+        severity: 'WARNING',
+        code: 'UXML-INPUTXML-ELEMENT-ENDPOINT-INCOMPLETE',
+        componentId: component.id,
+        sourceId,
+        message: `InputXML element ${id} does not resolve both endpoint nodes.`,
+        details: { startNode, endNode },
+      });
+    }
+
+    doc.components.push(component);
+  });
 
   pushDiagnostic(doc, {
-    severity: result.ok ? 'INFO' : 'WARNING',
-    code: result.ok
-      ? 'UXML-NORMALIZER-INPUTXML-MAPPER-OK'
-      : 'UXML-NORMALIZER-INPUTXML-MAPPER-PARTIAL',
-    message: result.ok
-      ? `InputXML adaptive mapper completed. Components=${result.stats.componentCount}.`
-      : 'InputXML adaptive mapper completed with no components. Schema-specific mapping may be required.',
+    severity: 'INFO',
+    code: 'UXML-NORMALIZER-INPUTXML-NODES-READ',
+    message: `Read ${nodeMap.size} InputXML node coordinate(s).`,
     sourceId,
-    details: result.stats,
   });
 
   return doc;
@@ -575,7 +721,7 @@ function makeStats(doc) {
 
 export function normalizeXmlToUxml(xmlText, options = {}) {
   const text = String(xmlText ?? '');
-  const profileReport = options.profileReport || detectUxmlProfile(text, options);
+  const profileReport = options.profileReport || detectUxmlProfile(text);
   const buildAllowed = assertXmlProfileBuildAllowed(profileReport);
 
   if (!buildAllowed.ok) {
@@ -598,9 +744,9 @@ export function normalizeXmlToUxml(xmlText, options = {}) {
   if (profileReport.profile === XML_PROFILES.UXML) {
     normalizeUxmlPassthrough(text, doc, sourceId);
   } else if (profileReport.profile === XML_PROFILES.STANDARD_XML) {
-    normalizeStandardXml(text, doc, sourceId, options);
+    normalizeStandardXml(text, doc, sourceId);
   } else if (profileReport.profile === XML_PROFILES.INPUT_XML) {
-    normalizeInputXml(text, doc, sourceId, options);
+    normalizeInputXml(text, doc, sourceId);
   } else if (profileReport.profile === XML_PROFILES.BENCHMARK_XML) {
     normalizeBenchmarkXml(text, doc, sourceId);
   } else {

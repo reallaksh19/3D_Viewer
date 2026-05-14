@@ -44,6 +44,32 @@
 - Coordinates: FROM_NODE, TO_NODE, DELTA_X, DELTA_Y, DELTA_Z on PIPINGELEMENT
 - Bores/Sizes: DIAMETER, WALL_THICK
 
+## Candidate Bores/Sizes/Rating/Class/Ref/Seq Fields
+- Bores: DIAMETER, WALL_THICK
+- Ref: NAME
+- Rating/Class: MATERIAL_NAME, MATERIAL_NUM
+
+## Source-field -> UXML-field mapping table
+| Source Field | UXML Field |
+| :--- | :--- |
+| PIPINGMODEL | Pipeline |
+| PIPINGELEMENT | Component |
+| RIGID TYPE="Valve" | Valve Component |
+| RIGID TYPE="Flange Pair" | Flange Component |
+| FROM_NODE | Anchor EP1 |
+| TO_NODE | Anchor EP2 |
+| DELTA_X | Relative X |
+| DELTA_Y | Relative Y |
+| DELTA_Z | Relative Z |
+
+## Expected extraction counts
+- Pipelines: 1
+- Components: ~15
+- Anchors: ~30
+- Ports: ~30
+- Segments: ~15
+- Supports: 0
+
 ## Observations
 Unlike standard AVEVA InputXML which uses `<Element type="PIPE">` with `<Node>` lists, this file uses a CAESAR II specific format:
 - Root is `<CAESARII>` -> `<PIPINGMODEL>`
