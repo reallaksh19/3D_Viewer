@@ -131,7 +131,25 @@ describe('UxmlNormalizer Agent 02 skeleton', () => {
     expect(result.uxml.components[0].id).toBe('PIPE-A');
   });
 
+  it('returns stable stats for normalizer output', () => {
+    const result = normalizeXmlToUxml(`
+      <Project>
+        <Component id="PIPE-STATS" type="PIPE" pipelineRef="/P1" ep1="0,0,0" ep2="100,0,0"/>
+      </Project>
+    `);
 
+    expect(result.stats).toEqual({
+      sourceCount: 1,
+      mappingCount: 3,
+      pipelineCount: 1,
+      componentCount: 1,
+      anchorCount: 4,
+      portCount: 4,
+      segmentCount: 1,
+      supportCount: 0,
+      lossCount: 0,
+      diagnosticCount: 5,
+    });
   });
 
   it('normalizes non-literal InputXML variant through adaptive mapper', () => {
@@ -186,3 +204,4 @@ describe('UxmlNormalizer Agent 02 skeleton', () => {
     expect(result.uxml.ports.length).toBe(8);
     expect(result.uxml.segments.length).toBe(2);
   });
+});

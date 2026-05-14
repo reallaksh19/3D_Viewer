@@ -1,6 +1,6 @@
 import { XML_PROFILES } from './UxmlConstants.js';
 
-export function detectUxmlProfile(xmlText, options = {}) {
+export function detectUxmlProfile(xmlText) {
   const text = String(xmlText || '').trim();
 
   if (!text) {
@@ -26,14 +26,6 @@ export function detectUxmlProfile(xmlText, options = {}) {
       profile: XML_PROFILES.STANDARD_XML,
       blockers: [],
       confidence: 'HIGH',
-    };
-  }
-
-  if (options.selectedSourceType === 'INPUT_XML' || (options.fileName && options.fileName.toUpperCase().includes('INPUT.XML'))) {
-    return {
-      profile: XML_PROFILES.INPUT_XML,
-      blockers: [],
-      confidence: 'MEDIUM',
     };
   }
 

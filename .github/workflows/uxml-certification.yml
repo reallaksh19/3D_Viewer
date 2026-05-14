@@ -64,7 +64,7 @@ jobs:
             pnpm vitest run \
               viewer/tests/uxml-contracts.test.js \
               viewer/tests/uxml-profile-detector.test.js \
-                            viewer/tests/uxml-normalizer.test.js \
+              viewer/tests/uxml-normalizer.test.js \
               viewer/tests/uxml-inputxml-schema-mapper.test.js \
               viewer/tests/uxml-standard-xml-schema-mapper.test.js \
               viewer/tests/uxml-validation-gate.test.js \
@@ -84,7 +84,7 @@ jobs:
             npx vitest run \
               viewer/tests/uxml-contracts.test.js \
               viewer/tests/uxml-profile-detector.test.js \
-                            viewer/tests/uxml-normalizer.test.js \
+              viewer/tests/uxml-normalizer.test.js \
               viewer/tests/uxml-inputxml-schema-mapper.test.js \
               viewer/tests/uxml-standard-xml-schema-mapper.test.js \
               viewer/tests/uxml-validation-gate.test.js \
