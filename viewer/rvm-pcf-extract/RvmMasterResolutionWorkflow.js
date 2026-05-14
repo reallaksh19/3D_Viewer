@@ -821,7 +821,7 @@ export class RvmMasterResolutionWorkflow {
     if (!request || !payload) return { applied: 0, diagnostics: [] };
 
     const diagnostics = [];
-const applyScope = normalizeMasterApplyScope(payload.applyScope);
+    const applyScope = normalizeMasterApplyScope(payload.applyScope);
     let applied = 0;
 
     const targetRows = (rows || []).filter(row => {
@@ -916,7 +916,7 @@ const applyScope = normalizeMasterApplyScope(payload.applyScope);
         }
 
         if (payload.action === 'manual') {
-const values = {
+          const values = {
             pipingClass: clean(payload.pipingClass),
             rating: normalizeResolvedRating(payload.rating),
             convertedBore: null,
@@ -1032,7 +1032,7 @@ const values = {
     requests.push(this._lineListRequest(row, key, fuzzy, fuzzy.length ? 'AMBIGUOUS_FUZZY' : 'NO_MATCH'));
   }
 
-_resolvePipingClass(row, requests, diagnostics) {
+  _resolvePipingClass(row, requests, diagnostics) {
     const derived = this._derivedPipingClass(row);
     const derivedRating = this._derivedRating(row);
 
@@ -1057,7 +1057,7 @@ _resolvePipingClass(row, requests, diagnostics) {
       }
     }
 
-if (derivedRating) {
+    if (derivedRating) {
       row.rating = derivedRating;
       row.ratingDerived = derivedRating;
       row.ratingSource = row.ratingSource || 'PIPELINE-REF-RATING-GROUP';
@@ -1252,7 +1252,7 @@ if (derivedRating) {
     );
   }
 
-_samePipelineGroup(row, request) {
+  _samePipelineGroup(row, request) {
     const requestPipeRef = norm(request.pipelineRef || request.lookupKey || '');
     const rowPipeRef = norm(row.pipelineRef || row.lineNoKey || row.lineKey || row.name || '');
 
@@ -1834,7 +1834,7 @@ function collectManualPayload(form, request) {
   }
 
   if (request.kind === 'LINELIST') {
-return {
+    return {
       action: 'manual',
       pipingClass: clean(form.elements.manualPipingClass?.value),
       rating: normalizeResolvedRating(form.elements.manualRating?.value || request.rating || request.derivedRating || ''),

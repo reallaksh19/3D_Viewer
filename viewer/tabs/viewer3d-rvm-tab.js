@@ -858,6 +858,11 @@ function _applyRvmSupportScale(
   return result;
 }
 
+function _previewRvmSupportScaleControls(container, rawValue) {
+  const scaleMultiplier = normalizeRvmSupportSymbolScale(rawValue);
+  _syncRvmSupportScaleControls(container, scaleMultiplier);
+}
+
 function _bindRvmSupportSymbolSettings(container) {
   if (container.dataset.rvmSupportSymbolSettingsBound === 'true') return;
   container.dataset.rvmSupportSymbolSettingsBound = 'true';
@@ -869,10 +874,9 @@ function _bindRvmSupportSymbolSettings(container) {
     if (!range && !number) return;
     if (!container.contains(event.target)) return;
 
-    // Live preview only. No notification spam while dragging.
-    _applyRvmSupportScale(container, event.target.value, 'support-scale-input', {
-      notifyUser: false,
-    });
+    // Preview only. Do not rebuild symbols continuously while dragging.
+    // Continuous rebuild can remove existing symbols if a transient scan finds 0 supports.
+    _previewRvmSupportScaleControls(container, event.target.value);
   });
 
   container.addEventListener('change', (event) => {
@@ -882,7 +886,7 @@ function _bindRvmSupportSymbolSettings(container) {
     if (!range && !number) return;
     if (!container.contains(event.target)) return;
 
-    // Final user-facing confirmation after slider release / number edit.
+    // Commit once after slider release / number edit.
     _applyRvmSupportScale(container, event.target.value, 'support-scale-change', {
       notifyUser: true,
     });
@@ -1113,10 +1117,15 @@ function _resetRvmInteractionToOrbit(container) {
 
   _setActiveToolButton(container, 'NAV_ORBIT');
 
-  emit(RuntimeEvents.RVM_TOOL_CHANGED, {
-    tool: 'orbit',
-    source: 'rvm-escape',
-  });
+  try {
+    emit(RuntimeEvents.RVM_CONFIG_CHANGED, {
+      key: 'activeTool',
+      tool: 'orbit',
+      source: 'rvm-escape',
+    });
+  } catch (err) {
+    console.warn('[RVM] Failed to emit tool change:', err);
+  }
 }
 
 function _bindShortcuts(container) {
