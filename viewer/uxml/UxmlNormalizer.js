@@ -721,7 +721,7 @@ function makeStats(doc) {
 
 export function normalizeXmlToUxml(xmlText, options = {}) {
   const text = String(xmlText ?? '');
-  const profileReport = options.profileReport || detectUxmlProfile(text);
+  const profileReport = options.profileReport || detectUxmlProfile(text, options);
   const buildAllowed = assertXmlProfileBuildAllowed(profileReport);
 
   if (!buildAllowed.ok) {

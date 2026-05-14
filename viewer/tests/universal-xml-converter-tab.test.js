@@ -81,6 +81,21 @@ describe('Universal XML Converter Tab Agent 09', () => {
     expect(detectSourceType('standard.xml', STANDARD_XML_SAMPLE)).toBe('EXISTING_XML');
   });
 
+  it('detects *_INPUT.XML as InputXML source type using filename hint', () => {
+    const xml = `
+      <?xml version="1.0"?>
+      <PlantModel>
+        <Pipeline name="L-1001">
+          <Node id="N1" x="0" y="0" z="0"/>
+          <Node id="N2" x="1000" y="0" z="0"/>
+          <Element id="E1" type="PIPE" startNode="N1" endNode="N2"/>
+        </Pipeline>
+      </PlantModel>
+    `;
+
+    expect(detectSourceType('1001-P - COPY_INPUT.XML', xml)).toBe('INPUT_XML');
+  });
+
   it('uses extension fallback for non-XML converter sources', () => {
     expect(detectSourceType('model.pcf', 'PIPELINE-REFERENCE X')).toBe('PCF');
     expect(detectSourceType('drawing.pdf', '%PDF')).toBe('PDF_TO_INPUTXML');
