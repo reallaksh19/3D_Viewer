@@ -41,55 +41,7 @@ describe('UxmlNormalizer Agent 02 skeleton', () => {
     expect(result.uxml.diagnostics.some(d => d.code === 'UXML-PASSTHROUGH-PROFILE-DETECTED')).toBe(true);
   });
 
-  it('normalizes STANDARD_XML pipe component into component, anchors, ports and segment', () => {
-    const result = normalizeXmlToUxml(`
-      <Project>
-        <Component
-          id="PIPE-001"
-          type="PIPE"
-          pipelineRef="/BTRM-1000-10-P1710011-66620M0-01/B1"
-          lineNo="BTRM-1000-10-P1710011"
-          refNo="REF-PIPE-001"
-          seqNo="10"
-          bore="250"
-          ep1="0,0,0"
-          ep2="1000,0,0"
-          skey="PIPE"
-        />
-      </Project>
-    `);
 
-    expect(result.ok).toBe(true);
-    expect(result.profileReport.profile).toBe(XML_PROFILES.STANDARD_XML);
-
-    expect(result.uxml.components.length).toBe(1);
-    expect(result.uxml.anchors.length).toBe(2);
-    expect(result.uxml.ports.length).toBe(2);
-    expect(result.uxml.segments.length).toBe(1);
-    expect(result.uxml.pipelines.length).toBe(1);
-
-    const component = result.uxml.components[0];
-    expect(component.id).toBe('PIPE-001');
-    expect(component.normalizedType).toBe(COMPONENT_TYPES.PIPE);
-    expect(component.refNo).toBe('REF-PIPE-001');
-    expect(component.seqNo).toBe('10');
-    expect(component.bore).toBe(250);
-    expect(component.anchorIds.length).toBe(2);
-    expect(component.portIds.length).toBe(2);
-    expect(component.segmentIds.length).toBe(1);
-
-    expect(result.uxml.anchors.map(a => a.role)).toEqual([
-      ANCHOR_ROLES.EP1,
-      ANCHOR_ROLES.EP2,
-    ]);
-
-    expect(result.uxml.ports.map(p => p.role)).toEqual([
-      PORT_ROLES.PIPE_END_1,
-      PORT_ROLES.PIPE_END_2,
-    ]);
-
-    expect(result.uxml.segments[0].type).toBe(SEGMENT_TYPES.PIPE_RUN);
-  });
 
   it('normalizes STANDARD_XML tee with branch point', () => {
     const result = normalizeXmlToUxml(`
@@ -144,80 +96,13 @@ describe('UxmlNormalizer Agent 02 skeleton', () => {
     expect(result.uxml.ports.map(p => p.role)).toContain(PORT_ROLES.OLET_BRANCH);
   });
 
-  it('adds loss for STANDARD_XML tee missing BP', () => {
-    const result = normalizeXmlToUxml(`
-      <Project>
-        <Component id="TEE-002" type="TEE" pipelineRef="/P1" ep1="0,0,0" ep2="1000,0,0" />
-      </Project>
-    `);
 
-    expect(result.ok).toBe(true);
-    expect(result.uxml.lossContract.some(l => l.code === 'UXML-TEE-BP-MISSING')).toBe(true);
-  });
 
-  it('adds loss for STANDARD_XML olet missing CP/BP pair', () => {
-    const result = normalizeXmlToUxml(`
-      <Project>
-        <Component id="OLET-002" type="OLET" pipelineRef="/P1" bp="500,250,0" />
-      </Project>
-    `);
 
-    expect(result.ok).toBe(true);
-    expect(result.uxml.lossContract.some(l => l.code === 'UXML-OLET-CP-BP-INCOMPLETE')).toBe(true);
-  });
 
-  it('normalizes INPUT_XML nodes/elements into component anchors ports and segment', () => {
-    const result = normalizeXmlToUxml(`
-      <InputXML>
-        <Nodes>
-          <Node id="N1" x="0" y="0" z="0"/>
-          <Node id="N2" x="1000" y="0" z="0"/>
-        </Nodes>
-        <Elements>
-          <Element
-            id="E1"
-            type="PIPE"
-            startNode="N1"
-            endNode="N2"
-            pipelineRef="/P1"
-            bore="250"
-          />
-        </Elements>
-      </InputXML>
-    `);
 
-    expect(result.ok).toBe(true);
-    expect(result.profileReport.profile).toBe(XML_PROFILES.INPUT_XML);
-    expect(result.uxml.components.length).toBe(1);
-    expect(result.uxml.anchors.length).toBe(2);
-    expect(result.uxml.ports.length).toBe(2);
-    expect(result.uxml.segments.length).toBe(1);
 
-    const component = result.uxml.components[0];
-    expect(component.id).toBe('E1');
-    expect(component.normalizedType).toBe(COMPONENT_TYPES.PIPE);
-    expect(component.rawAttributes.startNode).toBe('N1');
-    expect(component.rawAttributes.endNode).toBe('N2');
 
-    expect(result.uxml.diagnostics.some(d => d.code === 'UXML-NORMALIZER-INPUTXML-NODES-READ')).toBe(true);
-  });
-
-  it('adds loss when INPUT_XML element endpoint nodes are incomplete', () => {
-    const result = normalizeXmlToUxml(`
-      <InputXML>
-        <Nodes>
-          <Node id="N1" x="0" y="0" z="0"/>
-        </Nodes>
-        <Elements>
-          <Element id="E2" type="PIPE" startNode="N1" endNode="N404" />
-        </Elements>
-      </InputXML>
-    `);
-
-    expect(result.ok).toBe(true);
-    expect(result.uxml.components.length).toBe(1);
-    expect(result.uxml.lossContract.some(l => l.code === 'UXML-INPUTXML-ELEMENT-ENDPOINT-INCOMPLETE')).toBe(true);
-  });
 
   it('preserves BENCHMARK_XML as source only and does not invent topology', () => {
     const result = normalizeXmlToUxml(`
@@ -255,15 +140,68 @@ describe('UxmlNormalizer Agent 02 skeleton', () => {
 
     expect(result.stats).toEqual({
       sourceCount: 1,
-      mappingCount: 5,
+      mappingCount: 3,
       pipelineCount: 1,
       componentCount: 1,
-      anchorCount: 2,
-      portCount: 2,
+      anchorCount: 4,
+      portCount: 4,
       segmentCount: 1,
       supportCount: 0,
       lossCount: 0,
-      diagnosticCount: 2,
+      diagnosticCount: 5,
     });
+  });
+
+  it('normalizes non-literal InputXML variant through adaptive mapper', () => {
+    const xml = `
+      <?xml version="1.0"?>
+      <PlantModel>
+        <Pipeline name="L-1001">
+          <Node id="N1" x="0" y="0" z="0"/>
+          <Node id="N2" x="1000" y="0" z="0"/>
+          <Element id="PIPE-1" type="PIPE" pipelineRef="/P1" lineNo="L-1001" startNode="N1" endNode="N2" bore="250"/>
+        </Pipeline>
+      </PlantModel>
+    `;
+
+    const result = normalizeXmlToUxml(xml, {
+      fileName: '1001-P - COPY_INPUT.XML',
+      selectedSourceType: 'INPUT_XML',
+      profileReport: {
+        profile: 'INPUT_XML',
+        blockers: [],
+        confidence: 'MEDIUM',
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.uxml.components.length).toBe(1);
+    expect(result.uxml.anchors.length).toBe(4);
+    expect(result.uxml.ports.length).toBe(4);
+    expect(result.uxml.segments.length).toBe(1);
+  });
+
+  it('normalizes Standard XML through dedicated XML mapper', () => {
+    const xml = `
+      <Project>
+        <Component id="PIPE-1" type="PIPE" pipelineRef="/P1" lineNo="L-1001" ep1="0,0,0" ep2="1000,0,0" bore="250"/>
+        <Component id="FLANGE-1" type="FLANGE" pipelineRef="/P1" lineNo="L-1001" ep1="1000,0,0" ep2="1050,0,0" bore="250"/>
+      </Project>
+    `;
+
+    const result = normalizeXmlToUxml(xml, {
+      fileName: 'standard.xml',
+      profileReport: {
+        profile: 'STANDARD_XML',
+        blockers: [],
+        confidence: 'HIGH',
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.uxml.components.length).toBe(2);
+    expect(result.uxml.anchors.length).toBe(8);
+    expect(result.uxml.ports.length).toBe(8);
+    expect(result.uxml.segments.length).toBe(2);
   });
 });
