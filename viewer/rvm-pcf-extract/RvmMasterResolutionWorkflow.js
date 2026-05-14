@@ -502,14 +502,13 @@ export class RvmMasterResolutionWorkflow {
         return String(row.sourceCanonicalId || row.rowNo) === String(request.rowId);
       }
 
-      if (request.kind === 'PIPING_CLASS') {
-        return norm(this._derivedPipingClass(row)) === norm(request.derivedPipingClass);
+      // Pipe-level properties apply to all child components under the same
+      // pipeline + bore. Do not split by component type.
+      if (request.kind === 'PIPING_CLASS' || request.kind === 'LINELIST') {
+        return this._samePipePropertyGroup(row, request);
       }
 
-      if (request.kind === 'LINELIST') {
-        return norm(this._lineListLookupKey(row)) === norm(request.lookupKey);
-      }
-
+      // Weight stays component-specific.
       if (request.kind === 'WEIGHT') {
         return this._weightKey(row) === request.weightKey;
       }
@@ -871,6 +870,27 @@ export class RvmMasterResolutionWorkflow {
     );
   }
 
+  _samePipePropertyGroup(row, request) {
+    const requestPipeRef = norm(request.pipelineRef || request.lookupKey || '');
+    const rowPipeRef = norm(row.pipelineRef || row.lineNoKey || row.lineKey || row.name || '');
+
+    if (!requestPipeRef || !rowPipeRef || requestPipeRef !== rowPipeRef) {
+      return false;
+    }
+
+    const requestBore = toNumber(request.boreMm);
+    const rowBore = toNumber(row.convertedBore);
+
+    // If bore is known, group by pipeline + bore.
+    if (requestBore != null && rowBore != null) {
+      return Math.abs(requestBore - rowBore) < 1;
+    }
+
+    // If bore is missing, fall back to pipeline only.
+    // This is still safer than splitting by component type.
+    return true;
+  }
+
   _lineListLookupKey(row) {
     return clean(row.lineNoKey || row.lineKey || row.pipelineRef || row.name || row.sourcePath || '');
   }
@@ -993,15 +1013,36 @@ function requestLineLabel(request) {
   ) || '—';
 }
 
-function masterResolutionGroupKey(request) {
+function masterResolutionPipePropertyKey(request) {
   return [
-    request.pipelineRef || '(no pipeline)',
-    requestBoreLabel(request),
-    request.kind || 'UNKNOWN',
-    requestPipeClassLabel(request),
-    requestRatingLabel(request),
-    request.reason || '',
+    norm(request.pipelineRef || request.lookupKey || ''),
+    request.boreMm == null ? 'NO_BORE' : `DN${Math.round(Number(request.boreMm))}`,
   ].join('||');
+}
+
+function masterResolutionGroupKey(request) {
+  // Important:
+  // Do not split line-list / piping-class resolution by component type.
+  // Pipe-level properties apply to all children on the same pipeline + bore:
+  // PIPE, BEND, TEE, OLET, FLANGE, VALVE, SUPPORT-associated rows, etc.
+  if (request.kind === 'LINELIST' || request.kind === 'PIPING_CLASS') {
+    return masterResolutionPipePropertyKey(request);
+  }
+
+  // Weight remains component-sensitive because weight depends on
+  // component type + bore + rating + length.
+  if (request.kind === 'WEIGHT') {
+    return [
+      request.kind || 'WEIGHT',
+      request.componentType || '',
+      norm(request.pipelineRef || ''),
+      request.boreMm == null ? 'NO_BORE' : `DN${Math.round(Number(request.boreMm))}`,
+      normalizeRating(request.rating || request.derivedRating || request.derivedPipingClass || ''),
+      request.lengthMm == null ? 'NO_LENGTH' : `L${Math.round(Number(request.lengthMm))}`,
+    ].join('||');
+  }
+
+  return masterResolutionPipePropertyKey(request);
 }
 
 function groupMasterRequests(requests = []) {
@@ -1015,12 +1056,13 @@ function groupMasterRequests(requests = []) {
     if (!map.has(key)) {
       const group = {
         key,
-        pipelineRef: request.pipelineRef || '(no pipeline)',
+        pipelineRef: request.pipelineRef || request.lookupKey || '(no pipeline)',
         bore: requestBoreLabel(request),
-        kind: request.kind,
+        kinds: new Set(),
+        componentTypes: new Set(),
+        reasons: new Set(),
         pipingClass: requestPipeClassLabel(request),
         rating: requestRatingLabel(request),
-        reason: request.reason || '',
         requests: [],
       };
 
@@ -1028,7 +1070,21 @@ function groupMasterRequests(requests = []) {
       groups.push(group);
     }
 
-    map.get(key).requests.push({
+    const group = map.get(key);
+
+    if (request.kind) group.kinds.add(request.kind);
+    if (request.componentType) group.componentTypes.add(request.componentType);
+    if (request.reason) group.reasons.add(request.reason);
+
+    if ((!group.pipingClass || group.pipingClass === '—') && requestPipeClassLabel(request) !== '—') {
+      group.pipingClass = requestPipeClassLabel(request);
+    }
+
+    if ((!group.rating || group.rating === '—') && requestRatingLabel(request) !== '—') {
+      group.rating = requestRatingLabel(request);
+    }
+
+    group.requests.push({
       request,
       index: i,
     });
@@ -1036,8 +1092,7 @@ function groupMasterRequests(requests = []) {
 
   return groups.sort((a, b) => {
     return String(a.pipelineRef).localeCompare(String(b.pipelineRef)) ||
-      String(a.bore).localeCompare(String(b.bore)) ||
-      String(a.kind).localeCompare(String(b.kind));
+      String(a.bore).localeCompare(String(b.bore));
   });
 }
 
@@ -1255,7 +1310,13 @@ function renderGroupedDataSheet(requests, activeIndex) {
           <div class="rvm-master-group-title">
             <span>${esc(group.pipelineRef)}</span>
             <b>→ Bore ${esc(group.bore)}</b>
-            <em>${esc(group.kind)} / ${esc(group.reason)} / ${group.requests.length} row(s)</em>
+            <em>
+              ${esc(Array.from(group.kinds).join(', ') || 'MASTER')}
+              /
+              ${esc(Array.from(group.componentTypes).join(', ') || 'ALL COMPONENTS')}
+              /
+              ${group.requests.length} row(s)
+            </em>
           </div>
 
           <table class="rvm-master-sheet-table">
@@ -1321,7 +1382,7 @@ function renderRequestDetail(request, index, total) {
       <div class="rvm-master-apply-row">
         <label>
           <input type="checkbox" name="applyAll" checked>
-          Apply to all matching rows in this group
+          Apply to all rows with same Pipeline Ref + Bore
         </label>
 
         <button type="button" data-action="apply-candidate" ${request.candidates?.length ? '' : 'disabled'}>

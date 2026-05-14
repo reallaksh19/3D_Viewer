@@ -22,7 +22,10 @@ function run() {
     'Save Regex',
     'renderGroupedDataSheet',
     'rvm-master-sheet-table',
+    'masterResolutionPipePropertyKey',
     'masterResolutionGroupKey',
+    '_samePipePropertyGroup',
+    'Do not split line-list / piping-class resolution by component type',
     'requestBoreLabel',
     'Converted Bore is not required as manual input',
     'derivedPipingClass',
@@ -30,7 +33,7 @@ function run() {
     'boreMm',
     'showRvmMasterResolutionDialog',
     'Master Resolution Data Sheet',
-    'Apply to all matching rows in this group',
+    'Apply to all rows with same Pipeline Ref + Bore',
   ];
 
   for (const marker of requiredMarkers) {
