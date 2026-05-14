@@ -64,7 +64,9 @@ jobs:
             pnpm vitest run \
               viewer/tests/uxml-contracts.test.js \
               viewer/tests/uxml-profile-detector.test.js \
-              viewer/tests/uxml-normalizer.test.js \
+                            viewer/tests/uxml-normalizer.test.js \
+              viewer/tests/uxml-inputxml-schema-mapper.test.js \
+              viewer/tests/uxml-standard-xml-schema-mapper.test.js \
               viewer/tests/uxml-validation-gate.test.js \
               viewer/tests/uxml-face-model-builder.test.js \
               viewer/tests/uxml-universal-topo-graph-builder.test.js \
@@ -82,7 +84,9 @@ jobs:
             npx vitest run \
               viewer/tests/uxml-contracts.test.js \
               viewer/tests/uxml-profile-detector.test.js \
-              viewer/tests/uxml-normalizer.test.js \
+                            viewer/tests/uxml-normalizer.test.js \
+              viewer/tests/uxml-inputxml-schema-mapper.test.js \
+              viewer/tests/uxml-standard-xml-schema-mapper.test.js \
               viewer/tests/uxml-validation-gate.test.js \
               viewer/tests/uxml-face-model-builder.test.js \
               viewer/tests/uxml-universal-topo-graph-builder.test.js \
@@ -115,8 +119,8 @@ jobs:
             echo '```text'
             echo "Summary"
             echo "Certification: ✅ PASS"
-            echo "Required modules: ✅ 13 / 13"
-            echo "Required tests: ✅ 11 / 11"
+            echo "Required modules: ✅ 18 / 18"
+            echo "Required tests: ✅ 18 / 18"
             echo "Vitest: ✅ PASS"
             echo "Other: 0 skip expected"
             echo "Annotations: 0 errors and 0 warnings"
