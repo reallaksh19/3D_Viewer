@@ -76,7 +76,8 @@ jobs:
             viewer/tests/rvm-pcf-uxml-topology-diagnostics-panel.test.js \
             viewer/tests/rvm-pcf-uxml-topology-benchmark.test.js \
             viewer/tests/rvm-pcf-export-guard.test.js \
-            viewer/tests/rvm-pcf-accepted-topology-handoff.test.js
+            viewer/tests/rvm-pcf-accepted-topology-handoff.test.js \
+            viewer/tests/rvm-pcf-uxml-mode-e2e-smoke.test.js
           else
             npx vitest run \
               viewer/tests/uxml-contracts.test.js \
@@ -93,7 +94,8 @@ jobs:
             viewer/tests/rvm-pcf-uxml-topology-diagnostics-panel.test.js \
             viewer/tests/rvm-pcf-uxml-topology-benchmark.test.js \
             viewer/tests/rvm-pcf-export-guard.test.js \
-            viewer/tests/rvm-pcf-accepted-topology-handoff.test.js
+            viewer/tests/rvm-pcf-accepted-topology-handoff.test.js \
+            viewer/tests/rvm-pcf-uxml-mode-e2e-smoke.test.js
           fi
 
       - name: Write certification summary

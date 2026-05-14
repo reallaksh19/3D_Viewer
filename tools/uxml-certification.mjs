@@ -55,6 +55,7 @@ const REQUIRED_TESTS = Object.freeze([
   'viewer/tests/rvm-pcf-uxml-topology-benchmark.test.js',
   'viewer/tests/rvm-pcf-export-guard.test.js',
   'viewer/tests/rvm-pcf-accepted-topology-handoff.test.js',
+  'viewer/tests/rvm-pcf-uxml-mode-e2e-smoke.test.js',
 ]);
 
 const REQUIRED_EXPORT_MARKERS = Object.freeze([
