@@ -6,11 +6,24 @@ const PATCH_FLAG = Symbol.for('pcf-glb-rvm-support-symbols-patched');
 const SUPPORT_SYMBOL_GROUP_NAME = '__RVM_SUPPORT_SYMBOLS__';
 const SUPPORT_KIND_RX = /\b(GUIDE|LINE\s*STOP|LINESTOP|LIMIT\s*STOP|LIMIT|RESTING|REST|SHOE|BP|BASE\s*PLATE|ANCHOR|FIXED|STOPPER|STOP)\b/i;
 const SUPPORT_TAG_RX = /\bPS[-_\s]?[A-Z0-9][A-Z0-9._/\-]*\b/i;
+
+
+const SUPPORT_SYMBOL_SETTINGS_STORAGE_KEY = 'rvm_support_symbol_settings_v1';
+
 const DEFAULTS = Object.freeze({
   labelsVisible: false,
+
+  // Base model-size scaling.
+  // Final scale = clamp(modelDiagonal * symbolScaleFactor * scaleMultiplier)
   symbolScaleFactor: 0.0035,
+
+  // User-editable multiplier exposed in 3D RVM Viewer settings.
+  scaleMultiplier: 3.0,
+
+  // Wider range so very large/small models remain usable.
   minScale: 8,
-  maxScale: 120,
+  maxScale: 180,
+
   belowPipeFactor: 0.72,
 });
 
@@ -23,6 +36,86 @@ function asNumber(value) {
   const n = Number.parseFloat(String(value ?? '').replace(/mm/gi, '').trim());
   return Number.isFinite(n) ? n : null;
 }
+function clampNumber(value, min, max, fallback) {
+  const n = Number(value);
+
+  if (!Number.isFinite(n)) return fallback;
+
+  return Math.max(min, Math.min(max, n));
+}
+
+export function normalizeRvmSupportSymbolScale(value) {
+  return clampNumber(value, 0.25, 4.0, DEFAULTS.scaleMultiplier);
+}
+
+export function getRvmSupportSymbolSettings() {
+  let saved = {};
+
+  try {
+    saved = JSON.parse(localStorage.getItem(SUPPORT_SYMBOL_SETTINGS_STORAGE_KEY) || '{}') || {};
+  } catch {
+    saved = {};
+  }
+
+  return {
+    scaleMultiplier: normalizeRvmSupportSymbolScale(saved.scaleMultiplier ?? DEFAULTS.scaleMultiplier),
+  };
+}
+
+export function saveRvmSupportSymbolSettings(patch = {}) {
+  const next = {
+    ...getRvmSupportSymbolSettings(),
+    ...patch,
+  };
+
+  next.scaleMultiplier = normalizeRvmSupportSymbolScale(next.scaleMultiplier);
+
+  try {
+    localStorage.setItem(SUPPORT_SYMBOL_SETTINGS_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // ignore localStorage failure
+  }
+
+  return next;
+}
+
+function getSupportLabelsVisible(viewer) {
+  const root = viewer?.scene?.getObjectByName(SUPPORT_SYMBOL_GROUP_NAME);
+  if (!root) return false;
+
+  let visible = false;
+
+  root.traverse((obj) => {
+    if (obj.userData?.supportSymbolLabel && obj.element) {
+      if (obj.element.style.display !== 'none') visible = true;
+    }
+  });
+
+  return visible;
+}
+
+export function applyRvmSupportSymbolSettings(viewer, patch = {}) {
+  if (!viewer?.modelGroup || !viewer?.scene) {
+    return { created: 0, scanned: 0, skipped: 'NO_VIEWER_MODEL' };
+  }
+
+  const saved = saveRvmSupportSymbolSettings(patch);
+  const labelsVisible =
+    patch.labelsVisible != null
+      ? !!patch.labelsVisible
+      : getSupportLabelsVisible(viewer);
+
+  viewer.supportSymbolOptions = {
+    ...(viewer.supportSymbolOptions || {}),
+    ...saved,
+    labelsVisible,
+  };
+
+  viewer.supportSymbolDiagnostics = addRvmSupportSymbols(viewer, viewer.supportSymbolOptions);
+
+  return viewer.supportSymbolDiagnostics;
+}
+
 function normalizeCoord(value) {
   if (!value && value !== 0) return null;
   if (Array.isArray(value) && value.length >= 3) {
@@ -246,7 +339,13 @@ export function setRvmSupportSymbolLabelsVisible(viewer, visible) {
 }
 export function addRvmSupportSymbols(viewer, options = {}) {
   if (!viewer?.modelGroup || !viewer?.scene) return { created: 0, scanned: 0 };
-  const opts = { ...DEFAULTS, ...options };
+  const opts = {
+  ...DEFAULTS,
+  ...getRvmSupportSymbolSettings(),
+  ...options,
+};
+
+opts.scaleMultiplier = normalizeRvmSupportSymbolScale(opts.scaleMultiplier);
   const existing = viewer.scene.getObjectByName(SUPPORT_SYMBOL_GROUP_NAME);
   if (existing) { viewer.scene.remove(existing); disposeObject(existing); }
   const symbolRoot = new THREE.Group();
@@ -255,7 +354,8 @@ export function addRvmSupportSymbols(viewer, options = {}) {
   const modelBox = new THREE.Box3().setFromObject(viewer.modelGroup);
   const size = modelBox.isEmpty() ? new THREE.Vector3(1000, 1000, 1000) : modelBox.getSize(new THREE.Vector3());
   const diag = Math.max(size.length(), 1);
-  const scale = Math.max(opts.minScale, Math.min(opts.maxScale, diag * opts.symbolScaleFactor));
+  const rawScale = diag * opts.symbolScaleFactor * opts.scaleMultiplier;
+  const scale = Math.max(opts.minScale, Math.min(opts.maxScale, rawScale));
   const seen = new Set();
   let scanned = 0;
   viewer.modelGroup.updateMatrixWorld(true);
@@ -274,17 +374,47 @@ export function addRvmSupportSymbols(viewer, options = {}) {
     symbolRoot.add(buildSymbol(kind, pos, attrs, obj, scale, viewer, opts));
   });
   if (symbolRoot.children.length > 0) viewer.scene.add(symbolRoot);
-  return { created: symbolRoot.children.length, scanned, labelsVisible: opts.labelsVisible };
+  return {
+    created: symbolRoot.children.length,
+    scanned,
+    labelsVisible: opts.labelsVisible,
+    scale,
+    scaleMultiplier: opts.scaleMultiplier,
+    minScale: opts.minScale,
+    maxScale: opts.maxScale,
+  };
 }
 export function installRvmSupportSymbolPatch() {
   if (RvmViewer3D.prototype[PATCH_FLAG]) return;
   const originalSetModel = RvmViewer3D.prototype.setModel;
   RvmViewer3D.prototype.setModel = function patchedSetModel(model, upAxis = 'Y') {
     originalSetModel.call(this, model, upAxis);
-    this.supportSymbolDiagnostics = addRvmSupportSymbols(this, { upAxis, labelsVisible: false });
+
+    this.supportSymbolOptions = {
+      ...getRvmSupportSymbolSettings(),
+      upAxis,
+      labelsVisible: false,
+    };
+
+    this.supportSymbolDiagnostics = addRvmSupportSymbols(this, this.supportSymbolOptions);
   };
   RvmViewer3D.prototype.setSupportSymbolLabelsVisible = function setSupportSymbolLabelsVisible(visible) {
     setRvmSupportSymbolLabelsVisible(this, visible);
+  };
+  RvmViewer3D.prototype.setSupportSymbolOptions = function setSupportSymbolOptions(options = {}) {
+    this.supportSymbolOptions = {
+      ...(this.supportSymbolOptions || {}),
+      ...getRvmSupportSymbolSettings(),
+      ...options,
+    };
+
+    this.supportSymbolOptions.scaleMultiplier = normalizeRvmSupportSymbolScale(
+      this.supportSymbolOptions.scaleMultiplier
+    );
+
+    this.supportSymbolDiagnostics = addRvmSupportSymbols(this, this.supportSymbolOptions);
+
+    return this.supportSymbolDiagnostics;
   };
   RvmViewer3D.prototype[PATCH_FLAG] = true;
 }

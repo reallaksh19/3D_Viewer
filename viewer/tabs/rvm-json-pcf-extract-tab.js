@@ -22,6 +22,63 @@ import {
 let _offExtractRequested = null;
 let _offStateChanged = null;
 
+function _uniqueUrls(urls) {
+  const out = [];
+  const seen = new Set();
+
+  for (const url of urls) {
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    out.push(url);
+  }
+
+  return out;
+}
+
+function _repoBaseUrl() {
+  const base = document.baseURI || window.location.href;
+  return base.endsWith('/') ? base : `${base.replace(/[^/]*$/, '')}`;
+}
+
+function _rvmPcfModuleCandidates(fileName) {
+  const cleanFile = String(fileName || '').replace(/^\/+/, '');
+
+  return _uniqueUrls([
+    // Normal source layout when this module is served from /viewer/tabs.
+    new URL(`../rvm-pcf-extract/${cleanFile}`, import.meta.url).href,
+
+    // GitHub Pages flattened layout when /viewer contents are published at repo root.
+    new URL(`rvm-pcf-extract/${cleanFile}`, _repoBaseUrl()).href,
+
+    // GitHub Pages non-flattened layout.
+    new URL(`viewer/rvm-pcf-extract/${cleanFile}`, _repoBaseUrl()).href,
+  ]);
+}
+
+async function _importRvmPcfModule(fileName) {
+  const candidates = _rvmPcfModuleCandidates(fileName);
+  const errors = [];
+
+  for (const url of candidates) {
+    try {
+      return await import(url);
+    } catch (err) {
+      errors.push({
+        url,
+        message: err?.message || String(err),
+      });
+    }
+  }
+
+  const detail = errors
+    .map(e => `- ${e.url}\n  ${e.message}`)
+    .join('\n');
+
+  throw new Error(
+    `Failed to dynamically import RVM PCF module "${fileName}". Tried:\n${detail}`
+  );
+}
+
 function _esc(v) {
   return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -593,9 +650,9 @@ async function _runRebuildCsv(container) {
         showRvmMasterResolutionDialog
       }
     ] = await Promise.all([
-      import('../rvm-pcf-extract/RvmFinal2dCsvBuilder.js'),
-      import('../rvm-pcf-extract/RvmExtractHardening.js'),
-      import('../rvm-pcf-extract/RvmMasterResolutionWorkflow.js')
+      _importRvmPcfModule('RvmFinal2dCsvBuilder.js'),
+      _importRvmPcfModule('RvmExtractHardening.js'),
+      _importRvmPcfModule('RvmMasterResolutionWorkflow.js')
     ]);
 
     const selectedCanonicalIds = state.rvmPcfExtract.selectedCanonicalIds || [];
@@ -766,7 +823,7 @@ async function _runUxmlTopologyReadinessGate(container) {
   }
 
   try {
-    const { runUxmlTopologyForRvmRows } = await import('../rvm-pcf-extract/RvmUxmlTopologyBridge.js');
+    const { runUxmlTopologyForRvmRows } = await _importRvmPcfModule('RvmUxmlTopologyBridge.js');
 
     const result = runUxmlTopologyForRvmRows(rows, {
       connectToleranceMm: 6,
@@ -836,8 +893,8 @@ async function _runPcfReadinessGate(container) {
   }
 
   try {
-    const { runPcfReadinessGate, assertPcfExportAllowed } = await import('../rvm-pcf-extract/RvmPcfReadinessGate.js');
-    const { generateReadinessHtml } = await import('../rvm-pcf-extract/RvmPcfReadinessReport.js');
+    const { runPcfReadinessGate, assertPcfExportAllowed } = await _importRvmPcfModule('RvmPcfReadinessGate.js');
+    const { generateReadinessHtml } = await _importRvmPcfModule('RvmPcfReadinessReport.js');
 
     // Save to global for synchronous HTML rendering without awaiting
     window._rvmPcfReadinessReportModule = { generateReadinessHtml };
@@ -900,7 +957,7 @@ async function _dryRunReadinessGapOverlap(container) {
     return false;
   }
 
-  const { runPcfReadinessGate } = await import('../rvm-pcf-extract/RvmPcfReadinessGate.js');
+  const { runPcfReadinessGate } = await _importRvmPcfModule('RvmPcfReadinessGate.js');
 
   const result = runPcfReadinessGate(rows, {
     connectToleranceMm: 6,
@@ -932,7 +989,7 @@ async function _applyRaySecondPass(container) {
   }
 
   try {
-    const { runPcfReadinessGate } = await import('../rvm-pcf-extract/RvmPcfReadinessGate.js');
+    const { runPcfReadinessGate } = await _importRvmPcfModule('RvmPcfReadinessGate.js');
     const {
       buildRaySecondPassCandidates,
       createRaySecondPassFixPlan,
@@ -1107,7 +1164,7 @@ async function _runValidate(container) {
   }
   _setStatus(container, 'Validating…');
   try {
-    const { RvmExtractHardening } = await import('../rvm-pcf-extract/RvmExtractHardening.js');
+    const { RvmExtractHardening } = await _importRvmPcfModule('RvmExtractHardening.js');
     const hardening = new RvmExtractHardening();
     const register  = hardening.buildValidationRegister(rows);
     const existing = (state.rvmPcfExtract.diagnostics || []).filter(d => d._source !== 'validate');
@@ -1129,7 +1186,7 @@ async function _exportReadinessReport(container, format = 'json') {
   }
 
   try {
-    const { generateReadinessMarkdown } = await import('../rvm-pcf-extract/RvmPcfReadinessReport.js');
+    const { generateReadinessMarkdown } = await _importRvmPcfModule('RvmPcfReadinessReport.js');
 
     let content, mimeType, filename;
 
@@ -1183,8 +1240,8 @@ async function _runGeneratePcf(container) {
   if (!ok) return;
   _setStatus(container, 'Generating PCF…');
   try {
-    const { RvmPcfContinuityChecker } = await import('../rvm-pcf-extract/RvmPcfContinuityChecker.js');
-    const { RvmPcfEmitter } = await import('../rvm-pcf-extract/RvmPcfEmitter.js');
+    const { RvmPcfContinuityChecker } = await _importRvmPcfModule('RvmPcfContinuityChecker.js');
+    const { RvmPcfEmitter } = await _importRvmPcfModule('RvmPcfEmitter.js');
     const continuityChecker = new RvmPcfContinuityChecker();
     const continuitySettings = state.rvmPcfExtract.continuity || {};
     const singlePcfForMultiLineSelection = state.rvmPcfExtract.singlePcfForMultiLineSelection !== false;
@@ -1249,7 +1306,7 @@ async function _runGeneratePcf(container) {
 async function _runDownloadCsv(container) {
   const rows = state.rvmPcfExtract?.rows || [];
   if (!rows.length) { _setStatus(container, 'No rows — rebuild CSV first.', true); return; }
-  const { downloadCsv } = await import('../rvm-pcf-extract/RvmPcfDownload.js');
+  const { downloadCsv } = await _importRvmPcfModule('RvmPcfDownload.js');
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   downloadCsv(`rvm-pcf-extract-${ts}.csv`, rows);
   _setStatus(container, 'CSV downloaded.');
@@ -1264,7 +1321,7 @@ async function _runDownloadPcf(container) {
     const ok = await _runGeneratePcf(container);
     if (!ok) return;
   }
-  const { RvmExtractHardening } = await import('../rvm-pcf-extract/RvmExtractHardening.js');
+  const { RvmExtractHardening } = await _importRvmPcfModule('RvmExtractHardening.js');
   const hardening = new RvmExtractHardening();
   const files = hardening.downloadAllPcf(state.rvmPcfExtract.pcfTextByPipelineRef || {});
   _setStatus(container, `Downloaded ${files.length} PCF file(s).`);

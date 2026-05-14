@@ -309,6 +309,12 @@ function pipePropertyCacheKey(row) {
   ].join('||');
 }
 
+function pipelinePropertyCacheKey(row) {
+  const pipelineRef = norm(row?.pipelineRef || row?.lineNoKey || row?.lineKey || '');
+
+  return pipelineRef || 'NO_PIPELINE';
+}
+
 function bestRatingForGroup(values = []) {
   const found = values
     .map(normalizeResolvedRating)
@@ -664,24 +670,38 @@ export class RvmMasterResolutionWorkflow {
   }
 
 _applyPipePropertyCache(rows = [], diagnostics = []) {
-    const groups = new Map();
+    const boreGroups = new Map();
+    const pipelineGroups = new Map();
 
     for (const row of rows) {
       if (!row || row.include === false) continue;
 
-      const key = pipePropertyCacheKey(row);
+      const boreKey = pipePropertyCacheKey(row);
+      const pipelineKey = pipelinePropertyCacheKey(row);
 
-      if (!groups.has(key)) {
-        groups.set(key, {
-          key,
+      if (!boreGroups.has(boreKey)) {
+        boreGroups.set(boreKey, {
+          key: boreKey,
           pipingClasses: [],
           ratings: [],
           rows: [],
         });
       }
 
-      const group = groups.get(key);
-      group.rows.push(row);
+      if (!pipelineGroups.has(pipelineKey)) {
+        pipelineGroups.set(pipelineKey, {
+          key: pipelineKey,
+          pipingClasses: [],
+          ratings: [],
+          rows: [],
+        });
+      }
+
+      const boreGroup = boreGroups.get(boreKey);
+      const pipelineGroup = pipelineGroups.get(pipelineKey);
+
+      boreGroup.rows.push(row);
+      pipelineGroup.rows.push(row);
 
       const pipeClass =
         extractPipingClassFromPipelineRef(row.pipelineRef, this.options) ||
@@ -690,7 +710,8 @@ _applyPipePropertyCache(rows = [], diagnostics = []) {
         '';
 
       if (pipeClass) {
-        group.pipingClasses.push(pipeClass);
+        boreGroup.pipingClasses.push(pipeClass);
+        pipelineGroup.pipingClasses.push(pipeClass);
       }
 
       const rating =
@@ -701,15 +722,23 @@ _applyPipePropertyCache(rows = [], diagnostics = []) {
         '';
 
       if (rating) {
-        group.ratings.push(rating);
+        boreGroup.ratings.push(rating);
+        pipelineGroup.ratings.push(rating);
       }
     }
 
-    for (const group of groups.values()) {
-      const groupPipingClass = clean(group.pipingClasses[0] || '');
-      const groupRating = bestRatingForGroup(group.ratings);
+    for (const boreGroup of boreGroups.values()) {
+      const groupPipingClass = clean(boreGroup.pipingClasses[0] || '');
 
-      for (const row of group.rows) {
+      // Rating rule:
+      // 1. Prefer same Pipeline Ref + Bore.
+      // 2. If missing, inherit from same Pipeline Ref.
+      const sameBoreRating = bestRatingForGroup(boreGroup.ratings);
+      const pipelineKey = pipelinePropertyCacheKey(boreGroup.rows[0]);
+      const samePipelineRating = bestRatingForGroup(pipelineGroups.get(pipelineKey)?.ratings || []);
+      const groupRating = sameBoreRating || samePipelineRating;
+
+      for (const row of boreGroup.rows) {
         if (groupPipingClass) {
           const previous = clean(row.pipingClass);
 
@@ -736,7 +765,9 @@ _applyPipePropertyCache(rows = [], diagnostics = []) {
 
           row.rating = groupRating;
           row.ratingDerived = groupRating;
-          row.ratingSource = 'PIPELINE-REF-RATING-GROUP';
+          row.ratingSource = sameBoreRating
+            ? 'PIPELINE-BORE-RATING-GROUP'
+            : 'PIPELINE-REF-RATING-GROUP';
 
           if (previousRating && normalizeResolvedRating(previousRating) !== groupRating) {
             diagnostics.push({
@@ -748,6 +779,18 @@ _applyPipePropertyCache(rows = [], diagnostics = []) {
               pipelineRef: row.pipelineRef,
               previousRating,
               derivedRating: groupRating,
+            });
+          }
+
+          if (!sameBoreRating && samePipelineRating) {
+            diagnostics.push({
+              severity: 'INFO',
+              code: 'RATING-INHERITED-FROM-PIPELINE',
+              message: `Rating "${samePipelineRating}" inherited from another bore group with the same Pipeline Ref.`,
+              rowNo: row.rowNo,
+              componentType: row.type,
+              pipelineRef: row.pipelineRef,
+              derivedRating: samePipelineRating,
             });
           }
         }
@@ -1472,45 +1515,65 @@ function renderRegexHeader(activeRequest) {
 
   return `
     <div class="rvm-master-regex-header">
-      <div class="rvm-master-regex-title">Pipeline Reference Extraction</div>
+      <div class="rvm-master-regex-title">Pipeline Reference Reader</div>
+
+      <div class="rvm-master-simple-help">
+        <div class="rvm-master-help-line">
+          <b>Example:</b>
+          <code>/BTRM-1000-10"-P1710011-66620M0-01/B1</code>
+        </div>
+        <div class="rvm-master-help-line">
+          The app reads <b>66620M0</b> as the <b>Piping Class</b>.
+        </div>
+        <div class="rvm-master-help-line">
+          Rating is found only if the line text contains values like
+          <b>600</b>, <b>CL600</b>, <b>600#</b>, or if another row in the same pipeline already has rating.
+        </div>
+      </div>
 
       <div class="rvm-master-regex-preview">
         <div><b>Pipeline Ref</b></div>
         <div>${esc(pipelineRef || '—')}</div>
-        <div><b>Derived Piping Class</b></div>
+
+        <div><b>Piping Class</b></div>
         <div data-regex-preview-piping-class>${esc(previewPipingClass || '—')}</div>
-        <div><b>Derived Rating</b></div>
+
+        <div><b>Rating</b></div>
         <div data-regex-preview-rating>${esc(previewRating || '—')}</div>
       </div>
 
-      <div class="rvm-master-regex-grid">
-        <label>
-          <span>Piping Class Extraction Regex</span>
-          <input data-regex-key="pipingClassRegex" type="text" value="${esc(currentPipingRegex)}"
-            placeholder="e.g. (?:^|\\/)[^-\\/]+-[^-]+-[^-]+-[^-]+-([A-Z0-9]+)-[^\\/]+">
-        </label>
+      <details class="rvm-master-advanced-regex">
+        <summary>Advanced extraction settings</summary>
 
-        <label>
-          <span>Group</span>
-          <input data-regex-key="pipingClassRegexGroup" type="number" min="1" step="1" value="${esc(currentPipingGroup)}">
-        </label>
+        <div class="rvm-master-regex-grid">
+          <label>
+            <span>Piping Class Regex</span>
+            <input data-regex-key="pipingClassRegex" type="text" value="${esc(currentPipingRegex)}"
+              placeholder="Example: (?:^|\\/)[^-\\/]+-[^-]+-[^-]+-[^-]+-([A-Z0-9]+)-[^\\/]+">
+          </label>
 
-        <label>
-          <span>Rating Extraction Regex (Optional)</span>
-          <input data-regex-key="ratingRegex" type="text" value="${esc(currentRatingRegex)}"
-            placeholder="e.g. (\\d+)#">
-        </label>
+          <label>
+            <span>Group</span>
+            <input data-regex-key="pipingClassRegexGroup" type="number" min="1" step="1" value="${esc(currentPipingGroup)}">
+          </label>
 
-        <label>
-          <span>Group</span>
-          <input data-regex-key="ratingRegexGroup" type="number" min="1" step="1" value="${esc(currentRatingGroup)}">
-        </label>
-      </div>
+          <label>
+            <span>Rating Regex Optional</span>
+            <input data-regex-key="ratingRegex" type="text" value="${esc(currentRatingRegex)}"
+              placeholder="Example: (\\d+)#">
+          </label>
 
-      <div class="rvm-master-regex-actions">
-        <button type="button" data-action="save-regex">Save Regex</button>
-        <span data-regex-status>Saved regex is applied on next Rebuild 2D CSV / PCF build.</span>
-      </div>
+          <label>
+            <span>Group</span>
+            <input data-regex-key="ratingRegexGroup" type="number" min="1" step="1" value="${esc(currentRatingGroup)}">
+          </label>
+        </div>
+
+        <div class="rvm-master-regex-actions">
+          <button type="button" data-action="save-regex">Save Regex</button>
+          <span data-regex-status>Saved regex is applied on next Rebuild 2D CSV / PCF build.</span>
+        </div>
+      </details>
     </div>
   `;
 }
@@ -2138,6 +2201,39 @@ function ensureMasterResolutionStyles() {
       justify-content: flex-end;
       gap: 10px;
       flex-wrap: wrap;
+    }
+
+.rvm-master-simple-help {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 10px;
+      padding: 9px 10px;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #dbeafe;
+      font-size: 12px;
+    }
+
+    .rvm-master-help-line code {
+      color: #93c5fd;
+      background: rgba(37, 99, 235, 0.16);
+      padding: 2px 5px;
+      border-radius: 4px;
+    }
+
+    .rvm-master-advanced-regex {
+      margin-top: 8px;
+      border-top: 1px solid #334155;
+      padding-top: 8px;
+    }
+
+    .rvm-master-advanced-regex summary {
+      cursor: pointer;
+      color: #93c5fd;
+      font-size: 12px;
+      font-weight: 800;
     }
 
     @media (max-width: 980px) {

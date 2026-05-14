@@ -16,9 +16,7 @@ function run() {
     'RATING_REGEX_STORAGE_KEY',
     'extractRatingFromPipelineRef',
     'renderRegexHeader',
-    'Pipeline Reference Extraction',
-    'Piping Class Extraction Regex',
-    'Rating Extraction Regex (Optional)',
+
     'Save Regex',
     'renderGroupedDataSheet',
     'rvm-master-sheet-table',
@@ -61,7 +59,13 @@ function run() {
     '_applyPipePropertyCache',
     'PIPELINE-REF-RATING-GROUP',
     'RATING-GROUP-OVERRIDE',
-    'PIPELINE-REF-TOKEN-GROUP'
+    'PIPELINE-REF-TOKEN-GROUP',
+    'pipelinePropertyCacheKey',
+    'RATING-INHERITED-FROM-PIPELINE',
+    'PIPELINE-BORE-RATING-GROUP',
+    'Pipeline Reference Reader',
+    'Advanced extraction settings',
+    'The app reads <b>66620M0</b>'
   ];
 
   for (const marker of requiredMarkers) {
