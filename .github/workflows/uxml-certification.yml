@@ -49,7 +49,7 @@ jobs:
             pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
           else
             echo "package.json not found. Installing Vitest as temporary CI dependency."
-            npm install --no-save vitest
+            npm install --no-save vitest jsdom
           fi
 
       - name: Run UXML static certification
