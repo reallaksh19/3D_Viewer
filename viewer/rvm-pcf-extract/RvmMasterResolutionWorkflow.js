@@ -669,7 +669,7 @@ export class RvmMasterResolutionWorkflow {
     this.overrides = loadOverrides();
   }
 
-_applyPipePropertyCache(rows = [], diagnostics = []) {
+  _applyPipePropertyCache(rows = [], diagnostics = []) {
     const boreGroups = new Map();
     const pipelineGroups = new Map();
 
@@ -1223,7 +1223,7 @@ if (derivedRating) {
     );
   }
 
-_derivedPipingClass(row) {
+  _derivedPipingClass(row) {
     const fromPipelineRef = extractPipingClassFromPipelineRef(row.pipelineRef, this.options);
 
     if (fromPipelineRef) {
@@ -1237,7 +1237,7 @@ _derivedPipingClass(row) {
     );
   }
 
-_derivedRating(row) {
+  _derivedRating(row) {
     const existing = normalizeResolvedRating(
       row.rating ||
       row.ratingClass ||
@@ -1297,7 +1297,7 @@ _samePipelineGroup(row, request) {
     return `${type}|${normalizeRating(rating)}|DN${Math.round(boreMm)}|L${Math.round(lengthMm)}`;
   }
 
-_pipingClassRequest(row, derivedPipingClass, candidates, reason) {
+  _pipingClassRequest(row, derivedPipingClass, candidates, reason) {
     return {
       id: requestId('PIPING_CLASS', row, derivedPipingClass),
       kind: 'PIPING_CLASS',
@@ -1316,7 +1316,7 @@ _pipingClassRequest(row, derivedPipingClass, candidates, reason) {
     };
   }
 
-_lineListRequest(row, lookupKey, candidates, reason) {
+  _lineListRequest(row, lookupKey, candidates, reason) {
     return {
       id: requestId('LINELIST', row, lookupKey),
       kind: 'LINELIST',
@@ -1336,7 +1336,7 @@ _lineListRequest(row, lookupKey, candidates, reason) {
     };
   }
 
-_weightRequest(row, weightKey, candidates, reason) {
+  _weightRequest(row, weightKey, candidates, reason) {
     return {
       id: requestId('WEIGHT', row, weightKey),
       kind: 'WEIGHT',
