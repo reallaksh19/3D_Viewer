@@ -183,8 +183,16 @@ export function runPcfReadinessGate(rows = [], rawOptions = {}) {
     const basics = checkRowEmissionBasics(row);
     const ca = checkCaUnits(row);
 
-    state.pcfBlockers.push(...basics.blockers, ...ca.blockers);
+    state.pcfBlockers.push(...basics.blockers);
     state.pcfWarnings.push(...basics.warnings, ...ca.warnings);
+
+    for (const code of ca.blockers) {
+      if (skipPolicy.skipAllErrors || skipPolicy.skipCodes.has(code)) {
+        state.pcfWarnings.push(`SKIPPED-${code}`);
+      } else {
+        state.pcfBlockers.push(code);
+      }
+    }
   }
 
   for (const diagnostic of graphDiagnostics) {
