@@ -253,13 +253,28 @@ function compatibleForContinuity(a, b) {
   return true;
 }
 
-function buildEdges(out) {
+function buildEdges(out, add) {
   const seen = new Set();
 
   for (const node of out.nodes) {
     const ports = node.portIds
       .map(portId => out.ports.find(port => port.id === portId))
       .filter(Boolean);
+
+    if (ports.length > 12) {
+      add({
+        severity: DIAGNOSTIC_SEVERITIES.ERROR,
+        code: 'UXML-UTG-COLLAPSED-ENDPOINT-NODE',
+        message: 'UniversalTopoGraph skipped an implausible high-degree endpoint node; source geometry likely collapsed.',
+        details: {
+          nodeId: node.id,
+          point: node.point,
+          portCount: ports.length,
+          componentIds: node.componentIds,
+        },
+      });
+      continue;
+    }
 
     for (let i = 0; i < ports.length; i += 1) {
       for (let j = i + 1; j < ports.length; j += 1) {
@@ -425,8 +440,9 @@ export function buildUxmlUniversalTopoGraph(uxml, options = {}) {
     }
   }
 
-  buildEdges(out);
+  buildEdges(out, add);
   buildDisconnected(out, add);
+  out.summary = makeSummary(out);
 
   if (out.summary.supportContinuityEdgeCount > 0) {
     add({
@@ -437,8 +453,6 @@ export function buildUxmlUniversalTopoGraph(uxml, options = {}) {
 
     out.ok = false;
   }
-
-  out.summary = makeSummary(out);
 
   if (out.disconnected.length > 0) {
     out.ok = false;

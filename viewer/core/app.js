@@ -25,22 +25,29 @@ const TAB_CONFIG_URL = './opt/tab-visibility.json';
 const IS_DEV = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
 const TABS = [
-  { id: 'viewer3d', label: '3D Viewer', render: renderViewer3D },
-  { id: 'viewer3d-rvm', label: '3D RVM Viewer', render: renderViewer3DRvm },
+  // ── Viewers ───────────────────────────────────────────────────────────────
+  { id: 'viewer3d',     label: '3D Viewer',     group: 'Viewers', render: renderViewer3D },
+  { id: 'viewer3d-rvm', label: '3D RVM Viewer', group: 'Viewers', render: renderViewer3DRvm },
+
+  // ── Extraction / pipeline ──────────────────────────────────────────────────
+  { id: 'rvm-json-pcf-extract',    label: 'JSON → PCF Extract',     group: 'Extraction', render: (container, ctx) => mountRvmJsonPcfExtractTab(container, ctx) },
+  { id: 'universal-xml-converter', label: 'XML Converter',           group: 'Extraction', render: renderUniversalXmlConverterTab },
+  { id: 'xml-compare',             label: 'XML Compare',             group: 'Extraction', render: renderXmlCompareTab },
+
+  // ── Converters ────────────────────────────────────────────────────────────
+  { id: 'model-converters', label: 'Model Converters',  group: 'Convert', render: renderModelConvertersTab },
+  { id: 'model-exchange',   label: 'Format Converter',  group: 'Convert', render: renderModelExchangeTab },
+
+  // ── Configuration ─────────────────────────────────────────────────────────
+  { id: 'interchange-config',    label: 'Converter Config', group: 'Config', render: renderInterchangeConfigTab },
+  { id: 'support-mapping-config', label: 'Support Config',  group: 'Config', render: renderSupportMappingConfigTab },
+  { id: 'adapter-mapping',        label: '⚙ Adapter Config', group: 'Config', render: renderAdapterMappingTab },
+
+  // ── Dev only ──────────────────────────────────────────────────────────────
   ...(IS_DEV ? [
-    { id: 'adv-glb', label: 'Basic GLB/PCF Viewer', render: renderBasicGlbPcfPanel }
+    { id: 'adv-glb',        label: 'Basic GLB/PCF Viewer', group: 'Dev', render: renderBasicGlbPcfPanel },
+    { id: 'pcfx-converter', label: 'PCF↔PCFX↔GLB',        group: 'Dev', render: renderPcfxConverterTab },
   ] : []),
-  { id: 'model-converters', label: '3D Model Converters', render: renderModelConvertersTab },
-  { id: 'model-exchange', label: 'PCF/PCFX/XML/GLB Converter', render: renderModelExchangeTab },
-  { id: 'interchange-config', label: 'PCF/PCFX/XML/GLB Config', render: renderInterchangeConfigTab },
-  { id: 'support-mapping-config', label: 'PCF/PCFX/XML/GLB Support Config', render: renderSupportMappingConfigTab },
-  ...(IS_DEV ? [
-    { id: 'pcfx-converter', label: 'PCF<->PCFX<->GLB', render: renderPcfxConverterTab }
-  ] : []),
-  { id: 'adapter-mapping', label: '⚙ 3D RVM Adapter Mapping', render: renderAdapterMappingTab },
-  { id: 'universal-xml-converter', label: 'Universal XML Converter', render: renderUniversalXmlConverterTab },
-  { id: 'xml-compare', label: 'XML Compare', render: renderXmlCompareTab },
-  { id: 'rvm-json-pcf-extract', label: 'JSON → PCF Extract', render: (container, ctx) => mountRvmJsonPcfExtractTab(container, ctx) },
 ];
 
 let _visibleTabs = [...TABS];
@@ -147,9 +154,21 @@ function _bindAppSwitchHandler() {
 
 function _buildTabBar() {
   const bar = document.getElementById('tab-bar');
-  bar.innerHTML = _visibleTabs.map(t =>
-    `<button class="tab-btn" data-tab="${t.id}">${t.label}</button>`
-  ).join('');
+  let lastGroup = null;
+  const parts = [];
+
+  for (const t of _visibleTabs) {
+    if (t.group && t.group !== lastGroup) {
+      if (lastGroup !== null) {
+        parts.push(`<span class="tab-group-sep" aria-hidden="true"></span>`);
+      }
+      parts.push(`<span class="tab-group-label">${t.group}</span>`);
+      lastGroup = t.group;
+    }
+    parts.push(`<button class="tab-btn" data-tab="${t.id}" data-group="${t.group || ''}">${t.label}</button>`);
+  }
+
+  bar.innerHTML = parts.join('');
 
   bar.addEventListener('click', e => {
     const btn = e.target.closest('.tab-btn');

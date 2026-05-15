@@ -278,11 +278,23 @@ function _toHierarchyFromRevXml(xmlText, sourceName) {
           if (apos) attrs.APOS = apos;
           if (lpos) attrs.LPOS = lpos;
 
-          if (third && (mappedType === 'TEE' || mappedType === 'OLET')) attrs.BPOS = third;
-          if (third && mappedType === 'ELBOW') attrs.CPOS = third;
-          if (!attrs.CPOS && (mappedType === 'TEE' || mappedType === 'ELBOW' || mappedType === 'OLET')) {
+          if (mappedType === 'OLET') {
+            if (apos) attrs.CPOS = apos;
+            if (third) attrs.BPOS = third;
+            else if (lpos) attrs.BPOS = lpos;
+            if (attrs.CPOS) attrs.POS = attrs.CPOS;
+            else if (apos || lpos) attrs.POS = apos || lpos;
+          } else if (mappedType === 'TEE') {
+            if (third) attrs.BPOS = third;
             const center = _midpoint(apos, lpos);
             if (center) attrs.POS = center;
+          } else if (mappedType === 'ELBOW') {
+            if (third) attrs.CPOS = third;
+            if (!attrs.CPOS) {
+              const center = _midpoint(apos, lpos);
+              if (center) attrs.CPOS = center;
+            }
+            if (attrs.CPOS) attrs.POS = attrs.CPOS;
           } else if (apos || lpos) {
             attrs.POS = apos || lpos;
           }
