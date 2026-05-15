@@ -500,7 +500,13 @@ def build_miscel_1_payload(
             + f"{int(round(float(default_line_1[0]))):13d}"
             + "".join(f"{float(value):13.6G}" for value in default_line_1[1:])
         )
-        rows.append(_format_i(default_profile.default_line_2))
+        # IDFOPER: global hanger flags. Positions 2-4 (dof_type1, support_node,
+        # connecting_node) are computed from XML data; global defaults must be 0
+        # to avoid CAESAR II interpreting them as node references for hangers
+        # that have their own explicit per-hanger values.
+        dl2 = list(default_profile.default_line_2)
+        dl2[2:] = [0] * len(dl2[2:])
+        rows.append(_format_i(dl2))
 
         # IHGRNODE
         rows.extend(_pack_i([hanger.node for hanger in hangers]))

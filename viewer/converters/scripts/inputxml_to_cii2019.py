@@ -1940,8 +1940,10 @@ def _build_hanger_lines(model: ParsedModel, miscel_cfg: dict[str, object]) -> li
         ]
         lines.append(_row(hgrdat_1))
         lines.append(_row(hgrdat_2))
-        lines.append(_row([hanger.tag]))
-        lines.append(_row([hanger.guid]))
+        _tag_text = (hanger.tag or "")[:100]
+        _guid_text = (hanger.guid or "")[:100]
+        lines.append(f"{'':7}{len(_tag_text):5d} {_tag_text:<100}")
+        lines.append(f"{'':7}{len(_guid_text):5d} {_guid_text:<100}")
         lines.append(
             _row(
                 [
