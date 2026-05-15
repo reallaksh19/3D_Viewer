@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Validate CAESAR II 2019-style CII syntax (format-only checks).
+Validate CAESAR II 2019-style CII syntax and import compatibility.
 
 This checker validates:
 - Section framing and order by '#$ <SECTION>' blocks.
 - Numeric/string token classes and lightweight precision shapes.
 - Required block completeness and CONTROL-driven section sizes.
 - Optional behavior for NODENAME, line numbers, and COORDS.
-
-It intentionally does not validate engineering values or text semantics.
+- C2-risk conditions that loose syntax checks miss, such as zero unit
+  conversion constants, leaked InputXML sentinels, bad pointers, and bad
+  COORDS node references.
 """
 
 from __future__ import annotations
@@ -99,6 +100,10 @@ BLOCK_LINES_PER_SECTION = {
     "EQUIPMNT": 6,
 }
 
+UNITS_NUMERIC_TOKEN_COUNTS = [6, 6, 6, 4]
+UNITS_TOTAL_PAYLOAD_ROWS = 28
+CAESAR_INPUTXML_MISSING_SENTINEL = -1.0101
+
 
 @dataclass(frozen=True)
 class Section:
@@ -136,6 +141,16 @@ def _is_int(token: str) -> bool:
 
 def _is_real(token: str) -> bool:
     return bool(REAL_TOKEN_RX.fullmatch(token))
+
+
+def _real_value(token: str) -> float:
+    if not _is_real(token):
+        raise ValueError(f"Token is not a real number: {token}")
+    return float(token)
+
+
+def _ceil_div(value: int, divisor: int) -> int:
+    return value // divisor + (1 if value % divisor else 0)
 
 
 def _is_element_label_payload(line: str) -> bool:
@@ -522,6 +537,136 @@ def _validate_elements(
                     )
 
 
+def _validate_pointer_range(
+    errors: list[dict[str, object]],
+    line_no: int,
+    section_name: str,
+    value_token: str,
+    target_count: int,
+    target_name: str,
+) -> None:
+    if not _is_int(value_token):
+        return
+    value = int(value_token)
+    if value == 0:
+        return
+    if value < 0:
+        _add_error(
+            errors,
+            "elements_pointer_negative",
+            "ELEMENTS",
+            line_no,
+            f"{section_name} pointer {value} cannot be negative.",
+        )
+        return
+    if value > target_count:
+        _add_error(
+            errors,
+            "elements_pointer_range",
+            "ELEMENTS",
+            line_no,
+            f"{section_name} pointer {value} exceeds {target_name} count {target_count}.",
+        )
+
+
+def _validate_element_pointer_ranges(
+    section: Section | None,
+    metrics: dict[str, int],
+    errors: list[dict[str, object]],
+) -> None:
+    if section is None:
+        return
+    element_count = int(metrics.get("elements", 0))
+    if element_count <= 0:
+        return
+
+    rows = [entry for entry in section.payload if entry[1].strip()]
+    if len(rows) < element_count * 15:
+        return
+
+    for element_index in range(element_count):
+        base = element_index * 15
+        row13_line_no, row13_text = rows[base + 12]
+        row14_line_no, row14_text = rows[base + 13]
+        row15_line_no, row15_text = rows[base + 14]
+
+        row13 = _fixed_fortran_fields(row13_text, 6)
+        row14 = _fixed_fortran_fields(row14_text, 6)
+        row15 = _fixed_fortran_fields(row15_text, 3)
+
+        _validate_pointer_range(errors, row13_line_no, "BEND", row13[0], int(metrics.get("bends", 0)), "BEND")
+        _validate_pointer_range(errors, row13_line_no, "RIGID", row13[1], int(metrics.get("rigids", 0)), "RIGID")
+        _validate_pointer_range(errors, row13_line_no, "RESTRANT", row13[3], int(metrics.get("restraints", 0)), "RESTRANT")
+        _validate_pointer_range(errors, row15_line_no, "REDUCERS", row15[0], int(metrics.get("reducers", 0)), "REDUCERS")
+
+
+def _collect_element_node_ids(section: Section | None, metrics: dict[str, int]) -> set[int]:
+    if section is None:
+        return set()
+    element_count = int(metrics.get("elements", 0))
+    if element_count <= 0:
+        return set()
+
+    rows = [entry for entry in section.payload if entry[1].strip()]
+    if len(rows) < element_count * 15:
+        return set()
+
+    node_ids: set[int] = set()
+    for element_index in range(element_count):
+        _line_no, line_text = rows[element_index * 15]
+        tokens = _fixed_fortran_fields(line_text, 6)
+        for token in tokens[:2]:
+            if not _is_real(token):
+                continue
+            value = _real_value(token)
+            rounded = int(round(value))
+            if abs(value - rounded) < 1e-6:
+                node_ids.add(rounded)
+    return node_ids
+
+
+def _validate_coords_node_references(
+    coords_section: Section | None,
+    elements_section: Section | None,
+    metrics: dict[str, int],
+    errors: list[dict[str, object]],
+) -> None:
+    if coords_section is None:
+        return
+    element_nodes = _collect_element_node_ids(elements_section, metrics)
+    if not element_nodes:
+        return
+
+    rows = [entry for entry in coords_section.payload if entry[1].strip()]
+    if len(rows) <= 1:
+        return
+
+    seen_nodes: set[int] = set()
+    for line_no, line_text in rows[1:]:
+        tokens = _fixed_fortran_fields(line_text, 4)
+        node_token = tokens[0]
+        if not _is_int(node_token):
+            continue
+        node_id = int(node_token)
+        if node_id in seen_nodes:
+            _add_error(
+                errors,
+                "coords_duplicate_node",
+                "COORDS",
+                line_no,
+                f"COORDS contains duplicate node {node_id}.",
+            )
+        seen_nodes.add(node_id)
+        if node_id not in element_nodes:
+            _add_error(
+                errors,
+                "coords_unknown_node",
+                "COORDS",
+                line_no,
+                f"COORDS node {node_id} does not appear in ELEMENTS connectivity.",
+            )
+
+
 def _validate_blocked_section(
     section: Section | None,
     section_name: str,
@@ -608,8 +753,16 @@ def _validate_nodename(
 def _validate_units(section: Section | None, errors: list[dict[str, object]]) -> None:
     if section is None:
         return
-    rows = [entry for entry in section.payload if entry[1].strip()]
-    if len(rows) < 4:
+    rows = list(section.payload)
+    if len(rows) != UNITS_TOTAL_PAYLOAD_ROWS:
+        _add_error(
+            errors,
+            "units_row_count",
+            "UNITS",
+            section.header_line,
+            f"UNITS must contain exactly {UNITS_TOTAL_PAYLOAD_ROWS} payload rows.",
+        )
+    if len(rows) < len(UNITS_NUMERIC_TOKEN_COUNTS):
         _add_error(
             errors,
             "units_rows",
@@ -618,19 +771,11 @@ def _validate_units(section: Section | None, errors: list[dict[str, object]]) ->
             "UNITS must contain at least 4 numeric rows.",
         )
         return
-    numeric_expected = [6, 6, 6, 4]
-    for row_index, token_count in enumerate(numeric_expected, start=1):
+
+    numeric_values: list[float] = []
+    for row_index, token_count in enumerate(UNITS_NUMERIC_TOKEN_COUNTS, start=1):
         line_no, line_text = rows[row_index - 1]
         tokens = _fixed_fortran_fields(line_text, token_count)
-        if len(tokens) != token_count:
-            _add_error(
-                errors,
-                "units_numeric_token_count",
-                "UNITS",
-                line_no,
-                f"UNITS numeric row {row_index} must have {token_count} tokens.",
-            )
-            continue
         for token in tokens:
             if not _is_real(token):
                 _add_error(
@@ -641,6 +786,16 @@ def _validate_units(section: Section | None, errors: list[dict[str, object]]) ->
                     f"UNITS numeric row {row_index} has non-real token '{token}'.",
                 )
                 break
+            numeric_values.append(float(token))
+
+    if numeric_values and all(abs(value) < 1e-12 for value in numeric_values):
+        _add_error(
+            errors,
+            "units_numeric_all_zero",
+            "UNITS",
+            rows[0][0],
+            "UNITS conversion constants are all zero; CAESAR can create a corrupted C2 from this file.",
+        )
 
 
 def _validate_coords(
@@ -788,31 +943,127 @@ def _validate_miscel_1(
                 break
     cursor += rrmat_lines
 
-    minimum_tail_rows = 4  # execution options + north arrow
-    required_total = cursor + minimum_tail_rows
-    if len(rows) < required_total:
+    numnoz = int(metrics.get("nozzles", 0))
+    hanger_count = int(metrics.get("hangers", 0))
+    packed_hanger_rows = _ceil_div(hanger_count, 6) if hanger_count > 0 else 0
+    nozzle_rows = numnoz * 4
+    if len(rows) < cursor + nozzle_rows:
         _add_error(
             errors,
-            "miscel_structure_short",
+            "miscel_nozzle_rows",
             "MISCEL_1",
             section.header_line,
-            "MISCEL_1 does not have enough rows for RRMAT and execution-option tail.",
+            f"MISCEL_1 has insufficient nozzle rows: expected {nozzle_rows}.",
+        )
+        return
+    cursor += nozzle_rows
+
+    if hanger_count > 0:
+        expected_hanger_rows = 2 + packed_hanger_rows + (2 * hanger_count) + (2 * hanger_count) + hanger_count + (4 * packed_hanger_rows)
+        if len(rows) < cursor + expected_hanger_rows:
+            _add_error(
+                errors,
+                "miscel_hanger_rows",
+                "MISCEL_1",
+                section.header_line,
+                f"MISCEL_1 has insufficient hanger rows: expected {expected_hanger_rows} after RRMAT/nozzle rows.",
+            )
+            return
+
+        default_1_line, default_1_text = rows[cursor]
+        default_1_tokens = _tokens(default_1_text)
+        if len(default_1_tokens) != 6 or any(not _is_real(token) for token in default_1_tokens):
+            _add_error(
+                errors,
+                "miscel_hanger_default_1",
+                "MISCEL_1",
+                default_1_line,
+                "Hanger default row 1 must have 6 numeric tokens.",
+            )
+        cursor += 1
+
+        default_2_line, default_2_text = rows[cursor]
+        default_2_tokens = _tokens(default_2_text)
+        if len(default_2_tokens) != 5 or any(not _is_int(token) for token in default_2_tokens):
+            _add_error(
+                errors,
+                "miscel_hanger_default_2",
+                "MISCEL_1",
+                default_2_line,
+                "Hanger default row 2 must have 5 integer tokens.",
+            )
+        cursor += 1
+
+        def validate_packed_int_array(field_name: str) -> None:
+            nonlocal cursor
+            tokens: list[str] = []
+            for row_offset in range(packed_hanger_rows):
+                line_no, line_text = rows[cursor + row_offset]
+                row_tokens = _tokens(line_text)
+                if len(row_tokens) > 6:
+                    _add_error(errors, f"miscel_{field_name}_row_width", "MISCEL_1", line_no, f"{field_name} row may contain at most 6 tokens.")
+                for token in row_tokens:
+                    if not _is_int(token):
+                        _add_error(errors, f"miscel_{field_name}_token_type", "MISCEL_1", line_no, f"{field_name} token '{token}' is not an integer.")
+                        break
+                tokens.extend(row_tokens)
+            if len(tokens) != hanger_count:
+                line_no = rows[cursor][0]
+                _add_error(errors, f"miscel_{field_name}_count", "MISCEL_1", line_no, f"{field_name} has {len(tokens)} tokens; expected {hanger_count}.")
+            cursor += packed_hanger_rows
+
+        validate_packed_int_array("ihgrnode")
+
+        for hanger_index in range(hanger_count):
+            row_1_line, row_1_text = rows[cursor]
+            row_1_tokens = _tokens(row_1_text)
+            if len(row_1_tokens) != 6 or any(not _is_real(token) for token in row_1_tokens):
+                _add_error(errors, "miscel_hgrdat_row_1", "MISCEL_1", row_1_line, f"HGRDAT row 1 for hanger {hanger_index + 1} must have 6 numeric tokens.")
+            cursor += 1
+
+            row_2_line, row_2_text = rows[cursor]
+            row_2_tokens = _tokens(row_2_text)
+            if len(row_2_tokens) != 5 or any(not _is_real(token) for token in row_2_tokens):
+                _add_error(errors, "miscel_hgrdat_row_2", "MISCEL_1", row_2_line, f"HGRDAT row 2 for hanger {hanger_index + 1} must have 5 numeric tokens.")
+            cursor += 1
+
+            for text_kind in ("TAG", "GUID"):
+                line_no, line_text = rows[cursor]
+                tokens = _tokens(line_text)
+                if not tokens or not _is_int(tokens[0]):
+                    _add_error(
+                        errors,
+                        "miscel_hanger_text_length",
+                        "MISCEL_1",
+                        line_no,
+                        f"Hanger {text_kind} row for hanger {hanger_index + 1} must start with an integer length token.",
+                    )
+                cursor += 1
+
+        for hanger_index in range(hanger_count):
+            line_no, line_text = rows[cursor]
+            tokens = _tokens(line_text)
+            if len(tokens) != 4 or any(not _is_int(token) for token in tokens):
+                _add_error(errors, "miscel_ihgrfree_row", "MISCEL_1", line_no, f"IHGRFREE row for hanger {hanger_index + 1} must have 4 integer tokens.")
+            cursor += 1
+
+        validate_packed_int_array("ihgrnum")
+        validate_packed_int_array("ihgrtable")
+        validate_packed_int_array("ihgrshort")
+        validate_packed_int_array("ihgrcn")
+
+    if len(rows) != cursor + 4:
+        _add_error(
+            errors,
+            "miscel_row_count_exact",
+            "MISCEL_1",
+            section.header_line,
+            f"MISCEL_1 has {len(rows)} nonblank rows; expected {cursor + 4} from CONTROL counts and section structure.",
         )
         return
 
-    remaining = rows[cursor:]
-    if len(remaining) < minimum_tail_rows:
-        _add_error(
-            errors,
-            "miscel_execution_rows",
-            "MISCEL_1",
-            section.header_line,
-            "MISCEL_1 execution/north-arrow tail is incomplete.",
-        )
-        return
-
-    # Validate execution option syntax: first 3 rows expect 6 tokens, last row 1 token.
-    exec_rows = remaining[-4:]
+    # Validate execution option syntax at the structural cursor, not by slicing from the end.
+    exec_rows = rows[cursor:cursor + 4]
     for exec_index, (line_no, line_text) in enumerate(exec_rows, start=1):
         tokens = _tokens(line_text)
         expected = 6 if exec_index < 4 else 1
@@ -875,6 +1126,34 @@ def _validate_auxiliary_sections(
         _validate_blocked_section(section, section_name, expected_blocks, errors)
 
 
+def _validate_c2_risk_tokens(sections: list[Section], errors: list[dict[str, object]]) -> None:
+    for section in sections:
+        for line_no, line_text in section.payload:
+            for raw_token in _tokens(line_text):
+                token = raw_token.strip(" ,;\t")
+                upper = token.upper()
+                if upper in {"NAN", "+NAN", "-NAN", "INF", "+INF", "-INF", "INFINITY", "+INFINITY", "-INFINITY"}:
+                    _add_error(
+                        errors,
+                        "non_finite_token",
+                        section.name,
+                        line_no,
+                        f"Non-finite numeric token '{raw_token}' is not valid in CAESAR CII.",
+                    )
+                    continue
+                if not _is_real(token):
+                    continue
+                value = float(token)
+                if abs(value - CAESAR_INPUTXML_MISSING_SENTINEL) < 1e-6:
+                    _add_error(
+                        errors,
+                        "inputxml_sentinel_leak",
+                        section.name,
+                        line_no,
+                        "InputXML missing-value sentinel -1.0101 leaked into generated CII.",
+                    )
+
+
 def _build_report(
     input_path: Path,
     sections: list[Section],
@@ -931,11 +1210,11 @@ def _build_report(
     }
 
 
-def _validate(
+def validate_cii_text(
+    text: str,
     input_path: Path,
     options: RuleOptions,
 ) -> dict[str, object]:
-    text = input_path.read_text(encoding="utf-8", errors="replace")
     lines = text.splitlines()
     sections = _parse_sections(lines)
     errors: list[dict[str, object]] = []
@@ -953,11 +1232,13 @@ def _validate(
 
     _validate_duplicates(sections, errors)
     _validate_order(sections, options, errors, warnings)
+    _validate_c2_risk_tokens(sections, errors)
 
     section_map = _get_section_map(sections)
     metrics = _validate_control(section_map.get("CONTROL"), errors)
 
     _validate_elements(section_map.get("ELEMENTS"), metrics, options, errors)
+    _validate_element_pointer_ranges(section_map.get("ELEMENTS"), metrics, errors)
     _validate_auxiliary_sections(section_map, metrics, errors)
     _validate_nodename(
         section_map.get("NODENAME"),
@@ -969,8 +1250,22 @@ def _validate(
     _validate_miscel_1(section_map.get("MISCEL_1"), metrics, errors)
     _validate_units(section_map.get("UNITS"), errors)
     _validate_coords(section_map.get("COORDS"), options, errors)
+    _validate_coords_node_references(
+        section_map.get("COORDS"),
+        section_map.get("ELEMENTS"),
+        metrics,
+        errors,
+    )
 
     return _build_report(input_path, sections, metrics, errors, warnings, text=text)
+
+
+def _validate(
+    input_path: Path,
+    options: RuleOptions,
+) -> dict[str, object]:
+    text = input_path.read_text(encoding="utf-8", errors="replace")
+    return validate_cii_text(text, input_path, options)
 
 
 def _build_parser() -> argparse.ArgumentParser:

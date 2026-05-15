@@ -3360,4 +3360,50 @@ export class PcfViewer3D {
         this._reportMeasurement(null);
         this._emitTrace('dispose', {});
     }
+
+    /**
+     * Render an XML diff overlay: A-components in blue, B-components in orange.
+     * Lines are drawn in world space on top of whatever model is loaded.
+     * @param {Array} componentsA
+     * @param {Array} componentsB
+     */
+    setXmlDiffOverlay(componentsA, componentsB) {
+        this.clearXmlDiffOverlay();
+
+        const group = new THREE.Group();
+        group.name = 'xml-diff-overlay';
+
+        const matA = new THREE.LineBasicMaterial({ color: 0x3b82f6, depthTest: false });
+        const matB = new THREE.LineBasicMaterial({ color: 0xf97316, depthTest: false });
+
+        const addLines = (components, mat) => {
+            for (const comp of (Array.isArray(components) ? components : [])) {
+                const pts = comp?.points;
+                if (!Array.isArray(pts) || pts.length < 2) continue;
+                const v0 = mapCoord(pts[0]);
+                const v1 = mapCoord(pts[1]);
+                if (!v0 || !v1) continue;
+                const geo = new THREE.BufferGeometry().setFromPoints([v0, v1]);
+                group.add(new THREE.Line(geo, mat));
+            }
+        };
+
+        addLines(componentsA, matA);
+        addLines(componentsB, matB);
+
+        this.scene.add(group);
+        this._xmlDiffOverlayGroup = group;
+    }
+
+    /** Remove the XML diff overlay from the scene. */
+    clearXmlDiffOverlay() {
+        if (this._xmlDiffOverlayGroup) {
+            this.scene.remove(this._xmlDiffOverlayGroup);
+            this._xmlDiffOverlayGroup.traverse((obj) => {
+                obj.geometry?.dispose();
+                obj.material?.dispose();
+            });
+            this._xmlDiffOverlayGroup = null;
+        }
+    }
 }

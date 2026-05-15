@@ -21,6 +21,41 @@ const INPUTXML_HEADER_DEFAULTS = Object.freeze({
   headerMdbName: '/ZAU1',
 });
 
+const INPUTXML2019_SAFE_UNITS = Object.freeze({
+  numeric_lines: Object.freeze([
+    '        25.4000      4.44822     0.453592     0.112985     0.112985      6.89476',
+    '       0.555556     -17.7778      6.89476      6.89476 2.768000E-02 2.768000E-02',
+    '   2.768000E-02      1.75127     0.112985      1.75127      1.00000      6.89476',
+    '   2.540000E-02      25.4000      25.4000      25.4000',
+  ]),
+  text_lines: Object.freeze([
+    '  SI (mm)        ',
+    '  on ',
+    '  mm.',
+    '  N. ',
+    '  Kg.',
+    '  N.m.  ',
+    '  N.m.. ',
+    '  KPa       ',
+    '  C',
+    '  C',
+    '  KPa       ',
+    '  KPa       ',
+    '  kg.cu.cm. ',
+    '  kg.cu.cm. ',
+    '  kg.cu.cm. ',
+    '  N./cm. ',
+    '  N.m./deg  ',
+    '  N./cm. ',
+    "  g's",
+    '  Kpa       ',
+    '  m. ',
+    '  mm.',
+    '  mm.',
+    '  mm.',
+  ]),
+});
+
 function _defaultInputxml2019LayoutConfigJson() {
   return JSON.stringify({
     elements: {
@@ -66,12 +101,8 @@ function _defaultInputxml2019LayoutConfigJson() {
       material_ids: [],
     },
     units: {
-      numeric_lines: [
-        '      0.0000      0.00000      0.00000      0.00000      0.00000      0.00000',
-        '      0.000000      0.0000      0.00000      0.00000      0.00000      0.00000',
-        '      0.00000      0.00000      0.00000      0.00000      0.00000      0.00000',
-        '      0.00000      0.0000      0.0000      0.0000',
-      ],
+      numeric_lines: [...INPUTXML2019_SAFE_UNITS.numeric_lines],
+      text_lines: [...INPUTXML2019_SAFE_UNITS.text_lines],
     },
   }, null, 2);
 }
@@ -578,7 +609,7 @@ function _esc(value) {
 }
 
 function _createWorkerRuntime() {
-  const worker = new Worker(new URL('../converters/py-worker.js?v=20260509-elements-line78', import.meta.url), { type: 'module' });
+  const worker = new Worker(new URL('../converters/py-worker.js?v=20260515-cii-compat-check2', import.meta.url), { type: 'module' });
   const pending = new Map();
   let nextJobId = 1;
 
@@ -1024,10 +1055,40 @@ function _parseInputxml2019ConfigOrDefault(layoutConfigJsonText) {
   }
 }
 
+function _numbersFromCiiRows(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .flatMap((row) => String(row ?? '').trim().split(/\s+/).filter(Boolean))
+    .map((token) => Number(token))
+    .filter((value) => Number.isFinite(value));
+}
+
+function _applyInputxml2019SafeUnits(config, notes) {
+  if (!config.units || typeof config.units !== 'object' || Array.isArray(config.units)) {
+    config.units = {};
+  }
+  const numericValues = _numbersFromCiiRows(config.units.numeric_lines);
+  const numericIsUnsafe = numericValues.length === 0
+    || numericValues.every((value) => Math.abs(value) < 1e-12);
+  const textIsIncomplete = !Array.isArray(config.units.text_lines)
+    || config.units.text_lines.length !== INPUTXML2019_SAFE_UNITS.text_lines.length;
+
+  if (numericIsUnsafe) {
+    config.units.numeric_lines = [...INPUTXML2019_SAFE_UNITS.numeric_lines];
+    notes.push('Replaced unsafe all-zero units.numeric_lines with CAESAR-safe metric conversion constants.');
+  }
+  if (textIsIncomplete) {
+    config.units.text_lines = [...INPUTXML2019_SAFE_UNITS.text_lines];
+    notes.push('Set units.text_lines to the CAESAR 2019 metric label block.');
+  }
+}
+
 function _prepareInputxml2019ConfigForRequirements(layoutConfigJsonText, requirements) {
   const { config, parseIssue } = _parseInputxml2019ConfigOrDefault(layoutConfigJsonText);
   const notes = [];
   if (parseIssue) notes.push(parseIssue);
+
+  _applyInputxml2019SafeUnits(config, notes);
 
   if (!config.compatibility || typeof config.compatibility !== 'object' || Array.isArray(config.compatibility)) {
     config.compatibility = {};
@@ -1141,7 +1202,7 @@ async function _openInputxml2019PreRunPopup(def, values, primaryFileName, primar
 
   if (!popupResult.saved || !popupResult.payload) return false;
   const { jsonText, headerValues } = popupResult.payload;
-  values.layoutConfigJson = jsonText;
+  values.layoutConfigJson = _prepareInputxml2019ConfigForRequirements(jsonText, requirements).jsonText;
   for (const [headerKey, headerValue] of Object.entries(headerValues || {})) {
     values[headerKey] = headerValue;
   }

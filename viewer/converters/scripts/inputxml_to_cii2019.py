@@ -41,6 +41,11 @@ except ImportError:
     cii2019_section_rules = None
 
 try:
+    import cii_syntax_check_2019
+except ImportError:
+    cii_syntax_check_2019 = None
+
+try:
     import cii2019_hanger_miscel_control
 except ImportError:
     cii2019_hanger_miscel_control = None
@@ -51,12 +56,6 @@ VERSION_PAYLOAD_LINES: Final[int] = 61
 DEFAULT_LINEAR_STIFFNESS: Final[float] = 1.75127e12
 DEFAULT_VERSION_HEADER: Final[str] = "CAESARII Input XML to CII converter"
 DEFAULT_2019_CONFIG_FILE: Final[str] = "inputxml_to_cii2019_config.json"
-DEFAULT_2019_UNIVERSAL_TEMPLATE_RELATIVE_PATH: Final[tuple[str, ...]] = (
-    "Benchmarks",
-    "INPUT XML to CII 2019",
-    "BM_CII",
-    "mmtemplate_2019.cii",
-)
 UNIVERSAL_VERSION_PREFIX_FALLBACK: Final[tuple[str, ...]] = (
     "       5.000000     11.000000     1252",
     "  ",
@@ -787,32 +786,34 @@ def _default_2019_layout_config() -> dict[str, object]:
         },
         "units": {
             "numeric_lines": [
-                "      0.0000      0.00000      0.00000      0.00000      0.00000      0.00000",
-                "      0.000000      0.0000      0.00000      0.00000      0.00000      0.00000",
-                "      0.00000      0.00000      0.00000      0.00000      0.00000      0.00000",
-                "      0.00000      0.0000      0.0000      0.0000",
+                # CAESAR import requires real conversion constants; all-zero
+                # units can pass text conversion and still create a corrupt C2.
+                "        25.4000      4.44822     0.453592     0.112985     0.112985      6.89476",
+                "       0.555556     -17.7778      6.89476      6.89476 2.768000E-02 2.768000E-02",
+                "   2.768000E-02      1.75127     0.112985      1.75127      1.00000      6.89476",
+                "   2.540000E-02      25.4000      25.4000      25.4000",
             ],
             "text_lines": [
-                "  METRIC         ",
-                "  ON ",
+                "  SI (mm)        ",
+                "  on ",
                 "  mm.",
                 "  N. ",
                 "  Kg.",
                 "  N.m.  ",
-                "  N.m.  ",
-                "  MPa      ",
+                "  N.m.. ",
+                "  KPa       ",
                 "  C",
                 "  C",
-                "  MPa      ",
-                "  MPa      ",
-                "  kg.cu.cm.",
-                "  kg.cu.cm.",
-                "  kg.cu.cm.",
-                "  N./cm.",
-                "  N.m./deg",
-                "  N./cm.",
+                "  KPa       ",
+                "  KPa       ",
+                "  kg.cu.cm. ",
+                "  kg.cu.cm. ",
+                "  kg.cu.cm. ",
+                "  N./cm. ",
+                "  N.m./deg  ",
+                "  N./cm. ",
                 "  g's",
-                "  MPa      ",
+                "  Kpa       ",
                 "  m. ",
                 "  mm.",
                 "  mm.",
@@ -1053,40 +1054,9 @@ def _render_template_row(template: list[str], values: dict[str, str]) -> str:
 
 
 def _read_universal_version_payload_from_template() -> list[str]:
-    script_path = Path(__file__).resolve()
-    template_path: Path | None = None
-    for candidate_root in (script_path.parent, *script_path.parents):
-        candidate = candidate_root.joinpath(*DEFAULT_2019_UNIVERSAL_TEMPLATE_RELATIVE_PATH)
-        if candidate.is_file():
-            template_path = candidate
-            break
-    if template_path is None:
-        return list(UNIVERSAL_VERSION_PREFIX_FALLBACK)
-
-    lines = template_path.read_text(encoding="utf-8", errors="strict").splitlines()
-    version_index = -1
-    for index, line in enumerate(lines):
-        normalized = re.sub(r"\s+", " ", line.strip())
-        if normalized == "#$ VERSION":
-            version_index = index
-            break
-    if version_index < 0:
-        return []
-
-    next_index = len(lines)
-    for index in range(version_index + 1, len(lines)):
-        if lines[index].lstrip().startswith("#$ "):
-            next_index = index
-            break
-
-    payload = lines[version_index + 1 : next_index]
-    if not payload:
-        return []
-    if len(payload) < VERSION_PAYLOAD_LINES:
-        payload.extend([""] * (VERSION_PAYLOAD_LINES - len(payload)))
-    if len(payload) > VERSION_PAYLOAD_LINES:
-        payload = payload[:VERSION_PAYLOAD_LINES]
-    return payload
+    # Keep runtime defaults self-contained. Benchmark/template files are optional
+    # mapping inputs and must not be required for default value generation.
+    return list(UNIVERSAL_VERSION_PREFIX_FALLBACK)
 
 
 def _build_universal_version_payload() -> list[str]:
@@ -1940,8 +1910,10 @@ def _build_hanger_lines(model: ParsedModel, miscel_cfg: dict[str, object]) -> li
         ]
         lines.append(_row(hgrdat_1))
         lines.append(_row(hgrdat_2))
-        lines.append(_row([hanger.tag]))
-        lines.append(_row([hanger.guid]))
+        _tag_text = (hanger.tag or "")[:100]
+        _guid_text = (hanger.guid or "")[:100]
+        lines.append(f"{'':7}{len(_tag_text):5d} {_tag_text:<100}")
+        lines.append(f"{'':7}{len(_guid_text):5d} {_guid_text:<100}")
         lines.append(
             _row(
                 [
@@ -2700,12 +2672,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--hanger-miscel-default-profile-cii",
         type=Path,
-        default=Path("Benchmarks")
-        / "INPUT XML to CII 2019"
-        / "NEW BM"
-        / "BM_CII_DEFAULTVALUES.CII",
+        default=None,
         help=(
-            "CII profile used only to complete missing/sentinel HANGER and MISCEL_1 "
+            "Optional CII profile used only to complete missing/sentinel HANGER and MISCEL_1 "
             "default values. Hangers are still detected from explicit InputXML "
             "<HANGER/> records."
         ),
@@ -2735,6 +2704,39 @@ def _auto_detect_reference_cii(input_xml_path: Path) -> Path | None:
         if candidate_path.is_file():
             return candidate_path
     return None
+
+
+def _assert_cii2019_compatible(cii_text: str, output_path: Path) -> None:
+    if cii_syntax_check_2019 is None:
+        raise RuntimeError("CII 2019 compatibility checker is unavailable.")
+
+    options = cii_syntax_check_2019.RuleOptions(
+        allow_missing_nodename=True,
+        allow_zero_line_no=True,
+        allow_missing_coords=True,
+    )
+    report = cii_syntax_check_2019.validate_cii_text(cii_text, output_path, options)
+    if report.get("ok") is True:
+        return
+
+    errors = report.get("errors", [])
+    if not isinstance(errors, list):
+        raise ValueError("CII 2019 compatibility validation failed with an invalid report shape.")
+    messages: list[str] = []
+    for issue in errors[:12]:
+        if not isinstance(issue, dict):
+            continue
+        section = issue.get("section", "GLOBAL")
+        line = issue.get("line", 0)
+        code = issue.get("code", "validation_error")
+        message = issue.get("message", "")
+        messages.append(f"{section}:{line} {code}: {message}")
+    if len(errors) > len(messages):
+        messages.append(f"... {len(errors) - len(messages)} more validation error(s).")
+    raise ValueError(
+        "CII 2019 compatibility validation failed before writing output:\n"
+        + "\n".join(messages)
+    )
 
 
 def main() -> int:
@@ -2779,6 +2781,8 @@ def main() -> int:
             cii_text=cii_text,
             default_profile_cii=args.hanger_miscel_default_profile_cii,
         )
+
+    _assert_cii2019_compatible(cii_text, args.output)
 
     args.output.write_text(cii_text, encoding="utf-8")
 

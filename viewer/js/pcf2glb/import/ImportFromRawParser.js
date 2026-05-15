@@ -41,10 +41,8 @@ import { parse }            from '../../../parser/caesar-parser.js';
 import { buildUniversalCSV, normalizeToPCFWithContinuity, buildPcfFromContinuity } from '../../../utils/accdb-to-pcf.js';
 import { pcfxDocumentFromPcfText }         from '../../../pcfx/Pcfx_PcfAdapter.js';
 import { viewerComponentFromCanonicalItem } from '../../../pcfx/Pcfx_GlbAdapter.js';
-import { buildXmlGraphData } from '../../../parser/xml-graph-builder.js';
-import { buildXmlSupportComponents } from '../../../parser/xml-support-builder.js';
+import { buildNativeXmlDirectData } from './NativeXmlDirectBuilder.js';
 import { parseStpSupportMembers } from '../../../parser/stp-support-parser.js';
-import { debugSupport } from '../../../debug/support-debug.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -177,76 +175,6 @@ function _copySupportMetadata(comp, segment) {
   }
 }
 
-
-function _parsedXmlToDirectData(parsed, fileName, defaults) {
-  const graphData = buildXmlGraphData(parsed, fileName, {
-    syntheticGapMm: Number(defaults?.xmlLayout?.syntheticGapMm || 3500),
-    rootPlacements: defaults?.xmlLayout?.rootPlacements || null,
-    componentPlacements: defaults?.xmlLayout?.componentPlacements || null,
-    lineLabelText: defaults?.xmlLayout?.lineLabelText || '',
-    lineLabelPrefix: defaults?.xmlLayout?.lineLabelPrefix || 'ASSEMBLY',
-  });
-
-  const beforeCount = (graphData.components || []).filter((c) => String(c?.type || '').toUpperCase() === 'SUPPORT').length;
-
-  const xmlSupports = buildXmlSupportComponents(parsed, {
-    verticalAxis: 'Y',
-    worldNorth: parsed?.north || { x: 0, y: 0, z: -1 },
-    defaultBore: 100,
-    nodePositions: graphData.solvedNodePositions || parsed?.nodes || {},
-  });
-
-  const existingSupportKeys = new Set(
-    (graphData.components || [])
-      .filter((c) => String(c?.type || '').toUpperCase() === 'SUPPORT')
-      .map((c) => {
-        const p = c?.coOrds || (c?.points && c.points[0]) || null;
-        const name = String(c?.attributes?.SUPPORT_NAME || c?.attributes?.SKEY || '').trim();
-        return `${name}|${p ? `${Number(p.x).toFixed(3)}:${Number(p.y).toFixed(3)}:${Number(p.z).toFixed(3)}` : ''}`;
-      })
-  );
-
-  const appended = [];
-
-  for (const s of xmlSupports) {
-    const p = s?.coOrds || null;
-    const name = String(s?.attributes?.SUPPORT_NAME || s?.attributes?.SKEY || '').trim();
-    const key = `${name}|${p ? `${Number(p.x).toFixed(3)}:${Number(p.y).toFixed(3)}:${Number(p.z).toFixed(3)}` : ''}`;
-
-    if (existingSupportKeys.has(key)) {
-      debugSupport({
-        stage: 'xml-support-merge',
-        sourceId: s.id,
-        deduped: true,
-        dedupeKey: key,
-        resolvedKind: s?.attributes?.SUPPORT_KIND,
-        resolvedDirection: s?.attributes?.SUPPORT_DIRECTION,
-      });
-      continue;
-    }
-
-    appended.push(s);
-    existingSupportKeys.add(key);
-  }
-
-  const finalComponents = [
-    ...(graphData.components || []),
-    ...appended,
-  ];
-
-  debugSupport({
-    stage: 'xml-support-merge',
-    builtCount: xmlSupports.length,
-    beforeCount,
-    appendedCount: appended.length,
-    dedupedCount: xmlSupports.length - appended.length,
-  });
-
-  return {
-    ...graphData,
-    components: finalComponents,
-  };
-}
 
 /**
  * Convert a parsed result (from caesar-parser or accdb-mdb) into a
@@ -601,7 +529,7 @@ export async function importFromRawFile(file, state, logArray) {
     log.push({ level: 'INFO', msg: `Parser produced ${parsed.elements.length} element(s), ${Object.keys(parsed.nodes || {}).length} node(s). Converting via PCFX layer...` });
 
     const directPcfData = String(parsed?.format || '').toUpperCase() === 'XML'
-      ? _parsedXmlToDirectData(parsed, fileName, defaults)
+      ? buildNativeXmlDirectData(parsed, fileName, defaults)
       : _parsedToDirectPcfData(parsed, fileName, defaults);
 
     log.push({

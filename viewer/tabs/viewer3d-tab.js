@@ -18,6 +18,7 @@ import { buildComponentPanelModel } from '../viewer3d/component-panel-model.js';
 import { renderConfig } from './config-tab.js';
 import { importFromRawFile } from '../js/pcf2glb/import/ImportFromRawParser.js';
 import { notify } from '../diagnostics/notification-center.js';
+import { mountXmlComparePanel } from './viewer3d-xml-compare-panel.js';
 
 let _viewer = null;
 let _listenersRegistered = false;
@@ -28,6 +29,7 @@ let _directPcfData = null;
 let _ribbonCollapsed = false;
 let _leftSettingsCollapsed = false;
 let _mockSeedPayload = null;
+let xmlDiffPanel = null;
 const _spareOverlayRuntime = {
   spare1: { rows: [], fields: [], fileName: '' },
   spare2: { rows: [], fields: [], fileName: '' },
@@ -134,6 +136,9 @@ export function renderViewer3D(container) {
     });
     _listenersRegistered = true;
   }
+
+  xmlDiffPanel?.destroy?.();
+  xmlDiffPanel = null;
 
   // Always dispose the old viewer before rebuilding the DOM, as the old canvas will be destroyed.
   _disposeViewer();
@@ -345,11 +350,13 @@ export function renderViewer3D(container) {
             <div class="side-panel-tabs">
               ${showComponentPanel ? '<button class="panel-tab active" type="button" data-target="v3d-panel-component">Component Panel</button>' : ''}
               <button class="panel-tab ${showComponentPanel ? '' : 'active'}" type="button" data-target="v3d-panel-summary">Summary</button>
+              <button class="panel-tab" type="button" data-target="v3d-panel-xml-diff" data-viewer3d-side-tab="xml-diff">XML Diff</button>
             </div>
             ${showComponentPanel ? `<div class="panel-content active" id="v3d-panel-component" style="display:block;">${_renderComponentPanel(cfg)}</div>` : ''}
             <div class="panel-content ${showComponentPanel ? '' : 'active'}" id="v3d-panel-summary" style="display:${showComponentPanel ? 'none' : 'block'};">
               ${_renderSummaryPanel(cfg, summary, dataSource, components)}
             </div>
+            <div class="panel-content" id="v3d-panel-xml-diff" data-viewer3d-side-panel="xml-diff" style="display:none;"></div>
           </aside>
         </div>
 
@@ -398,6 +405,32 @@ export function renderViewer3D(container) {
   `;
 
   _wireSidePanelTabs(container);
+  const xmlDiffHost = container.querySelector('[data-viewer3d-side-panel="xml-diff"]');
+  if (xmlDiffHost) {
+    xmlDiffPanel = mountXmlComparePanel(xmlDiffHost, {
+      onDatasetLoaded(datasetId, result) {
+        console.info('[3D Viewer XML Diff] dataset loaded', datasetId, result?.route);
+      },
+      onPreviewOverlay(datasetA, datasetB) {
+        _viewer?.setXmlComparePreviewOverlay?.(datasetA, datasetB);
+      },
+      onCompare(reportA, reportB) {
+        console.info('[3D Viewer XML Diff] compare route reports', reportA, reportB);
+      },
+      onPushToCanvas(datasetA, datasetB) {
+        if (!_viewer) return;
+        _viewer.setXmlDiffOverlay(
+          Array.isArray(datasetA?.components) ? datasetA.components : [],
+          Array.isArray(datasetB?.components) ? datasetB.components : [],
+        );
+      },
+      onClear() {
+        _viewer?.clearXmlDiffOverlay?.();
+        _viewer?.clearXmlComparePreviewOverlay?.();
+        _viewer?.clearXmlCompareOverlay?.();
+      },
+    });
+  }
   _wireViewerControls(container, cfg, actions);
   _registerShortcuts(cfg, container);
 

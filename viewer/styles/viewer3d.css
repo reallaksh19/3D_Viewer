@@ -767,6 +767,541 @@
   background: rgba(157, 202, 252, 0.72);
 }
 
+.v3d-xc-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 100%;
+  color: #d7e6f5;
+}
+
+.v3d-xc-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(19, 28, 42, 0.94), rgba(13, 19, 31, 0.94));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.v3d-xc-file,
+.v3d-xc-route {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #94b7db;
+}
+
+.v3d-xc-file {
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.v3d-xc-file:hover {
+  background: rgba(59, 130, 246, 0.18);
+  border-color: rgba(96, 165, 250, 0.45);
+  color: #e4f1ff;
+}
+
+.v3d-xc-route select {
+  min-width: 140px;
+  height: 28px;
+  padding: 4px 26px 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #0f1726;
+  color: #dce8f4;
+  font-size: 11px;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23bcd9f3' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 10px 6px;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.v3d-xc-route select:focus {
+  border-color: #60a5fa;
+}
+
+.v3d-xc-toolbar button {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: #dce8f4;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s;
+}
+
+.v3d-xc-toolbar button:hover {
+  background: rgba(59, 130, 246, 0.22);
+  border-color: rgba(96, 165, 250, 0.52);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.v3d-xc-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 22px;
+  padding: 0 2px;
+  color: #a8c8eb;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.v3d-xc-report-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.v3d-xc-route-card {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(8, 14, 24, 0.42);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.v3d-xc-route-card b {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #d9ecff;
+}
+
+.v3d-xc-route-card span {
+  color: #b8cede;
+  font-size: 11px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.v3d-xc-route-card.is-ok {
+  border-color: rgba(74, 222, 128, 0.38);
+  box-shadow: inset 0 0 0 1px rgba(74, 222, 128, 0.12);
+}
+
+.v3d-xc-route-card.is-fail {
+  border-color: rgba(248, 113, 113, 0.44);
+  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.14);
+}
+
+.v3d-xc-route-card.is-empty {
+  opacity: 0.72;
+  border-style: dashed;
+}
+
+.v3d-xc-compare-result {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #2d4a72;
+  background: #0d1f38;
+  font-size: 11px;
+  color: #b8d4f8;
+}
+
+.v3d-xc-compare-result b {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: #7ab3ff;
+  margin-bottom: 4px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.v3d-xc-compare-result.is-ok {
+  border-color: #1e5c34;
+  background: #0a1f14;
+}
+
+.v3d-xc-compare-result.is-fail {
+  border-color: #7f2a2a;
+  background: #1c0a0a;
+}
+
+.v3d-xc-compare-summary {
+  display: block;
+  margin-bottom: 6px;
+  color: #94b8e0;
+  font-style: italic;
+}
+
+.v3d-xc-diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.v3d-xc-diff-table th {
+  text-align: left;
+  padding: 2px 4px;
+  color: #64748b;
+  font-weight: 600;
+  border-bottom: 1px solid #1e3a5c;
+}
+
+.v3d-xc-diff-table td {
+  padding: 2px 4px;
+  border-bottom: 1px solid #111f33;
+  vertical-align: top;
+  word-break: break-all;
+}
+
+.v3d-xc-diff-label {
+  color: #7ab3ff;
+  font-weight: 600;
+  white-space: nowrap;
+  width: 30%;
+}
+
+.v3d-xc-diff-a { color: #93c5fd; }
+.v3d-xc-diff-b { color: #fdba74; }
+
+.v3d-xc-diff-delta {
+  color: #64748b;
+  text-align: right;
+  width: 10%;
+}
+
+.v3d-xc-diff-delta.has-change {
+  color: #fbbf24;
+  font-weight: 700;
+}
+
+.v3d-xc-geo-overlay {
+  margin: 8px 0 6px;
+}
+
+.v3d-xc-geo-legend {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 10px;
+  margin-bottom: 4px;
+}
+
+.v3d-xc-geo-legend-a { color: #3b82f6; font-weight: 700; }
+.v3d-xc-geo-legend-b { color: #f97316; font-weight: 700; }
+.v3d-xc-geo-legend-note { color: #475569; margin-left: auto; }
+
+.v3d-xc-geo-svg {
+  display: block;
+  width: 100%;
+  border-radius: 4px;
+  border: 1px solid #1e3a5c;
+}
+
+.v3d-xc-push-btn {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 7px 10px;
+  background: linear-gradient(135deg, #1e3a5c 0%, #162d48 100%);
+  border: 1px solid #3b82f6;
+  border-radius: 6px;
+  color: #7ab3ff;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: center;
+  letter-spacing: 0.04em;
+  transition: background 0.15s, color 0.15s;
+}
+
+.v3d-xc-push-btn:hover {
+  background: linear-gradient(135deg, #2a4f7c 0%, #1e3a5c 100%);
+  color: #bfdbfe;
+}
+
+/* ── Transform / Alignment Panel ────────────────────────────────── */
+
+.v3d-xc-transform {
+  margin: 8px 0 4px;
+  padding: 10px 10px 12px;
+  background: rgba(251, 146, 60, 0.06);
+  border: 1px solid rgba(251, 146, 60, 0.25);
+  border-radius: 7px;
+}
+
+.v3d-xc-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #fb923c;
+  margin-bottom: 8px;
+  opacity: 0.9;
+}
+
+.v3d-xc-transform-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.v3d-xc-transform-btn {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid rgba(251, 146, 60, 0.5);
+  border-radius: 5px;
+  background: rgba(251, 146, 60, 0.18);
+  color: #fed7aa;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.v3d-xc-transform-btn:hover {
+  background: rgba(251, 146, 60, 0.32);
+  border-color: rgba(251, 146, 60, 0.8);
+  color: #fff7ed;
+}
+
+.v3d-xc-transform-btn--ghost {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #94a3b8;
+}
+
+.v3d-xc-transform-btn--ghost:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #cbd5e1;
+}
+
+.v3d-xc-transform-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.v3d-xc-transform-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.v3d-xc-transform-field label {
+  font-size: 10px;
+  color: #94a3b8;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.v3d-xc-transform-field input[type="number"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: #e2e8f0;
+  font-size: 11px;
+  font-family: 'Courier New', monospace;
+  appearance: textfield;
+  -moz-appearance: textfield;
+  transition: border-color 0.15s;
+}
+
+.v3d-xc-transform-field input[type="number"]::-webkit-inner-spin-button,
+.v3d-xc-transform-field input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.v3d-xc-transform-field input[type="number"]:focus {
+  outline: none;
+  border-color: rgba(251, 146, 60, 0.6);
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* Theme overrides – drawlight */
+.geo-theme-drawlight .v3d-xc-transform {
+  background: rgba(251, 146, 60, 0.07);
+  border-color: rgba(234, 88, 12, 0.3);
+}
+
+.geo-theme-drawlight .v3d-xc-section-title {
+  color: #c2410c;
+}
+
+.geo-theme-drawlight .v3d-xc-transform-btn {
+  background: rgba(251, 146, 60, 0.15);
+  border-color: rgba(234, 88, 12, 0.45);
+  color: #9a3412;
+}
+
+.geo-theme-drawlight .v3d-xc-transform-btn:hover {
+  background: rgba(251, 146, 60, 0.28);
+  color: #7c2d12;
+}
+
+.geo-theme-drawlight .v3d-xc-transform-btn--ghost {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: #cbd5e1;
+  color: #64748b;
+}
+
+.geo-theme-drawlight .v3d-xc-transform-btn--ghost:hover {
+  background: rgba(0, 0, 0, 0.1);
+  border-color: #94a3b8;
+  color: #334155;
+}
+
+.geo-theme-drawlight .v3d-xc-transform-field label {
+  color: #64748b;
+}
+
+.geo-theme-drawlight .v3d-xc-transform-field input[type="number"] {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.geo-theme-drawlight .v3d-xc-transform-field input[type="number"]:focus {
+  border-color: #ea580c;
+  background: #fff7ed;
+}
+
+/* Theme overrides – high contrast */
+.geo-theme-highcontrast .v3d-xc-transform {
+  background: #0a0a0a;
+  border-color: #888888;
+}
+
+.geo-theme-highcontrast .v3d-xc-section-title {
+  color: #ffa040;
+}
+
+.geo-theme-highcontrast .v3d-xc-transform-btn {
+  background: #1a1a1a;
+  border-color: #aaaaaa;
+  color: #ffffff;
+}
+
+.geo-theme-highcontrast .v3d-xc-transform-btn:hover {
+  background: #2a2a2a;
+  border-color: #ffffff;
+}
+
+.geo-theme-highcontrast .v3d-xc-transform-field input[type="number"] {
+  background: #000000;
+  border-color: #555555;
+  color: #ffffff;
+}
+
+.geo-theme-highcontrast .v3d-xc-transform-field input[type="number"]:focus {
+  border-color: #ffffff;
+}
+
+.geo-theme-drawlight .v3d-xc-panel {
+  color: #1e293b;
+}
+
+.geo-theme-drawlight .v3d-xc-toolbar {
+  background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
+  border-color: #cbd5e1;
+}
+
+.geo-theme-drawlight .v3d-xc-file,
+.geo-theme-drawlight .v3d-xc-route {
+  color: #475569;
+}
+
+.geo-theme-drawlight .v3d-xc-file {
+  background: #ffffff;
+  border-color: #cbd5e1;
+}
+
+.geo-theme-drawlight .v3d-xc-file:hover,
+.geo-theme-drawlight .v3d-xc-toolbar button:hover {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #0f172a;
+}
+
+.geo-theme-drawlight .v3d-xc-route select,
+.geo-theme-drawlight .v3d-xc-toolbar button {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.geo-theme-drawlight .v3d-xc-status {
+  color: #475569;
+}
+
+.geo-theme-drawlight .v3d-xc-route-card {
+  background: #ffffff;
+  border-color: #cbd5e1;
+}
+
+.geo-theme-drawlight .v3d-xc-route-card b {
+  color: #0f172a;
+}
+
+.geo-theme-drawlight .v3d-xc-route-card span {
+  color: #334155;
+}
+
+.geo-theme-highcontrast .v3d-xc-panel,
+.geo-theme-highcontrast .v3d-xc-toolbar,
+.geo-theme-highcontrast .v3d-xc-route-card {
+  background: #000000;
+  border-color: #555555;
+}
+
+.geo-theme-highcontrast .v3d-xc-file,
+.geo-theme-highcontrast .v3d-xc-route,
+.geo-theme-highcontrast .v3d-xc-status,
+.geo-theme-highcontrast .v3d-xc-route-card span {
+  color: #e0e0e0;
+}
+
+.geo-theme-highcontrast .v3d-xc-toolbar button,
+.geo-theme-highcontrast .v3d-xc-route select {
+  background: #0a0a0a;
+  color: #ffffff;
+  border-color: #555555;
+}
+
+.geo-theme-highcontrast .v3d-xc-toolbar button:hover,
+.geo-theme-highcontrast .v3d-xc-file:hover {
+  background: #1a1a1a;
+  border-color: #ffffff;
+  color: #ffffff;
+}
+
 @media (max-width: 1240px) {
   .geo-top-ribbon {
     gap: 6px;
@@ -823,6 +1358,24 @@
 
   .status-message {
     font-size: 11px;
+  }
+
+  .v3d-xc-toolbar {
+    align-items: stretch;
+  }
+
+  .v3d-xc-file,
+  .v3d-xc-route {
+    width: 100%;
+  }
+
+  .v3d-xc-route select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .v3d-xc-toolbar button {
+    width: 100%;
   }
 }
 

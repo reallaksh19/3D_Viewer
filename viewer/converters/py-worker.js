@@ -19,9 +19,11 @@ const SCRIPT_FILE_NAMES = Object.freeze([
   'inputxml_bookmark.py',
   'rev_to_stp.py',
   'xml_to_cii2019.py',
+  'cii2019_section_rules.py',
   'cii_syntax_check_2019.py',
   'inputxml_to_cii2014.py',
   'inputxml_to_cii2019.py',
+  'cii2019_hanger_miscel_control.py',
   'cii2019_miscel_hardener.py',
   'cii2019_displmnt_sync.py',
   'inputxml_profile_sys30_b7410250_benchmark.cii',
@@ -88,6 +90,17 @@ function _decodeLogBatches(values) {
 function _extractFailureDetail(stderrLines) {
   if (!stderrLines.length) return '';
   const priorityPatterns = [/^usage:/i, /^error:/i, /^RuntimeError:/i, /^ValueError:/i, /^Exception:/i, /contract check failed/i];
+  for (let i = 0; i < stderrLines.length; i += 1) {
+    const line = String(stderrLines[i] || '').trim();
+    if (!/^ValueError:/i.test(line)) continue;
+    const detailLines = [line];
+    for (let j = i + 1; j < stderrLines.length && detailLines.length < 6; j += 1) {
+      const nextLine = String(stderrLines[j] || '').trim();
+      if (!nextLine || /^Traceback\b/i.test(nextLine) || /^\s*File\b/i.test(nextLine)) continue;
+      detailLines.push(nextLine);
+    }
+    return detailLines.join(' | ');
+  }
   for (let i = stderrLines.length - 1; i >= 0; i -= 1) {
     const line = String(stderrLines[i] || '').trim();
     if (!line) continue;
@@ -227,6 +240,26 @@ async function _runContractGate(pyodide, converterId, sourcePath, outputPath, jo
   }
 }
 
+async function _runInputXml2019SyntaxCheck(pyodide, converterId, outputPath, jobDir, stdout, stderr) {
+  if (converterId !== 'inputxml_to_cii2019') return null;
+
+  const reportPath = `${jobDir}/inputxml_to_cii2019_syntax_report.json`;
+  const argv = [
+    '/scripts/cii_syntax_check_2019.py',
+    '--input',
+    outputPath,
+    '--output',
+    reportPath,
+  ];
+
+  await _runPythonScript(pyodide, '/scripts/cii_syntax_check_2019.py', argv, stdout, stderr);
+
+  return {
+    script: 'cii_syntax_check_2019.py',
+    reportPath,
+  };
+}
+
 async function _runJob(message) {
   const converterId = _toString(message?.converterId);
   if (!converterId) throw new Error('Missing converterId.');
@@ -284,6 +317,15 @@ async function _runJob(message) {
     stderr,
   );
 
+  const syntaxCheckResult = await _runInputXml2019SyntaxCheck(
+    pyodide,
+    converterId,
+    invocation.outputPath,
+    jobDir,
+    stdout,
+    stderr,
+  );
+
   const stdoutLines = _decodeLogBatches(stdout);
   const stderrLines = _decodeLogBatches(stderr);
   const outputText = pyodide.FS.readFile(invocation.outputPath, { encoding: 'utf8' });
@@ -303,7 +345,7 @@ async function _runJob(message) {
       stdout: stdoutLines,
       stderr: stderrLines,
       argv: invocation.argv.slice(1),
-      postprocess: [hardenerResult, displmntSyncResult].filter(Boolean),
+      postprocess: [hardenerResult, displmntSyncResult, syntaxCheckResult].filter(Boolean),
     },
   };
 }

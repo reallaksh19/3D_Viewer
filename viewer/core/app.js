@@ -7,7 +7,7 @@ import { renderPcfxConverterTab } from '../tabs/pcfx-converter-tab.js';
 import { renderModelExchangeTab } from '../tabs/model-exchange-tab.js';
 import { renderInterchangeConfigTab } from '../tabs/interchange-config-tab.js';
 import { renderSupportMappingConfigTab } from '../tabs/support-mapping-config-tab.js';
-import { renderModelConvertersTab } from '../tabs/model-converters-tab.js?v=20260509-elements-line78';
+import { renderModelConvertersTab } from '../tabs/model-converters-tab.js?v=20260515-cii-compat-check2';
 import { renderAdapterMappingTab } from '../tabs/adapter-mapping-tab.js';
 import { mount as mountRvmJsonPcfExtractTab } from '../tabs/rvm-json-pcf-extract-tab.js';
 import { renderUniversalXmlConverterTab } from '../tabs/universal-xml-converter-tab.js';

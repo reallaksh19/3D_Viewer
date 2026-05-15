@@ -534,7 +534,9 @@ def validate_elements_rows(
 def validate_units(sections: Mapping[str, Sequence[str]]) -> SectionValidationReport:
     report = SectionValidationReport()
 
-    rows = nonblank_rows(sections.get("UNITS", []))
+    # UNITS has intentional blank label rows in CAESAR output; count payload
+    # rows, not only nonblank rows.
+    rows = list(sections.get("UNITS", []))
 
     if len(rows) != UNITS_TOTAL_LINES:
         report.add(

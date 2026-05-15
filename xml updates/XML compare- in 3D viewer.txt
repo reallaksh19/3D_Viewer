@@ -1,0 +1,4243 @@
+XML compare- in 3D viewer
+
+Strat coding one by one, when you see "------------------------------------------------------------" ensure that you pass all test before proceeding to next
+
+
+Below is **Agent A prompt only**. This is the first coding agent in sequence.
+
+---
+
+# Agent A Prompt — InputXML Route Constants + Native XML Builder Extraction
+
+## Mission
+
+Implement the **native InputXML import route foundation**.
+
+This is the first slice of the InputXML dual-route plan:
+
+```text
+InputXML Import Route
+1. Native XML Builder
+2. UXML Round Trip
+```
+
+Your slice only implements:
+
+```text
+A. Route constants / normalization / persistence key
+B. Native XML Builder extraction from ImportFromRawParser.js
+C. Regression tests proving existing XML import still works
+D. Boundary checks proving no RVM modules are imported
+```
+
+Do **not** implement the UXML round-trip route in this slice.
+
+---
+
+## Existing source context
+
+The current normal XML import path is inside:
+
+```text
+viewer/js/pcf2glb/import/ImportFromRawParser.js
+```
+
+The existing flow reads XML/PDF text, calls `parse(text, fileName)`, and for XML uses `_parsedXmlToDirectData(parsed, fileName, defaults)`. That native XML branch internally uses `buildXmlGraphData()` and `buildXmlSupportComponents()`.  
+
+The route-mode pattern should follow the shape of the existing JSON→PCF topology mode file:
+
+```text
+viewer/rvm-pcf-extract/RvmPcfTopologyModes.js
+```
+
+but **do not import RVM modules**. That file only provides the design pattern: constants, default mode, localStorage persistence, normalize function, and label function. 
+
+---
+
+# Mandatory boundaries
+
+## Do not touch these files
+
+```text
+viewer/tabs/viewer3d-rvm-tab.js
+viewer/rvm/**
+viewer/rvm-viewer/**
+viewer/rvm-pcf-extract/**
+```
+
+## Do not import from these paths
+
+```text
+../rvm/
+../rvm-viewer/
+../rvm-pcf-extract/
+viewer/rvm/
+viewer/rvm-viewer/
+viewer/rvm-pcf-extract/
+```
+
+## Do not change behavior for
+
+```text
+ACCDB
+MDB
+PDF
+STEP
+Neutral text
+Existing XML import output schema
+```
+
+---
+
+# Files to create
+
+## 1. Create
+
+```text
+viewer/xml-compare/InputXmlImportRoutes.js
+```
+
+Add:
+
+```js
+/**
+ * InputXmlImportRoutes.js
+ *
+ * Route constants for InputXML/XML import in normal 3D Viewer / XML Compare.
+ *
+ * NATIVE_XML_BUILDER:
+ * - Existing native XML parser + buildXmlGraphData + buildXmlSupportComponents route.
+ *
+ * UXML_ROUND_TRIP:
+ * - Future route: InputXML -> UXML -> topology graph -> viewer components.
+ *
+ * This module intentionally does not import RVM modules.
+ */
+
+export const INPUTXML_IMPORT_ROUTES = Object.freeze({
+  NATIVE_XML_BUILDER: 'NATIVE_XML_BUILDER',
+  UXML_ROUND_TRIP: 'UXML_ROUND_TRIP',
+});
+
+export const INPUTXML_IMPORT_ROUTE_STORAGE_KEY = 'viewer3d_inputxml_import_route';
+
+export const DEFAULT_INPUTXML_IMPORT_ROUTE = (() => {
+  try {
+    const stored = localStorage.getItem(INPUTXML_IMPORT_ROUTE_STORAGE_KEY);
+
+    if (stored === INPUTXML_IMPORT_ROUTES.NATIVE_XML_BUILDER) {
+      return INPUTXML_IMPORT_ROUTES.NATIVE_XML_BUILDER;
+    }
+
+    if (stored === INPUTXML_IMPORT_ROUTES.UXML_ROUND_TRIP) {
+      return INPUTXML_IMPORT_ROUTES.UXML_ROUND_TRIP;
+    }
+  } catch {}
+
+  return INPUTXML_IMPORT_ROUTES.UXML_ROUND_TRIP;
+})();
+
+export function normalizeInputXmlImportRoute(value) {
+  const route = String(value ?? '').trim().toUpperCase();
+
+  if (route === INPUTXML_IMPORT_ROUTES.NATIVE_XML_BUILDER) {
+    return INPUTXML_IMPORT_ROUTES.NATIVE_XML_BUILDER;
+  }
+
+  return INPUTXML_IMPORT_ROUTES.UXML_ROUND_TRIP;
+}
+
+export function isNativeInputXmlBuilderRoute(value) {
+  return normalizeInputXmlImportRoute(value) === INPUTXML_IMPORT_ROUTES.NATIVE_XML_BUILDER;
+}
+
+export function isUxmlInputXmlRoundTripRoute(value) {
+  return normalizeInputXmlImportRoute(value) === INPUTXML_IMPORT_ROUTES.UXML_ROUND_TRIP;
+}
+
+export function inputXmlImportRouteLabel(value) {
+  const route = normalizeInputXmlImportRoute(value);
+
+  if (route === INPUTXML_IMPORT_ROUTES.NATIVE_XML_BUILDER) {
+    return 'Native XML Builder';
+  }
+
+  return 'UXML Round Trip';
+}
+
+export function persistInputXmlImportRoute(value) {
+  const route = normalizeInputXmlImportRoute(value);
+
+  try {
+    localStorage.setItem(INPUTXML_IMPORT_ROUTE_STORAGE_KEY, route);
+  } catch {}
+
+  return route;
+}
+```
+
+---
+
+## 2. Create
+
+```text
+viewer/js/pcf2glb/import/NativeXmlDirectBuilder.js
+```
+
+Move the existing native XML builder logic from `ImportFromRawParser.js` into this module.
+
+Required exports:
+
+```js
+export function buildNativeXmlDirectData(parsed, fileName, defaults = {}) {
+  // existing _parsedXmlToDirectData logic moved here
+}
+```
+
+Also export helper only if tests need it:
+
+```js
+export function mergeNativeXmlGraphAndSupports(graphData, xmlSupports) {
+  // support dedupe / merge logic from old _parsedXmlToDirectData
+}
+```
+
+The new module must import:
+
+```js
+import { buildXmlGraphData } from '../../../parser/xml-graph-builder.js';
+import { buildXmlSupportComponents } from '../../../parser/xml-support-builder.js';
+import { debugSupport } from '../../../debug/support-debug.js';
+```
+
+Preserve existing behavior:
+
+```text
+syntheticGapMm default: 3500
+lineLabelPrefix default: ASSEMBLY
+verticalAxis: Y
+worldNorth fallback: { x: 0, y: 0, z: -1 }
+defaultBore: 100
+support dedupe by support name + coordinates
+debugSupport calls
+```
+
+---
+
+# Files to patch
+
+## 3. Patch
+
+```text
+viewer/js/pcf2glb/import/ImportFromRawParser.js
+```
+
+Add import:
+
+```js
+import { buildNativeXmlDirectData } from './NativeXmlDirectBuilder.js';
+```
+
+Replace the XML branch:
+
+```js
+const directPcfData = String(parsed?.format || '').toUpperCase() === 'XML'
+  ? _parsedXmlToDirectData(parsed, fileName, defaults)
+  : _parsedToDirectPcfData(parsed, fileName, defaults);
+```
+
+with:
+
+```js
+const directPcfData = String(parsed?.format || '').toUpperCase() === 'XML'
+  ? buildNativeXmlDirectData(parsed, fileName, defaults)
+  : _parsedToDirectPcfData(parsed, fileName, defaults);
+```
+
+Then remove the old internal `_parsedXmlToDirectData(...)` function only after confirming the extracted module compiles.
+
+Do **not** modify `_parsedToDirectPcfData(...)`.
+
+Do **not** modify STEP import.
+
+Do **not** modify ACCDB/MDB import.
+
+---
+
+# Tests to add
+
+## 4. Add
+
+```text
+viewer/tests/inputxml-import-routes.test.js
+```
+
+Test requirements:
+
+```js
+import assert from 'assert/strict';
+
+async function run() {
+  console.log('--- inputxml-import-routes.test.js ---');
+
+  const {
+    INPUTXML_IMPORT_ROUTES,
+    normalizeInputXmlImportRoute,
+    inputXmlImportRouteLabel,
+    isNativeInputXmlBuilderRoute,
+    isUxmlInputXmlRoundTripRoute,
+  } = await import('../xml-compare/InputXmlImportRoutes.js');
+
+  assert.equal(
+    normalizeInputXmlImportRoute('NATIVE_XML_BUILDER'),
+    INPUTXML_IMPORT_ROUTES.NATIVE_XML_BUILDER
+  );
+
+  assert.equal(
+    normalizeInputXmlImportRoute('UXML_ROUND_TRIP'),
+    INPUTXML_IMPORT_ROUTES.UXML_ROUND_TRIP
+  );
+
+  assert.equal(
+    normalizeInputXmlImportRoute('bad-value'),
+    INPUTXML_IMPORT_ROUTES.UXML_ROUND_TRIP,
+    'invalid route must default to UXML_ROUND_TRIP'
+  );
+
+  assert.equal(inputXmlImportRouteLabel('NATIVE_XML_BUILDER'), 'Native XML Builder');
+  assert.equal(inputXmlImportRouteLabel('UXML_ROUND_TRIP'), 'UXML Round Trip');
+
+  assert.equal(isNativeInputXmlBuilderRoute('NATIVE_XML_BUILDER'), true);
+  assert.equal(isUxmlInputXmlRoundTripRoute('UXML_ROUND_TRIP'), true);
+
+  console.log('[PASS] InputXML import routes passed.');
+}
+
+run().catch(error => {
+  console.error('[FAIL] InputXML import routes failed.');
+  console.error(error);
+  process.exit(1);
+});
+```
+
+---
+
+## 5. Add
+
+```text
+viewer/tests/native-xml-direct-builder-smoke.test.js
+```
+
+This should be a **source-level and behavior-lite** test.
+
+Minimum required checks:
+
+```js
+import assert from 'assert/strict';
+import fs from 'fs';
+import path from 'path';
+
+function read(file) {
+  return fs.readFileSync(path.resolve(file), 'utf-8');
+}
+
+function run() {
+  console.log('--- native-xml-direct-builder-smoke.test.js ---');
+
+  const builder = read('viewer/js/pcf2glb/import/NativeXmlDirectBuilder.js');
+  const importer = read('viewer/js/pcf2glb/import/ImportFromRawParser.js');
+
+  assert.ok(
+    builder.includes('buildNativeXmlDirectData'),
+    'NativeXmlDirectBuilder.js must export buildNativeXmlDirectData'
+  );
+
+  assert.ok(
+    builder.includes('buildXmlGraphData'),
+    'native builder must use buildXmlGraphData'
+  );
+
+  assert.ok(
+    builder.includes('buildXmlSupportComponents'),
+    'native builder must use buildXmlSupportComponents'
+  );
+
+  assert.ok(
+    builder.includes('xml-support-merge'),
+    'native builder must preserve support merge diagnostics'
+  );
+
+  assert.ok(
+    importer.includes("import { buildNativeXmlDirectData } from './NativeXmlDirectBuilder.js';"),
+    'ImportFromRawParser.js must import extracted native builder'
+  );
+
+  assert.ok(
+    importer.includes('? buildNativeXmlDirectData(parsed, fileName, defaults)'),
+    'XML branch must use extracted native builder'
+  );
+
+  assert.ok(
+    !builder.includes('viewer3d-rvm-tab') &&
+    !builder.includes('RvmPcf') &&
+    !builder.includes('rvm-pcf-extract'),
+    'native builder must not reference RVM modules'
+  );
+
+  console.log('[PASS] Native XML direct builder smoke passed.');
+}
+
+try {
+  run();
+} catch (error) {
+  console.error('[FAIL] Native XML direct builder smoke failed.');
+  console.error(error);
+  process.exit(1);
+}
+```
+
+---
+
+## 6. Add
+
+```text
+viewer/tests/import-from-raw-parser-native-route-regression.test.js
+```
+
+Minimum required checks:
+
+```js
+import assert from 'assert/strict';
+import fs from 'fs';
+import path from 'path';
+
+function read(file) {
+  return fs.readFileSync(path.resolve(file), 'utf-8');
+}
+
+function run() {
+  console.log('--- import-from-raw-parser-native-route-regression.test.js ---');
+
+  const importer = read('viewer/js/pcf2glb/import/ImportFromRawParser.js');
+
+  assert.ok(
+    importer.includes("import { parseBinaryAccdb }"),
+    'ACCDB/MDB import must remain present'
+  );
+
+  assert.ok(
+    importer.includes("import { parse }"),
+    'CAESAR/XML parser import must remain present'
+  );
+
+  assert.ok(
+    importer.includes("parseStpSupportMembers"),
+    'STEP import must remain present'
+  );
+
+  assert.ok(
+    importer.includes("ext === 'stp' || ext === 'step'"),
+    'STEP branch must remain present'
+  );
+
+  assert.ok(
+    importer.includes("ext === 'xml' || ext === 'pdf'"),
+    'XML/PDF branch must remain present'
+  );
+
+  assert.ok(
+    importer.includes("String(parsed?.format || '').toUpperCase() === 'XML'"),
+    'XML format branch must remain present'
+  );
+
+  assert.ok(
+    importer.includes('buildNativeXmlDirectData(parsed, fileName, defaults)'),
+    'XML format branch must route to native XML direct builder'
+  );
+
+  assert.ok(
+    importer.includes('_parsedToDirectPcfData(parsed, fileName, defaults)'),
+    'non-XML parser route must still use _parsedToDirectPcfData'
+  );
+
+  console.log('[PASS] ImportFromRawParser native route regression passed.');
+}
+
+try {
+  run();
+} catch (error) {
+  console.error('[FAIL] ImportFromRawParser native route regression failed.');
+  console.error(error);
+  process.exit(1);
+}
+```
+
+---
+
+## 7. Add or update boundary test
+
+Create:
+
+```text
+viewer/tests/inputxml-routing-no-rvm-import.test.js
+```
+
+```js
+import assert from 'assert/strict';
+import fs from 'fs';
+import path from 'path';
+
+function readIfExists(file) {
+  const full = path.resolve(file);
+  return fs.existsSync(full) ? fs.readFileSync(full, 'utf-8') : '';
+}
+
+function run() {
+  console.log('--- inputxml-routing-no-rvm-import.test.js ---');
+
+  const files = [
+    'viewer/xml-compare/InputXmlImportRoutes.js',
+    'viewer/js/pcf2glb/import/NativeXmlDirectBuilder.js',
+  ];
+
+  for (const file of files) {
+    const text = readIfExists(file);
+
+    assert.ok(text, `expected file to exist: ${file}`);
+
+    assert.ok(
+      !/viewer3d-rvm-tab|rvm-viewer|rvm-pcf-extract|viewer\/rvm\/|RvmPcf|RvmSupport|RvmTag/i.test(text),
+      `${file} must not import or reference RVM-specific modules`
+    );
+  }
+
+  console.log('[PASS] InputXML routing no-RVM boundary passed.');
+}
+
+try {
+  run();
+} catch (error) {
+  console.error('[FAIL] InputXML routing no-RVM boundary failed.');
+  console.error(error);
+  process.exit(1);
+}
+```
+
+---
+
+# Mandatory verification commands
+
+Run these exactly:
+
+```bash
+cd PCF_GLB_Viewer_Conv
+
+node viewer/tests/inputxml-import-routes.test.js
+node viewer/tests/native-xml-direct-builder-smoke.test.js
+node viewer/tests/import-from-raw-parser-native-route-regression.test.js
+node viewer/tests/inputxml-routing-no-rvm-import.test.js
+```
+
+If the repo has Vitest configured, also run:
+
+```bash
+pnpm vitest run \
+  viewer/tests/inputxml-import-routes.test.js \
+  viewer/tests/native-xml-direct-builder-smoke.test.js \
+  viewer/tests/import-from-raw-parser-native-route-regression.test.js \
+  viewer/tests/inputxml-routing-no-rvm-import.test.js
+```
+
+If `pnpm` is unavailable, run:
+
+```bash
+npx vitest run \
+  viewer/tests/inputxml-import-routes.test.js \
+  viewer/tests/native-xml-direct-builder-smoke.test.js \
+  viewer/tests/import-from-raw-parser-native-route-regression.test.js \
+  viewer/tests/inputxml-routing-no-rvm-import.test.js
+```
+
+Do not claim Vitest passed if Vitest is not installed. State clearly:
+
+```text
+Vitest not available in environment; node tests passed.
+```
+
+---
+
+# Smoke test requirement
+
+After code change, perform this manual smoke check in browser if possible:
+
+```text
+1. Open app.
+2. Open normal 3D Viewer.
+3. Import a known XML file.
+4. Confirm geometry renders as before.
+5. Confirm supports still appear.
+6. Confirm no console error from ImportFromRawParser.js.
+7. Confirm 3D RVM Viewer was not changed.
+```
+
+If browser smoke cannot be run, state:
+
+```text
+Browser smoke not run in this environment.
+```
+
+---
+
+# Required final report format
+
+When complete, report exactly:
+
+```text
+Agent A complete.
+
+Changed files:
+- viewer/xml-compare/InputXmlImportRoutes.js
+- viewer/js/pcf2glb/import/NativeXmlDirectBuilder.js
+- viewer/js/pcf2glb/import/ImportFromRawParser.js
+- viewer/tests/inputxml-import-routes.test.js
+- viewer/tests/native-xml-direct-builder-smoke.test.js
+- viewer/tests/import-from-raw-parser-native-route-regression.test.js
+- viewer/tests/inputxml-routing-no-rvm-import.test.js
+
+Tests:
+[PASS/FAIL] node viewer/tests/inputxml-import-routes.test.js
+[PASS/FAIL] node viewer/tests/native-xml-direct-builder-smoke.test.js
+[PASS/FAIL] node viewer/tests/import-from-raw-parser-native-route-regression.test.js
+[PASS/FAIL] node viewer/tests/inputxml-routing-no-rvm-import.test.js
+[PASS/FAIL/SKIPPED] vitest command
+[PASS/FAIL/SKIPPED] browser smoke
+
+Boundary:
+- No RVM files touched: YES/NO
+- ImportFromRawParser.js ACCDB/MDB/PDF/STEP behavior changed: YES/NO
+- Native XML builder extracted without behavior loss: YES/NO
+
+git diff --name-only origin/main...HEAD:
+<paste output>
+```
+
+---
+
+# Pass criteria
+
+This agent is accepted only when:
+
+```text
+Route constants exist.
+Invalid route defaults to UXML_ROUND_TRIP.
+Native XML builder is extracted.
+ImportFromRawParser.js still routes XML through the native builder.
+ACCDB/MDB/PDF/STEP branches remain intact.
+All required node tests pass.
+Vitest run attempted if available.
+No RVM-specific imports/references added.
+No unrelated files modified.
+```
+
+After Agent A passes, proceed to **Agent B — UXML Round Trip Route**.
+------------------------------------------------------------
+Some earlier uploaded files have expired; re-upload only if the next agent must inspect those exact local files. Below is **Agent B prompt only**.
+
+---
+
+# Agent B Prompt — InputXML UXML Round Trip Route
+
+## Mission
+
+Implement the **UXML Round Trip** route for InputXML import.
+
+This is the second slice after Agent A.
+
+Input route target:
+
+```text
+InputXML text
+→ detect/map to UXML
+→ validate UXML
+→ build face model
+→ build universal topology graph
+→ build ray topology graph
+→ compare topology graphs
+→ topology decision gate
+→ convert UXML to normal viewer components
+→ return common route result
+```
+
+Use the same architectural shape as the existing JSON/RVM→PCF UXML topology bridge, but **do not import RVM modules**. The existing RVM bridge performs UXML validation, face model generation, universal graph, ray graph, graph comparison, and topology decision. Use that as pattern only. 
+
+Relevant existing UXML modules already exist:
+
+```text
+viewer/uxml/UxmlInputXmlSchemaMapper.js
+viewer/uxml/UxmlValidationGate.js
+viewer/uxml/UxmlFaceModelBuilder.js
+viewer/uxml/UxmlUniversalTopoGraphBuilder.js
+viewer/uxml/UxmlRayTopoGraphBuilder.js
+viewer/uxml/UxmlTopoGraphComparator.js
+viewer/uxml/UxmlTopologyDecisionGate.js
+```
+
+The InputXML mapper export exists in `UxmlInputXmlSchemaMapper.js`. 
+The face model, universal graph, and ray graph builders exist in the UXML layer.
+
+---
+
+# Mandatory boundaries
+
+## Do not touch these files
+
+```text
+viewer/tabs/viewer3d-rvm-tab.js
+viewer/rvm/**
+viewer/rvm-viewer/**
+viewer/rvm-pcf-extract/**
+```
+
+## Do not import from these paths
+
+```text
+viewer/rvm/**
+viewer/rvm-viewer/**
+viewer/rvm-pcf-extract/**
+../rvm/**
+../rvm-viewer/**
+../rvm-pcf-extract/**
+```
+
+## Do not emit PCF
+
+This route is for import/render/compare only.
+
+Do not call:
+
+```text
+buildPcfFromContinuity
+pcfxDocumentFromPcfText
+PCF emitter
+CII emitter
+```
+
+---
+
+# Files to create
+
+## 1. Create
+
+```text
+viewer/xml-compare/InputXmlUxmlToViewerComponents.js
+```
+
+Purpose: convert UXML components into the same viewer-component shape used by normal 3D Viewer.
+
+Required export:
+
+```js
+export function uxmlToViewerComponents(uxml, options = {}) {
+  // returns viewer components array
+}
+```
+
+Required output component shape:
+
+```js
+{
+  id,
+  type,
+  points: [
+    { x, y, z, bore },
+    { x, y, z, bore }
+  ],
+  centrePoint,
+  branch1Point,
+  coOrds,
+  bore,
+  fixingAction,
+  attributes,
+  source
+}
+```
+
+Minimum implementation rules:
+
+```text
+- Read UXML components safely.
+- Preserve component id/ref/seq/line/pipeline in attributes.
+- Convert anchors/ports into points where available.
+- For PIPE/BEND/ELBOW/REDUCER/TEE/OLET/VALVE/FLANGE, use EP1/EP2 if available.
+- For SUPPORT/ANCI, use support coordinate / first anchor / first point as coOrds.
+- Do not throw on incomplete components; add diagnostics through options.diagnostics if provided.
+```
+
+Suggested helper pattern:
+
+```js
+function clean(value) {
+  return String(value ?? '').trim();
+}
+
+function numberOrNull(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function pointFromAnchor(anchor) {
+  const p = anchor?.point || anchor?.coord || anchor?.position || anchor;
+  const x = numberOrNull(p?.x);
+  const y = numberOrNull(p?.y);
+  const z = numberOrNull(p?.z);
+  if (x == null || y == null || z == null) return null;
+  return { x, y, z };
+}
+```
+
+---
+
+## 2. Create
+
+```text
+viewer/xml-compare/InputXmlUxmlRoundTripRoute.js
+```
+
+Required exports:
+
+```js
+export function runInputXmlUxmlRoundTrip(xmlText, options = {}) {
+  // returns full route result
+}
+
+export function flattenInputXmlUxmlDiagnostics(parts = {}) {
+  // returns normalized diagnostics array
+}
+```
+
+Implementation skeleton:
+
+```js
+import { mapInputXmlToUxml } from '../uxml/UxmlInputXmlSchemaMapper.js';
+import { validateUxmlDocument } from '../uxml/UxmlValidationGate.js';
+import { buildUxmlFaceModel } from '../uxml/UxmlFaceModelBuilder.js';
+import { buildUxmlUniversalTopoGraph } from '../uxml/UxmlUniversalTopoGraphBuilder.js';
+import { buildUxmlRayTopoGraph } from '../uxml/UxmlRayTopoGraphBuilder.js';
+import { compareUxmlTopoGraphs } from '../uxml/UxmlTopoGraphComparator.js';
+import { decideUxmlTopologyAcceptance } from '../uxml/UxmlTopologyDecisionGate.js';
+import { uxmlToViewerComponents } from './InputXmlUxmlToViewerComponents.js';
+```
+
+Required route result shape:
+
+```js
+{
+  schema: 'inputxml-uxml-roundtrip-route/v1',
+  ok,
+  route: 'UXML_ROUND_TRIP',
+  fileName,
+  profile,
+  options,
+  uxml,
+  validation,
+  faceModel,
+  universalGraph,
+  rayGraph,
+  comparison,
+  topologyDecision,
+  components,
+  diagnostics,
+  summary
+}
+```
+
+Required options normalization:
+
+```js
+const normalizedOptions = {
+  fileName: options.fileName || 'input.xml',
+  connectToleranceMm: clampNumber(options.connectToleranceMm, 0, 1000, 6),
+  fixToleranceMm: clampNumber(options.fixToleranceMm, 0, 100, 25),
+  maxRayLengthMm: clampNumber(options.maxRayLengthMm, 1, 5000, 500),
+  tubeToleranceMm: clampNumber(options.tubeToleranceMm ?? options.perpendicularToleranceMm, 0, 1000, 12),
+  allowPartialImport: options.allowPartialImport === true,
+  allowPartialExport: options.allowPartialExport === true,
+};
+```
+
+Required processing sequence:
+
+```js
+const uxml = mapInputXmlToUxml(xmlText, {
+  sourceName: normalizedOptions.fileName,
+  fileName: normalizedOptions.fileName,
+});
+
+const validation = validateUxmlDocument(uxml);
+
+const faceModel = buildUxmlFaceModel(uxml, {
+  allowPartial: true,
+});
+
+const universalGraph = buildUxmlUniversalTopoGraph(uxml, {
+  faceModel,
+  allowPartialFaceModel: true,
+  allowBlockedFaceModel: true,
+  connectToleranceMm: normalizedOptions.connectToleranceMm,
+});
+
+const rayGraph = buildUxmlRayTopoGraph(uxml, {
+  faceModel,
+  universalGraph,
+  allowPartialFaceModel: true,
+  allowBlockedFaceModel: true,
+  maxRayLengthMm: normalizedOptions.maxRayLengthMm,
+  tubeToleranceMm: normalizedOptions.tubeToleranceMm,
+});
+
+const comparison = compareUxmlTopoGraphs(uxml, {
+  universalGraph,
+  rayGraph,
+  allowBlockedGraphs: true,
+});
+
+const topologyDecision = decideUxmlTopologyAcceptance(uxml, {
+  comparison,
+  allowPartialExport: normalizedOptions.allowPartialExport,
+  acceptUniversalOnly: true,
+  allowSafeRayPromotions: true,
+  allowFaceProximityPromotions: false,
+  maxPromotionDistanceAlongRayMm: normalizedOptions.maxRayLengthMm,
+  maxPromotionPerpendicularMissMm: normalizedOptions.tubeToleranceMm,
+});
+
+const diagnostics = flattenInputXmlUxmlDiagnostics({
+  validation,
+  faceModel,
+  universalGraph,
+  rayGraph,
+  comparison,
+  topologyDecision,
+});
+
+const components = uxmlToViewerComponents(uxml, {
+  diagnostics,
+  faceModel,
+  universalGraph,
+  rayGraph,
+  topologyDecision,
+});
+```
+
+`ok` rule:
+
+```js
+const exportAllowed = topologyDecision?.exportAllowed === true;
+const ok = exportAllowed || normalizedOptions.allowPartialImport === true;
+```
+
+Required summary:
+
+```js
+summary: {
+  route: 'UXML_ROUND_TRIP',
+  componentCount: components.length,
+  uxmlComponentCount,
+  anchorCount,
+  portCount,
+  universalNodeCount,
+  universalEdgeCount,
+  disconnectedCount,
+  rayCandidateCount,
+  rayConnectionCount,
+  promotionCandidateCount,
+  manualReviewCount,
+  exportAllowed,
+  outputBridgeReady
+}
+```
+
+---
+
+# Tests to add
+
+## 3. Add
+
+```text
+viewer/tests/inputxml-uxml-to-viewer-components.test.js
+```
+
+Behavior test:
+
+```js
+import assert from 'assert/strict';
+
+async function run() {
+  console.log('--- inputxml-uxml-to-viewer-components.test.js ---');
+
+  const { uxmlToViewerComponents } = await import('../xml-compare/InputXmlUxmlToViewerComponents.js');
+
+  const uxml = {
+    schema: 'uxml/test',
+    components: [
+      {
+        id: 'C1',
+        type: 'PIPE',
+        anchors: [
+          { role: 'EP1', point: { x: 0, y: 0, z: 0 } },
+          { role: 'EP2', point: { x: 100, y: 0, z: 0 } },
+        ],
+        attributes: {
+          refNo: '10',
+          seqNo: '1',
+          pipelineRef: 'LINE-1',
+          bore: 100,
+        },
+      },
+      {
+        id: 'S1',
+        type: 'SUPPORT',
+        anchors: [
+          { role: 'SUPPORT', point: { x: 50, y: 0, z: -100 } },
+        ],
+        attributes: {
+          supportKind: 'GUIDE',
+        },
+      },
+    ],
+  };
+
+  const diagnostics = [];
+  const components = uxmlToViewerComponents(uxml, { diagnostics });
+
+  assert.equal(components.length, 2);
+
+  const pipe = components.find(c => c.id === 'C1');
+  assert.ok(pipe);
+  assert.equal(pipe.type, 'PIPE');
+  assert.equal(pipe.points.length, 2);
+  assert.equal(pipe.points[0].x, 0);
+  assert.equal(pipe.points[1].x, 100);
+  assert.equal(pipe.attributes.refNo, '10');
+
+  const support = components.find(c => c.id === 'S1');
+  assert.ok(support);
+  assert.equal(support.type, 'SUPPORT');
+  assert.equal(support.coOrds.x, 50);
+
+  console.log('[PASS] InputXML UXML to viewer components passed.');
+}
+
+run().catch(error => {
+  console.error('[FAIL] InputXML UXML to viewer components failed.');
+  console.error(error);
+  process.exit(1);
+});
+```
+
+---
+
+## 4. Add
+
+```text
+viewer/tests/inputxml-uxml-roundtrip-route.test.js
+```
+
+Behavior-lite test:
+
+```js
+import assert from 'assert/strict';
+
+async function run() {
+  console.log('--- inputxml-uxml-roundtrip-route.test.js ---');
+
+  const { runInputXmlUxmlRoundTrip } = await import('../xml-compare/InputXmlUxmlRoundTripRoute.js');
+
+  const xmlText = `
+    <InputXML>
+      <Components>
+        <Component id="P1" type="PIPE" pipelineRef="LINE-1" refNo="10" seqNo="1" ep1="0 0 0" ep2="100 0 0" bore="100" />
+      </Components>
+    </InputXML>
+  `;
+
+  const result = runInputXmlUxmlRoundTrip(xmlText, {
+    fileName: 'sample-inputxml.xml',
+    allowPartialImport: true,
+  });
+
+  assert.equal(result.schema, 'inputxml-uxml-roundtrip-route/v1');
+  assert.equal(result.route, 'UXML_ROUND_TRIP');
+  assert.ok(result.uxml, 'result must include uxml');
+  assert.ok(result.validation, 'result must include validation');
+  assert.ok(result.faceModel, 'result must include faceModel');
+  assert.ok(result.universalGraph, 'result must include universalGraph');
+  assert.ok(result.rayGraph, 'result must include rayGraph');
+  assert.ok(result.comparison, 'result must include comparison');
+  assert.ok(result.topologyDecision, 'result must include topologyDecision');
+  assert.ok(Array.isArray(result.components), 'result.components must be array');
+  assert.ok(Array.isArray(result.diagnostics), 'result.diagnostics must be array');
+  assert.equal(result.summary.route, 'UXML_ROUND_TRIP');
+
+  console.log('[PASS] InputXML UXML roundtrip route passed.');
+}
+
+run().catch(error => {
+  console.error('[FAIL] InputXML UXML roundtrip route failed.');
+  console.error(error);
+  process.exit(1);
+});
+```
+
+---
+
+## 5. Add
+
+```text
+viewer/tests/inputxml-uxml-roundtrip-diagnostics.test.js
+```
+
+Required checks:
+
+```js
+import assert from 'assert/strict';
+
+async function run() {
+  console.log('--- inputxml-uxml-roundtrip-diagnostics.test.js ---');
+
+  const {
+    flattenInputXmlUxmlDiagnostics,
+  } = await import('../xml-compare/InputXmlUxmlRoundTripRoute.js');
+
+  const diagnostics = flattenInputXmlUxmlDiagnostics({
+    validation: {
+      diagnostics: [
+        { severity: 'ERROR', code: 'VAL-1', message: 'Validation issue' },
+      ],
+    },
+    faceModel: {
+      diagnostics: [
+        { level: 'WARN', code: 'FACE-1', message: 'Face issue' },
+      ],
+    },
+    universalGraph: {
+      diagnostics: [
+        { severity: 'INFO', code: 'GRAPH-1', message: 'Graph issue' },
+      ],
+    },
+  });
+
+  assert.equal(diagnostics.length, 3);
+  assert.equal(diagnostics[0]._source, 'validation');
+  assert.equal(diagnostics[1]._source, 'faceModel');
+  assert.equal(diagnostics[1].severity, 'WARNING');
+  assert.equal(diagnostics[2]._source, 'universalGraph');
+
+  console.log('[PASS] InputXML UXML roundtrip diagnostics passed.');
+}
+
+run().catch(error => {
+  console.error('[FAIL] InputXML UXML roundtrip diagnostics failed.');
+  console.error(error);
+  process.exit(1);
+});
+```
+
+---
+
+## 6. Add
+
+```text
+viewer/tests/inputxml-uxml-roundtrip-no-rvm-import.test.js
+```
+
+```js
+import assert from 'assert/strict';
+import fs from 'fs';
+import path from 'path';
+
+function read(file) {
+  return fs.readFileSync(path.resolve(file), 'utf-8');
+}
+
+function run() {
+  console.log('--- inputxml-uxml-roundtrip-no-rvm-import.test.js ---');
+
+  const files = [
+    'viewer/xml-compare/InputXmlUxmlRoundTripRoute.js',
+    'viewer/xml-compare/InputXmlUxmlToViewerComponents.js',
+  ];
+
+  for (const file of files) {
+    const text = read(file);
+
+    assert.ok(
+      !/viewer3d-rvm-tab|rvm-viewer|rvm-pcf-extract|viewer\/rvm\/|RvmPcf|RvmSupport|RvmTag/i.test(text),
+      `${file} must not import or reference RVM-specific modules`
+    );
+
+    assert.ok(
+      !/buildPcfFromContinuity|pcfxDocumentFromPcfText|PcfEmitter|CII/i.test(text),
+      `${file} must not emit PCF/CII`
+    );
+  }
+
+  console.log('[PASS] InputXML UXML roundtrip no-RVM/no-emitter boundary passed.');
+}
+
+try {
+  run();
+} catch (error) {
+  console.error('[FAIL] InputXML UXML roundtrip no-RVM/no-emitter boundary failed.');
+  console.error(error);
+  process.exit(1);
+}
+```
+
+---
+
+# Mandatory verification commands
+
+Run these exactly:
+
+```bash
+cd PCF_GLB_Viewer_Conv
+
+node viewer/tests/inputxml-uxml-to-viewer-components.test.js
+node viewer/tests/inputxml-uxml-roundtrip-route.test.js
+node viewer/tests/inputxml-uxml-roundtrip-diagnostics.test.js
+node viewer/tests/inputxml-uxml-roundtrip-no-rvm-import.test.js
+```
+
+Also re-run Agent A tests to confirm no regression:
+
+```bash
+node viewer/tests/inputxml-import-routes.test.js
+node viewer/tests/native-xml-direct-builder-smoke.test.js
+node viewer/tests/import-from-raw-parser-native-route-regression.test.js
+node viewer/tests/inputxml-routing-no-rvm-import.test.js
+```
+
+If Vitest is available, run:
+
+```bash
+pnpm vitest run \
+  viewer/tests/inputxml-uxml-to-viewer-components.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-route.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-diagnostics.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-no-rvm-import.test.js \
+  viewer/tests/inputxml-import-routes.test.js \
+  viewer/tests/native-xml-direct-builder-smoke.test.js \
+  viewer/tests/import-from-raw-parser-native-route-regression.test.js \
+  viewer/tests/inputxml-routing-no-rvm-import.test.js
+```
+
+If `pnpm` is unavailable, run:
+
+```bash
+npx vitest run \
+  viewer/tests/inputxml-uxml-to-viewer-components.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-route.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-diagnostics.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-no-rvm-import.test.js \
+  viewer/tests/inputxml-import-routes.test.js \
+  viewer/tests/native-xml-direct-builder-smoke.test.js \
+  viewer/tests/import-from-raw-parser-native-route-regression.test.js \
+  viewer/tests/inputxml-routing-no-rvm-import.test.js
+```
+
+Do not claim Vitest passed if it is unavailable. Report:
+
+```text
+Vitest not available in environment; node tests passed.
+```
+
+---
+
+# Smoke test requirement
+
+Browser smoke is optional for Agent B because UI routing is not implemented yet.
+
+Still, perform this smoke check if possible:
+
+```text
+1. Open browser console.
+2. Import InputXML through a temporary node/browser harness if available.
+3. Confirm UXML route result contains components.
+4. Confirm no PCF/CII export path is invoked.
+5. Confirm no RVM module is loaded.
+```
+
+If not possible, report:
+
+```text
+Browser smoke not run in this environment; UI not implemented in Agent B slice.
+```
+
+---
+
+# Required final report format
+
+When complete, report exactly:
+
+```text
+Agent B complete.
+
+Changed files:
+- viewer/xml-compare/InputXmlUxmlToViewerComponents.js
+- viewer/xml-compare/InputXmlUxmlRoundTripRoute.js
+- viewer/tests/inputxml-uxml-to-viewer-components.test.js
+- viewer/tests/inputxml-uxml-roundtrip-route.test.js
+- viewer/tests/inputxml-uxml-roundtrip-diagnostics.test.js
+- viewer/tests/inputxml-uxml-roundtrip-no-rvm-import.test.js
+
+Tests:
+[PASS/FAIL] node viewer/tests/inputxml-uxml-to-viewer-components.test.js
+[PASS/FAIL] node viewer/tests/inputxml-uxml-roundtrip-route.test.js
+[PASS/FAIL] node viewer/tests/inputxml-uxml-roundtrip-diagnostics.test.js
+[PASS/FAIL] node viewer/tests/inputxml-uxml-roundtrip-no-rvm-import.test.js
+[PASS/FAIL] Agent A regression node tests
+[PASS/FAIL/SKIPPED] vitest command
+[PASS/FAIL/SKIPPED] browser smoke
+
+Boundary:
+- No RVM files touched: YES/NO
+- No RVM imports added: YES/NO
+- No PCF/CII emitter called: YES/NO
+- UXML validation/face/universal/ray/comparison/decision sequence implemented: YES/NO
+
+git diff --name-only origin/main...HEAD:
+<paste output>
+```
+
+---
+
+# Pass criteria
+
+Agent B is accepted only when:
+
+```text
+InputXmlUxmlRoundTripRoute.js exists.
+InputXmlUxmlToViewerComponents.js exists.
+InputXML maps to UXML using UxmlInputXmlSchemaMapper.
+UXML validation runs.
+Face model runs.
+Universal topology graph runs.
+Ray topology graph runs.
+Topology comparison runs.
+Topology decision gate runs.
+Viewer components are returned.
+Diagnostics are flattened with _source.
+All required node tests pass.
+Vitest run attempted if available.
+No RVM-specific import/reference added.
+No PCF/CII emitter added.
+No unrelated files modified.
+```
+
+After Agent B passes, proceed to **Agent C — Common InputXML Import Router**.
+----------------------------------------------------------
+Some earlier uploaded files have expired; re-upload only if the agent needs exact local-file inspection. Below is **Agent C prompt only**.
+
+---
+
+# Agent C Prompt — Common InputXML Import Router
+
+## Mission
+
+Implement the **common InputXML import router** that selects between:
+
+```text
+1. NATIVE_XML_BUILDER
+2. UXML_ROUND_TRIP
+```
+
+This agent must connect Agent A and Agent B outputs into one stable public API.
+
+Do **not** implement UI in this slice.
+Do **not** modify 3D Viewer panel files in this slice.
+Do **not** import RVM modules.
+
+---
+
+# Prerequisite
+
+Start only after Agent A and Agent B are complete.
+
+Required existing files:
+
+```text
+viewer/xml-compare/InputXmlImportRoutes.js
+viewer/js/pcf2glb/import/NativeXmlDirectBuilder.js
+viewer/xml-compare/InputXmlUxmlRoundTripRoute.js
+viewer/xml-compare/InputXmlUxmlToViewerComponents.js
+```
+
+---
+
+# Mandatory boundaries
+
+## Do not touch
+
+```text
+viewer/tabs/viewer3d-rvm-tab.js
+viewer/rvm/**
+viewer/rvm-viewer/**
+viewer/rvm-pcf-extract/**
+viewer/tabs/viewer3d-xml-compare-panel.js
+viewer/styles/viewer3d.css
+```
+
+## Do not import
+
+```text
+viewer/rvm/**
+viewer/rvm-viewer/**
+viewer/rvm-pcf-extract/**
+../rvm/**
+../rvm-viewer/**
+../rvm-pcf-extract/**
+```
+
+## Do not emit PCF/CII
+
+Do not call:
+
+```text
+buildPcfFromContinuity
+pcfxDocumentFromPcfText
+PCF emitter
+CII emitter
+```
+
+---
+
+# Files to create
+
+## 1. Create
+
+```text
+viewer/xml-compare/InputXmlImportRouter.js
+```
+
+Required exports:
+
+```js
+export function importInputXmlByRoute(xmlText, options = {}) {}
+export function normalizeInputXmlImportResult(result, options = {}) {}
+export function inputXmlRouteDiagnostics(route, diagnostics = []) {}
+```
+
+Implementation outline:
+
+```js
+import { parse } from '../parser/caesar-parser.js';
+import {
+  INPUTXML_IMPORT_ROUTES,
+  normalizeInputXmlImportRoute,
+  inputXmlImportRouteLabel,
+} from './InputXmlImportRoutes.js';
+
+import { buildNativeXmlDirectData } from '../js/pcf2glb/import/NativeXmlDirectBuilder.js';
+import { runInputXmlUxmlRoundTrip } from './InputXmlUxmlRoundTripRoute.js';
+
+function clean(value) {
+  return String(value ?? '').trim();
+}
+
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+export function inputXmlRouteDiagnostics(route, diagnostics = []) {
+  return [
+    {
+      severity: 'INFO',
+      code: `INPUTXML-ROUTE-${route}`,
+      message: `InputXML imported via ${inputXmlImportRouteLabel(route)}.`,
+      route,
+    },
+    ...asArray(diagnostics),
+  ];
+}
+
+export function normalizeInputXmlImportResult(result, options = {}) {
+  const route = normalizeInputXmlImportRoute(result?.route || options.route);
+  const components = asArray(result?.components || result?.directPcfData?.components);
+
+  return {
+    schema: 'inputxml-import-router/v1',
+    ok: result?.ok !== false,
+    route,
+    routeLabel: inputXmlImportRouteLabel(route),
+    fileName: clean(result?.fileName || options.fileName || 'input.xml'),
+    directPcfData: result?.directPcfData || {
+      kind: 'inputxml-router-direct',
+      fileName: clean(options.fileName || 'input.xml'),
+      components,
+      parsed: result?.parsed || {},
+      messageCircleNodes: [],
+      messageSquareNodes: [],
+    },
+    components,
+    diagnostics: inputXmlRouteDiagnostics(route, result?.diagnostics),
+    native: result?.native || null,
+    uxmlRoundTrip: result?.uxmlRoundTrip || null,
+    summary: result?.summary || {
+      route,
+      componentCount: components.length,
+    },
+  };
+}
+
+export function importInputXmlByRoute(xmlText, options = {}) {
+  const route = normalizeInputXmlImportRoute(options.route);
+  const fileName = clean(options.fileName || 'input.xml');
+
+  if (!clean(xmlText)) {
+    return normalizeInputXmlImportResult({
+      ok: false,
+      route,
+      fileName,
+      components: [],
+      diagnostics: [{
+        severity: 'ERROR',
+        code: 'INPUTXML-EMPTY',
+        message: 'InputXML text is empty.',
+      }],
+      summary: {
+        route,
+        componentCount: 0,
+        failed: true,
+      },
+    }, options);
+  }
+
+  if (route === INPUTXML_IMPORT_ROUTES.NATIVE_XML_BUILDER) {
+    const parsed = parse(xmlText, fileName);
+    const directPcfData = buildNativeXmlDirectData(parsed, fileName, options.defaults || {});
+    const components = asArray(directPcfData?.components);
+
+    return normalizeInputXmlImportResult({
+      ok: true,
+      route,
+      fileName,
+      directPcfData,
+      components,
+      native: {
+        parsedFormat: parsed?.format || '',
+        componentCount: components.length,
+      },
+      diagnostics: [{
+        severity: 'INFO',
+        code: 'INPUTXML-NATIVE-XML-BUILDER',
+        message: 'InputXML imported through the native XML builder.',
+      }],
+      summary: {
+        route,
+        routeLabel: inputXmlImportRouteLabel(route),
+        componentCount: components.length,
+        parsedFormat: parsed?.format || '',
+        nativeBuilder: true,
+      },
+    }, options);
+  }
+
+  const roundTrip = runInputXmlUxmlRoundTrip(xmlText, {
+    ...options,
+    fileName,
+  });
+
+  const components = asArray(roundTrip?.components);
+
+  return normalizeInputXmlImportResult({
+    ok: roundTrip?.ok !== false,
+    route,
+    fileName,
+    directPcfData: {
+      kind: 'inputxml-uxml-roundtrip-direct',
+      fileName,
+      components,
+      parsed: {
+        route,
+        profile: roundTrip?.profile || '',
+        uxml: roundTrip?.uxml || null,
+        topologyDecision: roundTrip?.topologyDecision || null,
+      },
+      messageCircleNodes: [],
+      messageSquareNodes: [],
+    },
+    components,
+    uxmlRoundTrip: roundTrip,
+    diagnostics: roundTrip?.diagnostics || [],
+    summary: {
+      ...(roundTrip?.summary || {}),
+      route,
+      routeLabel: inputXmlImportRouteLabel(route),
+      componentCount: components.length,
+      uxmlRoundTrip: true,
+    },
+  }, options);
+}
+```
+
+---
+
+# Tests to add
+
+## 2. Add
+
+```text
+viewer/tests/inputxml-import-router-native.test.js
+```
+
+```js
+import assert from 'assert/strict';
+
+async function run() {
+  console.log('--- inputxml-import-router-native.test.js ---');
+
+  const {
+    importInputXmlByRoute,
+  } = await import('../xml-compare/InputXmlImportRouter.js');
+
+  const xmlText = `
+    <InputXML>
+      <Components>
+        <Component id="P1" type="PIPE" pipelineRef="LINE-1" refNo="10" seqNo="1" ep1="0 0 0" ep2="100 0 0" bore="100" />
+      </Components>
+    </InputXML>
+  `;
+
+  const result = importInputXmlByRoute(xmlText, {
+    route: 'NATIVE_XML_BUILDER',
+    fileName: 'native-input.xml',
+    allowPartialImport: true,
+  });
+
+  assert.equal(result.schema, 'inputxml-import-router/v1');
+  assert.equal(result.route, 'NATIVE_XML_BUILDER');
+  assert.equal(result.routeLabel, 'Native XML Builder');
+  assert.equal(result.fileName, 'native-input.xml');
+  assert.ok(result.directPcfData, 'native route must return directPcfData');
+  assert.ok(Array.isArray(result.components), 'native route components must be array');
+  assert.ok(Array.isArray(result.diagnostics), 'native route diagnostics must be array');
+  assert.ok(result.summary.nativeBuilder, 'native route summary must identify native builder');
+
+  console.log('[PASS] InputXML import router native route passed.');
+}
+
+run().catch(error => {
+  console.error('[FAIL] InputXML import router native route failed.');
+  console.error(error);
+  process.exit(1);
+});
+```
+
+---
+
+## 3. Add
+
+```text
+viewer/tests/inputxml-import-router-uxml.test.js
+```
+
+```js
+import assert from 'assert/strict';
+
+async function run() {
+  console.log('--- inputxml-import-router-uxml.test.js ---');
+
+  const {
+    importInputXmlByRoute,
+  } = await import('../xml-compare/InputXmlImportRouter.js');
+
+  const xmlText = `
+    <InputXML>
+      <Components>
+        <Component id="P1" type="PIPE" pipelineRef="LINE-1" refNo="10" seqNo="1" ep1="0 0 0" ep2="100 0 0" bore="100" />
+      </Components>
+    </InputXML>
+  `;
+
+  const result = importInputXmlByRoute(xmlText, {
+    route: 'UXML_ROUND_TRIP',
+    fileName: 'uxml-input.xml',
+    allowPartialImport: true,
+  });
+
+  assert.equal(result.schema, 'inputxml-import-router/v1');
+  assert.equal(result.route, 'UXML_ROUND_TRIP');
+  assert.equal(result.routeLabel, 'UXML Round Trip');
+  assert.equal(result.fileName, 'uxml-input.xml');
+  assert.ok(result.directPcfData, 'UXML route must return directPcfData wrapper');
+  assert.ok(result.uxmlRoundTrip, 'UXML route must include uxmlRoundTrip payload');
+  assert.ok(Array.isArray(result.components), 'UXML route components must be array');
+  assert.ok(Array.isArray(result.diagnostics), 'UXML route diagnostics must be array');
+  assert.ok(result.summary.uxmlRoundTrip, 'UXML route summary must identify round trip');
+
+  console.log('[PASS] InputXML import router UXML route passed.');
+}
+
+run().catch(error => {
+  console.error('[FAIL] InputXML import router UXML route failed.');
+  console.error(error);
+  process.exit(1);
+});
+```
+
+---
+
+## 4. Add
+
+```text
+viewer/tests/inputxml-import-router-schema.test.js
+```
+
+```js
+import assert from 'assert/strict';
+
+async function run() {
+  console.log('--- inputxml-import-router-schema.test.js ---');
+
+  const {
+    normalizeInputXmlImportResult,
+    inputXmlRouteDiagnostics,
+  } = await import('../xml-compare/InputXmlImportRouter.js');
+
+  const normalized = normalizeInputXmlImportResult({
+    ok: true,
+    route: 'BAD_VALUE',
+    fileName: 'schema.xml',
+    components: [{ id: 'C1', type: 'PIPE' }],
+    diagnostics: [{ severity: 'WARNING', code: 'TEST', message: 'Test warning' }],
+  });
+
+  assert.equal(normalized.schema, 'inputxml-import-router/v1');
+  assert.equal(normalized.route, 'UXML_ROUND_TRIP', 'bad route must normalize to UXML');
+  assert.equal(normalized.routeLabel, 'UXML Round Trip');
+  assert.equal(normalized.fileName, 'schema.xml');
+  assert.equal(normalized.components.length, 1);
+  assert.ok(normalized.directPcfData, 'normalized result must have directPcfData wrapper');
+  assert.ok(Array.isArray(normalized.diagnostics));
+  assert.equal(normalized.diagnostics[0].code, 'INPUTXML-ROUTE-UXML_ROUND_TRIP');
+
+  const diagnostics = inputXmlRouteDiagnostics('NATIVE_XML_BUILDER', [
+    { severity: 'INFO', code: 'X', message: 'Y' },
+  ]);
+
+  assert.equal(diagnostics.length, 2);
+  assert.equal(diagnostics[0].code, 'INPUTXML-ROUTE-NATIVE_XML_BUILDER');
+  assert.equal(diagnostics[1].code, 'X');
+
+  console.log('[PASS] InputXML import router schema passed.');
+}
+
+run().catch(error => {
+  console.error('[FAIL] InputXML import router schema failed.');
+  console.error(error);
+  process.exit(1);
+});
+```
+
+---
+
+## 5. Add
+
+```text
+viewer/tests/inputxml-import-router-no-rvm-import.test.js
+```
+
+```js
+import assert from 'assert/strict';
+import fs from 'fs';
+import path from 'path';
+
+function read(file) {
+  return fs.readFileSync(path.resolve(file), 'utf-8');
+}
+
+function run() {
+  console.log('--- inputxml-import-router-no-rvm-import.test.js ---');
+
+  const files = [
+    'viewer/xml-compare/InputXmlImportRouter.js',
+  ];
+
+  for (const file of files) {
+    const text = read(file);
+
+    assert.ok(
+      !/viewer3d-rvm-tab|rvm-viewer|rvm-pcf-extract|viewer\/rvm\/|RvmPcf|RvmSupport|RvmTag/i.test(text),
+      `${file} must not import or reference RVM-specific modules`
+    );
+
+    assert.ok(
+      !/buildPcfFromContinuity|pcfxDocumentFromPcfText|PcfEmitter|CII/i.test(text),
+      `${file} must not emit PCF/CII`
+    );
+  }
+
+  console.log('[PASS] InputXML import router no-RVM/no-emitter boundary passed.');
+}
+
+try {
+  run();
+} catch (error) {
+  console.error('[FAIL] InputXML import router no-RVM/no-emitter boundary failed.');
+  console.error(error);
+  process.exit(1);
+}
+```
+
+---
+
+# Mandatory verification commands
+
+Run Agent C tests:
+
+```bash
+cd PCF_GLB_Viewer_Conv
+
+node viewer/tests/inputxml-import-router-native.test.js
+node viewer/tests/inputxml-import-router-uxml.test.js
+node viewer/tests/inputxml-import-router-schema.test.js
+node viewer/tests/inputxml-import-router-no-rvm-import.test.js
+```
+
+Re-run Agent A and Agent B tests:
+
+```bash
+node viewer/tests/inputxml-import-routes.test.js
+node viewer/tests/native-xml-direct-builder-smoke.test.js
+node viewer/tests/import-from-raw-parser-native-route-regression.test.js
+node viewer/tests/inputxml-routing-no-rvm-import.test.js
+
+node viewer/tests/inputxml-uxml-to-viewer-components.test.js
+node viewer/tests/inputxml-uxml-roundtrip-route.test.js
+node viewer/tests/inputxml-uxml-roundtrip-diagnostics.test.js
+node viewer/tests/inputxml-uxml-roundtrip-no-rvm-import.test.js
+```
+
+If Vitest is available, run:
+
+```bash
+pnpm vitest run \
+  viewer/tests/inputxml-import-router-native.test.js \
+  viewer/tests/inputxml-import-router-uxml.test.js \
+  viewer/tests/inputxml-import-router-schema.test.js \
+  viewer/tests/inputxml-import-router-no-rvm-import.test.js \
+  viewer/tests/inputxml-import-routes.test.js \
+  viewer/tests/native-xml-direct-builder-smoke.test.js \
+  viewer/tests/import-from-raw-parser-native-route-regression.test.js \
+  viewer/tests/inputxml-routing-no-rvm-import.test.js \
+  viewer/tests/inputxml-uxml-to-viewer-components.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-route.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-diagnostics.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-no-rvm-import.test.js
+```
+
+If `pnpm` is unavailable, run:
+
+```bash
+npx vitest run \
+  viewer/tests/inputxml-import-router-native.test.js \
+  viewer/tests/inputxml-import-router-uxml.test.js \
+  viewer/tests/inputxml-import-router-schema.test.js \
+  viewer/tests/inputxml-import-router-no-rvm-import.test.js \
+  viewer/tests/inputxml-import-routes.test.js \
+  viewer/tests/native-xml-direct-builder-smoke.test.js \
+  viewer/tests/import-from-raw-parser-native-route-regression.test.js \
+  viewer/tests/inputxml-routing-no-rvm-import.test.js \
+  viewer/tests/inputxml-uxml-to-viewer-components.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-route.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-diagnostics.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-no-rvm-import.test.js
+```
+
+Do not claim Vitest passed if unavailable. Report clearly:
+
+```text
+Vitest not available in environment; node tests passed.
+```
+
+---
+
+# Smoke test requirement
+
+Agent C has no UI, but must run a route smoke by node:
+
+```text
+1. Import a small InputXML string through NATIVE_XML_BUILDER.
+2. Import the same InputXML string through UXML_ROUND_TRIP.
+3. Confirm both return schema=inputxml-import-router/v1.
+4. Confirm both return directPcfData.
+5. Confirm both return components array.
+6. Confirm no PCF/CII emitter is invoked.
+```
+
+---
+
+# Required final report format
+
+When complete, report exactly:
+
+```text
+Agent C complete.
+
+Changed files:
+- viewer/xml-compare/InputXmlImportRouter.js
+- viewer/tests/inputxml-import-router-native.test.js
+- viewer/tests/inputxml-import-router-uxml.test.js
+- viewer/tests/inputxml-import-router-schema.test.js
+- viewer/tests/inputxml-import-router-no-rvm-import.test.js
+
+Tests:
+[PASS/FAIL] node viewer/tests/inputxml-import-router-native.test.js
+[PASS/FAIL] node viewer/tests/inputxml-import-router-uxml.test.js
+[PASS/FAIL] node viewer/tests/inputxml-import-router-schema.test.js
+[PASS/FAIL] node viewer/tests/inputxml-import-router-no-rvm-import.test.js
+[PASS/FAIL] Agent A regression node tests
+[PASS/FAIL] Agent B regression node tests
+[PASS/FAIL/SKIPPED] vitest command
+[PASS/FAIL/SKIPPED] route smoke
+
+Boundary:
+- No RVM files touched: YES/NO
+- No RVM imports added: YES/NO
+- No PCF/CII emitter called: YES/NO
+- Both routes return same outer schema: YES/NO
+- Native route returns directPcfData: YES/NO
+- UXML route returns directPcfData wrapper and uxmlRoundTrip: YES/NO
+
+git diff --name-only origin/main...HEAD:
+<paste output>
+```
+
+---
+
+# Pass criteria
+
+Agent C is accepted only when:
+
+```text
+InputXmlImportRouter.js exists.
+NATIVE_XML_BUILDER route calls buildNativeXmlDirectData().
+UXML_ROUND_TRIP route calls runInputXmlUxmlRoundTrip().
+Both routes return schema=inputxml-import-router/v1.
+Both routes return directPcfData.
+Both routes return components array.
+Both routes return diagnostics array.
+Bad route normalizes to UXML_ROUND_TRIP.
+All required node tests pass.
+Agent A and Agent B regression tests still pass.
+Vitest attempted if available.
+No RVM-specific import/reference added.
+No PCF/CII emitter added.
+No unrelated files modified.
+```
+
+After Agent C passes, proceed to **Agent E — Route Report / Diagnostics Display Model**.
+-----------------------------------------------------------
+Some earlier uploaded files have expired; re-upload only if the agent needs exact local-file inspection. Below is **Agent E prompt only**.
+
+---
+
+# Agent E Prompt — InputXML Route Report / Diagnostics Display Model
+
+## Mission
+
+Implement the **route report model** used by the future 3D Viewer XML Diff UI.
+
+This slice does **not** add UI. It creates a clean report builder that summarizes both InputXML import routes:
+
+```text
+1. NATIVE_XML_BUILDER
+2. UXML_ROUND_TRIP
+```
+
+The report must be compact, stable, and easy for Agent D to display in the panel.
+
+---
+
+# Prerequisite
+
+Start only after Agent A, B, and C are complete.
+
+Required existing files:
+
+```text
+viewer/xml-compare/InputXmlImportRoutes.js
+viewer/xml-compare/InputXmlImportRouter.js
+viewer/js/pcf2glb/import/NativeXmlDirectBuilder.js
+viewer/xml-compare/InputXmlUxmlRoundTripRoute.js
+```
+
+Current repo `main` does not yet show `InputXmlRouteReport.js`, so create it fresh.
+
+---
+
+# Mandatory boundaries
+
+## Do not touch
+
+```text
+viewer/tabs/viewer3d-rvm-tab.js
+viewer/rvm/**
+viewer/rvm-viewer/**
+viewer/rvm-pcf-extract/**
+viewer/tabs/viewer3d-xml-compare-panel.js
+viewer/styles/viewer3d.css
+```
+
+## Do not import
+
+```text
+viewer/rvm/**
+viewer/rvm-viewer/**
+viewer/rvm-pcf-extract/**
+../rvm/**
+../rvm-viewer/**
+../rvm-pcf-extract/**
+```
+
+## Do not emit PCF/CII
+
+Do not call:
+
+```text
+buildPcfFromContinuity
+pcfxDocumentFromPcfText
+PcfEmitter
+CII emitter
+```
+
+---
+
+# File to create
+
+## 1. Create
+
+```text
+viewer/xml-compare/InputXmlRouteReport.js
+```
+
+Required exports:
+
+```js
+export function buildInputXmlRouteReport(importResult, options = {}) {}
+export function summarizeInputXmlDiagnostics(diagnostics = []) {}
+export function formatInputXmlRouteReportLines(report) {}
+```
+
+Suggested implementation:
+
+```js
+import {
+  inputXmlImportRouteLabel,
+  normalizeInputXmlImportRoute,
+  INPUTXML_IMPORT_ROUTES,
+} from './InputXmlImportRoutes.js';
+
+function clean(value) {
+  return String(value ?? '').trim();
+}
+
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function countArray(value) {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function severityOf(diagnostic = {}) {
+  const raw = String(diagnostic.severity || diagnostic.level || 'INFO').toUpperCase();
+
+  if (raw === 'ERR' || raw === 'ERROR' || raw === 'FATAL') return 'ERROR';
+  if (raw === 'WARN' || raw === 'WARNING') return 'WARNING';
+  return 'INFO';
+}
+
+export function summarizeInputXmlDiagnostics(diagnostics = []) {
+  const summary = {
+    total: 0,
+    error: 0,
+    warning: 0,
+    info: 0,
+    byCode: {},
+  };
+
+  for (const diagnostic of asArray(diagnostics)) {
+    const severity = severityOf(diagnostic);
+    const code = clean(diagnostic.code || 'NO_CODE') || 'NO_CODE';
+
+    summary.total += 1;
+    summary[severity.toLowerCase()] += 1;
+    summary.byCode[code] = (summary.byCode[code] || 0) + 1;
+  }
+
+  return summary;
+}
+
+function countUxmlAnchors(uxml) {
+  const components = asArray(uxml?.components);
+
+  return components.reduce((sum, component) => {
+    return sum + countArray(component?.anchors);
+  }, 0);
+}
+
+function countUxmlPorts(uxml) {
+  const components = asArray(uxml?.components);
+
+  return components.reduce((sum, component) => {
+    return sum + countArray(component?.ports);
+  }, 0);
+}
+
+function graphStats(graph) {
+  return {
+    nodeCount: Number(graph?.stats?.nodeCount ?? graph?.nodeCount ?? countArray(graph?.nodes)),
+    edgeCount: Number(graph?.stats?.edgeCount ?? graph?.edgeCount ?? countArray(graph?.edges)),
+    disconnectedCount: Number(
+      graph?.stats?.disconnectedCount ??
+      graph?.disconnectedCount ??
+      countArray(graph?.disconnectedNodes)
+    ),
+  };
+}
+
+function nativeRouteReport(importResult, route, diagnosticsSummary) {
+  const components = asArray(importResult?.components);
+
+  return {
+    nativeBuilder: true,
+    parsedFormat: clean(importResult?.native?.parsedFormat || importResult?.summary?.parsedFormat),
+    componentCount: components.length,
+    supportCount: components.filter(c => String(c?.type || '').toUpperCase() === 'SUPPORT').length,
+    graph: {
+      nativeBuilder: true,
+      universalNodeCount: null,
+      universalEdgeCount: null,
+      rayCandidateCount: null,
+      rayConnectionCount: null,
+      exportAllowed: null,
+    },
+    diagnostics: diagnosticsSummary,
+  };
+}
+
+function uxmlRouteReport(importResult, route, diagnosticsSummary) {
+  const roundTrip = importResult?.uxmlRoundTrip || {};
+  const uxml = roundTrip.uxml || {};
+  const universalStats = graphStats(roundTrip.universalGraph);
+  const rayStats = graphStats(roundTrip.rayGraph);
+  const comparison = roundTrip.comparison || {};
+  const decision = roundTrip.topologyDecision || {};
+
+  return {
+    nativeBuilder: false,
+    componentCount: countArray(importResult?.components),
+    uxml: {
+      componentCount: countArray(uxml?.components),
+      anchorCount: countUxmlAnchors(uxml),
+      portCount: countUxmlPorts(uxml),
+      pipelineCount: countArray(uxml?.pipelines),
+      validationPass: roundTrip.validation?.pass ?? roundTrip.validation?.ok ?? null,
+    },
+    topology: {
+      universalNodeCount: universalStats.nodeCount,
+      universalEdgeCount: universalStats.edgeCount,
+      universalDisconnectedCount: universalStats.disconnectedCount,
+
+      rayNodeCount: rayStats.nodeCount,
+      rayEdgeCount: rayStats.edgeCount,
+      rayDisconnectedCount: rayStats.disconnectedCount,
+
+      rayCandidateCount: Number(
+        roundTrip.rayGraph?.stats?.rayCandidateCount ??
+        roundTrip.rayGraph?.candidateCount ??
+        countArray(roundTrip.rayGraph?.candidates)
+      ),
+
+      rayConnectionCount: Number(
+        roundTrip.rayGraph?.stats?.rayConnectionCount ??
+        roundTrip.rayGraph?.connectionCount ??
+        countArray(roundTrip.rayGraph?.connections)
+      ),
+
+      promotionCandidateCount: Number(
+        comparison?.stats?.promotionCandidateCount ??
+        comparison?.promotionCandidateCount ??
+        countArray(comparison?.promotionCandidates)
+      ),
+
+      manualReviewCount: Number(
+        decision?.stats?.manualReviewCount ??
+        decision?.manualReviewCount ??
+        countArray(decision?.manualReview)
+      ),
+
+      exportAllowed: decision?.exportAllowed === true,
+      outputBridgeReady: decision?.outputBridgeReady === true || roundTrip.summary?.outputBridgeReady === true,
+    },
+    diagnostics: diagnosticsSummary,
+  };
+}
+
+export function buildInputXmlRouteReport(importResult, options = {}) {
+  const route = normalizeInputXmlImportRoute(importResult?.route || options.route);
+  const diagnostics = asArray(importResult?.diagnostics);
+  const diagnosticsSummary = summarizeInputXmlDiagnostics(diagnostics);
+
+  const base = {
+    schema: 'inputxml-route-report/v1',
+    route,
+    routeLabel: inputXmlImportRouteLabel(route),
+    fileName: clean(importResult?.fileName || options.fileName || 'input.xml'),
+    ok: importResult?.ok !== false,
+    componentCount: countArray(importResult?.components),
+    diagnosticsCount: diagnostics.length,
+  };
+
+  if (route === INPUTXML_IMPORT_ROUTES.NATIVE_XML_BUILDER) {
+    return {
+      ...base,
+      mode: 'native',
+      native: nativeRouteReport(importResult, route, diagnosticsSummary),
+      uxml: null,
+      topology: nativeRouteReport(importResult, route, diagnosticsSummary).graph,
+      diagnosticsSummary,
+    };
+  }
+
+  const uxmlReport = uxmlRouteReport(importResult, route, diagnosticsSummary);
+
+  return {
+    ...base,
+    mode: 'uxml-round-trip',
+    native: null,
+    uxml: uxmlReport.uxml,
+    topology: uxmlReport.topology,
+    diagnosticsSummary,
+  };
+}
+
+export function formatInputXmlRouteReportLines(report) {
+  if (!report) return ['No InputXML route report available.'];
+
+  const lines = [
+    `Route: ${report.routeLabel || report.route}`,
+    `File: ${report.fileName || '-'}`,
+    `Status: ${report.ok ? 'OK' : 'FAILED'}`,
+    `Components: ${report.componentCount ?? 0}`,
+    `Diagnostics: ${report.diagnosticsSummary?.total ?? report.diagnosticsCount ?? 0}`,
+  ];
+
+  if (report.mode === 'native') {
+    lines.push('Native Builder: yes');
+    lines.push(`Parsed Format: ${report.native?.parsedFormat || '-'}`);
+    lines.push(`Supports: ${report.native?.supportCount ?? 0}`);
+    return lines;
+  }
+
+  lines.push(`UXML Components: ${report.uxml?.componentCount ?? 0}`);
+  lines.push(`UXML Anchors: ${report.uxml?.anchorCount ?? 0}`);
+  lines.push(`UXML Ports: ${report.uxml?.portCount ?? 0}`);
+  lines.push(`Universal Nodes: ${report.topology?.universalNodeCount ?? '-'}`);
+  lines.push(`Universal Edges: ${report.topology?.universalEdgeCount ?? '-'}`);
+  lines.push(`Ray Candidates: ${report.topology?.rayCandidateCount ?? '-'}`);
+  lines.push(`Ray Connections: ${report.topology?.rayConnectionCount ?? '-'}`);
+  lines.push(`Export Allowed: ${report.topology?.exportAllowed === true ? 'yes' : 'no'}`);
+
+  return lines;
+}
+```
+
+---
+
+# Tests to add
+
+## 2. Add
+
+```text
+viewer/tests/inputxml-route-report-native.test.js
+```
+
+```js
+import assert from 'assert/strict';
+
+async function run() {
+  console.log('--- inputxml-route-report-native.test.js ---');
+
+  const {
+    buildInputXmlRouteReport,
+    formatInputXmlRouteReportLines,
+  } = await import('../xml-compare/InputXmlRouteReport.js');
+
+  const report = buildInputXmlRouteReport({
+    ok: true,
+    route: 'NATIVE_XML_BUILDER',
+    fileName: 'native.xml',
+    components: [
+      { id: 'P1', type: 'PIPE' },
+      { id: 'S1', type: 'SUPPORT' },
+    ],
+    native: {
+      parsedFormat: 'XML',
+    },
+    diagnostics: [
+      { severity: 'INFO', code: 'NATIVE-1', message: 'ok' },
+    ],
+  });
+
+  assert.equal(report.schema, 'inputxml-route-report/v1');
+  assert.equal(report.route, 'NATIVE_XML_BUILDER');
+  assert.equal(report.routeLabel, 'Native XML Builder');
+  assert.equal(report.mode, 'native');
+  assert.equal(report.ok, true);
+  assert.equal(report.componentCount, 2);
+  assert.equal(report.native.nativeBuilder, true);
+  assert.equal(report.native.supportCount, 1);
+  assert.equal(report.topology.nativeBuilder, true);
+  assert.equal(report.topology.universalNodeCount, null);
+  assert.equal(report.diagnosticsSummary.info, 1);
+
+  const lines = formatInputXmlRouteReportLines(report);
+  assert.ok(lines.some(line => line.includes('Route: Native XML Builder')));
+  assert.ok(lines.some(line => line.includes('Native Builder: yes')));
+
+  console.log('[PASS] InputXML route report native passed.');
+}
+
+run().catch(error => {
+  console.error('[FAIL] InputXML route report native failed.');
+  console.error(error);
+  process.exit(1);
+});
+```
+
+---
+
+## 3. Add
+
+```text
+viewer/tests/inputxml-route-report-uxml.test.js
+```
+
+```js
+import assert from 'assert/strict';
+
+async function run() {
+  console.log('--- inputxml-route-report-uxml.test.js ---');
+
+  const {
+    buildInputXmlRouteReport,
+    formatInputXmlRouteReportLines,
+  } = await import('../xml-compare/InputXmlRouteReport.js');
+
+  const report = buildInputXmlRouteReport({
+    ok: true,
+    route: 'UXML_ROUND_TRIP',
+    fileName: 'uxml.xml',
+    components: [
+      { id: 'P1', type: 'PIPE' },
+    ],
+    uxmlRoundTrip: {
+      uxml: {
+        components: [
+          {
+            id: 'P1',
+            anchors: [
+              { role: 'EP1' },
+              { role: 'EP2' },
+            ],
+            ports: [
+              { role: 'END_1' },
+              { role: 'END_2' },
+            ],
+          },
+        ],
+        pipelines: [{ id: 'LINE-1' }],
+      },
+      validation: { pass: true },
+      universalGraph: {
+        stats: {
+          nodeCount: 2,
+          edgeCount: 1,
+          disconnectedCount: 0,
+        },
+      },
+      rayGraph: {
+        stats: {
+          nodeCount: 2,
+          edgeCount: 1,
+          rayCandidateCount: 3,
+          rayConnectionCount: 2,
+        },
+      },
+      comparison: {
+        stats: {
+          promotionCandidateCount: 1,
+        },
+      },
+      topologyDecision: {
+        exportAllowed: true,
+        outputBridgeReady: true,
+        stats: {
+          manualReviewCount: 0,
+        },
+      },
+    },
+    diagnostics: [
+      { severity: 'WARNING', code: 'UXML-WARN', message: 'warn' },
+      { severity: 'ERROR', code: 'UXML-ERR', message: 'err' },
+    ],
+  });
+
+  assert.equal(report.schema, 'inputxml-route-report/v1');
+  assert.equal(report.route, 'UXML_ROUND_TRIP');
+  assert.equal(report.routeLabel, 'UXML Round Trip');
+  assert.equal(report.mode, 'uxml-round-trip');
+  assert.equal(report.componentCount, 1);
+  assert.equal(report.uxml.componentCount, 1);
+  assert.equal(report.uxml.anchorCount, 2);
+  assert.equal(report.uxml.portCount, 2);
+  assert.equal(report.uxml.pipelineCount, 1);
+  assert.equal(report.topology.universalNodeCount, 2);
+  assert.equal(report.topology.rayCandidateCount, 3);
+  assert.equal(report.topology.rayConnectionCount, 2);
+  assert.equal(report.topology.promotionCandidateCount, 1);
+  assert.equal(report.topology.manualReviewCount, 0);
+  assert.equal(report.topology.exportAllowed, true);
+  assert.equal(report.topology.outputBridgeReady, true);
+  assert.equal(report.diagnosticsSummary.warning, 1);
+  assert.equal(report.diagnosticsSummary.error, 1);
+
+  const lines = formatInputXmlRouteReportLines(report);
+  assert.ok(lines.some(line => line.includes('Route: UXML Round Trip')));
+  assert.ok(lines.some(line => line.includes('Universal Nodes: 2')));
+  assert.ok(lines.some(line => line.includes('Ray Candidates: 3')));
+
+  console.log('[PASS] InputXML route report UXML passed.');
+}
+
+run().catch(error => {
+  console.error('[FAIL] InputXML route report UXML failed.');
+  console.error(error);
+  process.exit(1);
+});
+```
+
+---
+
+## 4. Add
+
+```text
+viewer/tests/inputxml-route-report-diagnostics.test.js
+```
+
+```js
+import assert from 'assert/strict';
+
+async function run() {
+  console.log('--- inputxml-route-report-diagnostics.test.js ---');
+
+  const {
+    summarizeInputXmlDiagnostics,
+  } = await import('../xml-compare/InputXmlRouteReport.js');
+
+  const summary = summarizeInputXmlDiagnostics([
+    { severity: 'ERROR', code: 'A' },
+    { severity: 'ERR', code: 'A' },
+    { severity: 'WARNING', code: 'B' },
+    { level: 'WARN', code: 'B' },
+    { severity: 'INFO', code: 'C' },
+    { code: 'NO_SEV' },
+  ]);
+
+  assert.equal(summary.total, 6);
+  assert.equal(summary.error, 2);
+  assert.equal(summary.warning, 2);
+  assert.equal(summary.info, 2);
+  assert.equal(summary.byCode.A, 2);
+  assert.equal(summary.byCode.B, 2);
+  assert.equal(summary.byCode.C, 1);
+  assert.equal(summary.byCode.NO_SEV, 1);
+
+  console.log('[PASS] InputXML route report diagnostics passed.');
+}
+
+run().catch(error => {
+  console.error('[FAIL] InputXML route report diagnostics failed.');
+  console.error(error);
+  process.exit(1);
+});
+```
+
+---
+
+## 5. Add
+
+```text
+viewer/tests/inputxml-route-report-no-rvm-import.test.js
+```
+
+```js
+import assert from 'assert/strict';
+import fs from 'fs';
+import path from 'path';
+
+function read(file) {
+  return fs.readFileSync(path.resolve(file), 'utf-8');
+}
+
+function run() {
+  console.log('--- inputxml-route-report-no-rvm-import.test.js ---');
+
+  const file = 'viewer/xml-compare/InputXmlRouteReport.js';
+  const text = read(file);
+
+  assert.ok(
+    !/viewer3d-rvm-tab|rvm-viewer|rvm-pcf-extract|viewer\/rvm\/|RvmPcf|RvmSupport|RvmTag/i.test(text),
+    `${file} must not import or reference RVM-specific modules`
+  );
+
+  assert.ok(
+    !/buildPcfFromContinuity|pcfxDocumentFromPcfText|PcfEmitter|CII/i.test(text),
+    `${file} must not emit PCF/CII`
+  );
+
+  console.log('[PASS] InputXML route report no-RVM/no-emitter boundary passed.');
+}
+
+try {
+  run();
+} catch (error) {
+  console.error('[FAIL] InputXML route report no-RVM/no-emitter boundary failed.');
+  console.error(error);
+  process.exit(1);
+}
+```
+
+---
+
+# Mandatory verification commands
+
+Run Agent E tests:
+
+```bash
+cd PCF_GLB_Viewer_Conv
+
+node viewer/tests/inputxml-route-report-native.test.js
+node viewer/tests/inputxml-route-report-uxml.test.js
+node viewer/tests/inputxml-route-report-diagnostics.test.js
+node viewer/tests/inputxml-route-report-no-rvm-import.test.js
+```
+
+Re-run Agent A/B/C tests:
+
+```bash
+node viewer/tests/inputxml-import-routes.test.js
+node viewer/tests/native-xml-direct-builder-smoke.test.js
+node viewer/tests/import-from-raw-parser-native-route-regression.test.js
+node viewer/tests/inputxml-routing-no-rvm-import.test.js
+
+node viewer/tests/inputxml-uxml-to-viewer-components.test.js
+node viewer/tests/inputxml-uxml-roundtrip-route.test.js
+node viewer/tests/inputxml-uxml-roundtrip-diagnostics.test.js
+node viewer/tests/inputxml-uxml-roundtrip-no-rvm-import.test.js
+
+node viewer/tests/inputxml-import-router-native.test.js
+node viewer/tests/inputxml-import-router-uxml.test.js
+node viewer/tests/inputxml-import-router-schema.test.js
+node viewer/tests/inputxml-import-router-no-rvm-import.test.js
+```
+
+If Vitest is available, run:
+
+```bash
+pnpm vitest run \
+  viewer/tests/inputxml-route-report-native.test.js \
+  viewer/tests/inputxml-route-report-uxml.test.js \
+  viewer/tests/inputxml-route-report-diagnostics.test.js \
+  viewer/tests/inputxml-route-report-no-rvm-import.test.js \
+  viewer/tests/inputxml-import-routes.test.js \
+  viewer/tests/native-xml-direct-builder-smoke.test.js \
+  viewer/tests/import-from-raw-parser-native-route-regression.test.js \
+  viewer/tests/inputxml-routing-no-rvm-import.test.js \
+  viewer/tests/inputxml-uxml-to-viewer-components.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-route.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-diagnostics.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-no-rvm-import.test.js \
+  viewer/tests/inputxml-import-router-native.test.js \
+  viewer/tests/inputxml-import-router-uxml.test.js \
+  viewer/tests/inputxml-import-router-schema.test.js \
+  viewer/tests/inputxml-import-router-no-rvm-import.test.js
+```
+
+If `pnpm` is unavailable, run:
+
+```bash
+npx vitest run \
+  viewer/tests/inputxml-route-report-native.test.js \
+  viewer/tests/inputxml-route-report-uxml.test.js \
+  viewer/tests/inputxml-route-report-diagnostics.test.js \
+  viewer/tests/inputxml-route-report-no-rvm-import.test.js \
+  viewer/tests/inputxml-import-routes.test.js \
+  viewer/tests/native-xml-direct-builder-smoke.test.js \
+  viewer/tests/import-from-raw-parser-native-route-regression.test.js \
+  viewer/tests/inputxml-routing-no-rvm-import.test.js \
+  viewer/tests/inputxml-uxml-to-viewer-components.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-route.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-diagnostics.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-no-rvm-import.test.js \
+  viewer/tests/inputxml-import-router-native.test.js \
+  viewer/tests/inputxml-import-router-uxml.test.js \
+  viewer/tests/inputxml-import-router-schema.test.js \
+  viewer/tests/inputxml-import-router-no-rvm-import.test.js
+```
+
+Do not claim Vitest passed if unavailable. Report:
+
+```text
+Vitest not available in environment; node tests passed.
+```
+
+---
+
+# Smoke test requirement
+
+Agent E has no UI. Smoke test is route-report smoke by node:
+
+```text
+1. Build report from a mocked native route result.
+2. Build report from a mocked UXML route result.
+3. Confirm native report shows Native XML Builder.
+4. Confirm UXML report shows Universal/Ray stats.
+5. Confirm report lines are display-ready strings.
+```
+
+---
+
+# Required final report format
+
+When complete, report exactly:
+
+```text
+Agent E complete.
+
+Changed files:
+- viewer/xml-compare/InputXmlRouteReport.js
+- viewer/tests/inputxml-route-report-native.test.js
+- viewer/tests/inputxml-route-report-uxml.test.js
+- viewer/tests/inputxml-route-report-diagnostics.test.js
+- viewer/tests/inputxml-route-report-no-rvm-import.test.js
+
+Tests:
+[PASS/FAIL] node viewer/tests/inputxml-route-report-native.test.js
+[PASS/FAIL] node viewer/tests/inputxml-route-report-uxml.test.js
+[PASS/FAIL] node viewer/tests/inputxml-route-report-diagnostics.test.js
+[PASS/FAIL] node viewer/tests/inputxml-route-report-no-rvm-import.test.js
+[PASS/FAIL] Agent A regression node tests
+[PASS/FAIL] Agent B regression node tests
+[PASS/FAIL] Agent C regression node tests
+[PASS/FAIL/SKIPPED] vitest command
+[PASS/FAIL/SKIPPED] route-report smoke
+
+Boundary:
+- No RVM files touched: YES/NO
+- No RVM imports added: YES/NO
+- No PCF/CII emitter called: YES/NO
+- Native route report works: YES/NO
+- UXML route report works: YES/NO
+- Diagnostics summary works: YES/NO
+
+git diff --name-only origin/main...HEAD:
+<paste output>
+```
+
+---
+
+# Pass criteria
+
+Agent E is accepted only when:
+
+```text
+InputXmlRouteReport.js exists.
+Native route report returns schema=inputxml-route-report/v1.
+UXML route report returns schema=inputxml-route-report/v1.
+Diagnostics are counted by severity and code.
+Report lines are display-ready strings.
+Agent A/B/C regression tests still pass.
+Vitest attempted if available.
+No RVM-specific import/reference added.
+No PCF/CII emitter added.
+No unrelated files modified.
+```
+
+After Agent E passes, proceed to **Agent D — 3D Viewer XML Diff UI Route Selector**.
+--------------------------------------------------------------
+
+Some earlier uploaded files have expired; re-upload only if the agent needs exact local-file inspection. Below is **Agent D prompt only**.
+
+---
+
+# Agent D Prompt — 3D Viewer XML Diff UI Route Selector
+
+## Mission
+
+Add the **InputXML Route selector** into the normal **3D Viewer XML Diff panel**.
+
+The panel must allow users to choose how InputXML/XML files are imported:
+
+```text
+1. UXML Round Trip
+2. Native XML Builder
+```
+
+This agent connects the UI to the router/report work from Agents A, B, C, and E.
+
+Do **not** modify the RVM viewer.
+
+---
+
+# Prerequisite
+
+Start only after Agents A, B, C, and E are complete.
+
+Required existing files:
+
+```text
+viewer/xml-compare/InputXmlImportRoutes.js
+viewer/xml-compare/InputXmlImportRouter.js
+viewer/xml-compare/InputXmlRouteReport.js
+viewer/js/pcf2glb/import/NativeXmlDirectBuilder.js
+viewer/xml-compare/InputXmlUxmlRoundTripRoute.js
+```
+
+If `viewer/tabs/viewer3d-xml-compare-panel.js` does not exist yet, create it.
+
+---
+
+# Mandatory boundaries
+
+## Do not touch
+
+```text
+viewer/tabs/viewer3d-rvm-tab.js
+viewer/rvm/**
+viewer/rvm-viewer/**
+viewer/rvm-pcf-extract/**
+```
+
+## Do not import
+
+```text
+viewer/rvm/**
+viewer/rvm-viewer/**
+viewer/rvm-pcf-extract/**
+../rvm/**
+../rvm-viewer/**
+../rvm-pcf-extract/**
+```
+
+## Do not emit PCF/CII
+
+Do not call:
+
+```text
+buildPcfFromContinuity
+pcfxDocumentFromPcfText
+PcfEmitter
+CII emitter
+```
+
+---
+
+# Files to create or patch
+
+## 1. Create or patch
+
+```text
+viewer/tabs/viewer3d-xml-compare-panel.js
+```
+
+Required imports:
+
+```js
+import {
+  DEFAULT_INPUTXML_IMPORT_ROUTE,
+  INPUTXML_IMPORT_ROUTES,
+  INPUTXML_IMPORT_ROUTE_STORAGE_KEY,
+  inputXmlImportRouteLabel,
+  normalizeInputXmlImportRoute,
+  persistInputXmlImportRoute,
+} from '../xml-compare/InputXmlImportRoutes.js';
+
+import { importInputXmlByRoute } from '../xml-compare/InputXmlImportRouter.js';
+import {
+  buildInputXmlRouteReport,
+  formatInputXmlRouteReportLines,
+} from '../xml-compare/InputXmlRouteReport.js';
+```
+
+Required export:
+
+```js
+export function mountXmlComparePanel(containerEl, callbacks = {}) {}
+```
+
+Required callbacks:
+
+```js
+{
+  onDatasetLoaded(datasetId, result),
+  onPreviewOverlay(datasetA, datasetB),
+  onCompare(reportA, reportB),
+  onClear()
+}
+```
+
+---
+
+# Panel behavior
+
+The panel must support:
+
+```text
+Load XML A
+Load XML B
+InputXML Route selector
+Route status/report card for XML A
+Route status/report card for XML B
+Preview button
+Clear button
+```
+
+Minimum state:
+
+```js
+const state = {
+  inputXmlRoute: DEFAULT_INPUTXML_IMPORT_ROUTE,
+  datasets: {
+    A: null,
+    B: null,
+  },
+  routeReports: {
+    A: null,
+    B: null,
+  },
+};
+```
+
+---
+
+# Required UI HTML
+
+The panel must include this route selector:
+
+```html
+<label class="v3d-xc-route">
+  InputXML Route
+  <select data-v3d-xc-inputxml-route>
+    <option value="UXML_ROUND_TRIP">UXML Round Trip</option>
+    <option value="NATIVE_XML_BUILDER">Native XML Builder</option>
+  </select>
+</label>
+```
+
+The selector must default to `DEFAULT_INPUTXML_IMPORT_ROUTE`.
+
+On change:
+
+```js
+const route = persistInputXmlImportRoute(select.value);
+state.inputXmlRoute = route;
+render();
+```
+
+---
+
+# Required file load flow
+
+When loading XML A or XML B:
+
+```js
+const text = await file.text();
+
+const result = importInputXmlByRoute(text, {
+  route: state.inputXmlRoute,
+  fileName: file.name,
+  allowPartialImport: true,
+});
+
+const routeReport = buildInputXmlRouteReport(result, {
+  fileName: file.name,
+  route: state.inputXmlRoute,
+});
+
+state.datasets[datasetId] = result;
+state.routeReports[datasetId] = routeReport;
+
+callbacks.onDatasetLoaded?.(datasetId, result);
+render();
+```
+
+---
+
+# Required route badge/report display
+
+For each loaded XML, show:
+
+```text
+XML A
+Route: UXML Round Trip / Native XML Builder
+Status: OK / FAILED
+Components: N
+Diagnostics: N
+```
+
+For UXML route, also show:
+
+```text
+Universal Nodes
+Universal Edges
+Ray Candidates
+Ray Connections
+Export Allowed
+```
+
+For native route, also show:
+
+```text
+Native Builder: yes
+Parsed Format
+Supports
+```
+
+Use:
+
+```js
+formatInputXmlRouteReportLines(report)
+```
+
+for display lines.
+
+---
+
+# Suggested implementation skeleton
+
+```js
+function esc(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function renderReportCard(datasetId, report) {
+  if (!report) {
+    return `
+      <div class="v3d-xc-route-card is-empty">
+        <b>XML ${esc(datasetId)}</b>
+        <span>No file loaded</span>
+      </div>
+    `;
+  }
+
+  const lines = formatInputXmlRouteReportLines(report);
+
+  return `
+    <div class="v3d-xc-route-card ${report.ok ? 'is-ok' : 'is-fail'}">
+      <b>XML ${esc(datasetId)}</b>
+      ${lines.map(line => `<span>${esc(line)}</span>`).join('')}
+    </div>
+  `;
+}
+
+export function mountXmlComparePanel(containerEl, callbacks = {}) {
+  const state = {
+    inputXmlRoute: DEFAULT_INPUTXML_IMPORT_ROUTE,
+    datasets: { A: null, B: null },
+    routeReports: { A: null, B: null },
+  };
+
+  let disposed = false;
+
+  async function loadDataset(datasetId, file) {
+    if (!file) return;
+
+    const text = await file.text();
+
+    const result = importInputXmlByRoute(text, {
+      route: state.inputXmlRoute,
+      fileName: file.name,
+      allowPartialImport: true,
+    });
+
+    const report = buildInputXmlRouteReport(result, {
+      route: state.inputXmlRoute,
+      fileName: file.name,
+    });
+
+    state.datasets[datasetId] = result;
+    state.routeReports[datasetId] = report;
+
+    callbacks.onDatasetLoaded?.(datasetId, result);
+    render();
+  }
+
+  function clear() {
+    state.datasets.A = null;
+    state.datasets.B = null;
+    state.routeReports.A = null;
+    state.routeReports.B = null;
+
+    callbacks.onClear?.();
+    render();
+  }
+
+  function preview() {
+    if (!state.datasets.A || !state.datasets.B) return;
+
+    callbacks.onPreviewOverlay?.(state.datasets.A, state.datasets.B);
+  }
+
+  function compare() {
+    if (!state.datasets.A || !state.datasets.B) return;
+
+    callbacks.onCompare?.(state.routeReports.A, state.routeReports.B);
+  }
+
+  function render() {
+    if (disposed) return;
+
+    containerEl.innerHTML = `
+      <div class="v3d-xc-panel">
+        <div class="v3d-xc-toolbar">
+          <label class="v3d-xc-file">
+            Load XML A
+            <input type="file" accept=".xml,.XML" data-v3d-xc-load="A" hidden>
+          </label>
+
+          <label class="v3d-xc-file">
+            Load XML B
+            <input type="file" accept=".xml,.XML" data-v3d-xc-load="B" hidden>
+          </label>
+
+          <label class="v3d-xc-route">
+            InputXML Route
+            <select data-v3d-xc-inputxml-route>
+              <option value="${INPUTXML_IMPORT_ROUTES.UXML_ROUND_TRIP}" ${state.inputXmlRoute === INPUTXML_IMPORT_ROUTES.UXML_ROUND_TRIP ? 'selected' : ''}>
+                UXML Round Trip
+              </option>
+              <option value="${INPUTXML_IMPORT_ROUTES.NATIVE_XML_BUILDER}" ${state.inputXmlRoute === INPUTXML_IMPORT_ROUTES.NATIVE_XML_BUILDER ? 'selected' : ''}>
+                Native XML Builder
+              </option>
+            </select>
+          </label>
+
+          <button type="button" data-v3d-xc-action="preview">Preview</button>
+          <button type="button" data-v3d-xc-action="compare">Compare</button>
+          <button type="button" data-v3d-xc-action="clear">Clear</button>
+        </div>
+
+        <div class="v3d-xc-status">
+          <span>Selected route: ${esc(inputXmlImportRouteLabel(state.inputXmlRoute))}</span>
+        </div>
+
+        <div class="v3d-xc-report-grid">
+          ${renderReportCard('A', state.routeReports.A)}
+          ${renderReportCard('B', state.routeReports.B)}
+        </div>
+      </div>
+    `;
+  }
+
+  function onChange(event) {
+    const routeSelect = event.target.closest('[data-v3d-xc-inputxml-route]');
+    if (routeSelect && containerEl.contains(routeSelect)) {
+      state.inputXmlRoute = persistInputXmlImportRoute(routeSelect.value);
+      render();
+      return;
+    }
+
+    const fileInput = event.target.closest('[data-v3d-xc-load]');
+    if (fileInput && containerEl.contains(fileInput)) {
+      const datasetId = fileInput.dataset.v3dXcLoad;
+      const file = fileInput.files?.[0] || null;
+      fileInput.value = '';
+      loadDataset(datasetId, file);
+    }
+  }
+
+  function onClick(event) {
+    const action = event.target.closest('[data-v3d-xc-action]')?.dataset.v3dXcAction;
+
+    if (action === 'preview') {
+      preview();
+      return;
+    }
+
+    if (action === 'compare') {
+      compare();
+      return;
+    }
+
+    if (action === 'clear') {
+      clear();
+    }
+  }
+
+  containerEl.addEventListener('change', onChange);
+  containerEl.addEventListener('click', onClick);
+
+  render();
+
+  return {
+    destroy() {
+      disposed = true;
+      containerEl.removeEventListener('change', onChange);
+      containerEl.removeEventListener('click', onClick);
+      containerEl.innerHTML = '';
+    },
+    getState() {
+      return {
+        inputXmlRoute: state.inputXmlRoute,
+        hasA: !!state.datasets.A,
+        hasB: !!state.datasets.B,
+        routeA: state.routeReports.A?.route || '',
+        routeB: state.routeReports.B?.route || '',
+      };
+    },
+  };
+}
+```
+
+---
+
+## 2. Patch
+
+```text
+viewer/tabs/viewer3d-tab.js
+```
+
+Add import:
+
+```js
+import { mountXmlComparePanel } from './viewer3d-xml-compare-panel.js';
+```
+
+Find the right-side panel/tabs where existing component/summary panels are mounted.
+
+Add a third panel tab:
+
+```text
+XML Diff
+```
+
+Required DOM marker:
+
+```html
+<button type="button" data-viewer3d-side-tab="xml-diff">XML Diff</button>
+<div data-viewer3d-side-panel="xml-diff"></div>
+```
+
+Mount:
+
+```js
+const xmlDiffHost = container.querySelector('[data-viewer3d-side-panel="xml-diff"]');
+
+const xmlDiffPanel = mountXmlComparePanel(xmlDiffHost, {
+  onDatasetLoaded(datasetId, result) {
+    console.info('[3D Viewer XML Diff] dataset loaded', datasetId, result?.route);
+  },
+  onPreviewOverlay(datasetA, datasetB) {
+    viewer?.setXmlComparePreviewOverlay?.(datasetA, datasetB);
+  },
+  onCompare(reportA, reportB) {
+    console.info('[3D Viewer XML Diff] compare route reports', reportA, reportB);
+  },
+  onClear() {
+    viewer?.clearXmlComparePreviewOverlay?.();
+    viewer?.clearXmlCompareOverlay?.();
+  },
+});
+```
+
+On tab cleanup/dispose:
+
+```js
+xmlDiffPanel?.destroy?.();
+```
+
+If viewer overlay API does not exist yet, use optional chaining as shown. Do **not** implement overlay API in this slice.
+
+---
+
+## 3. Patch CSS
+
+Patch active normal 3D Viewer CSS file, likely:
+
+```text
+viewer/styles/viewer3d.css
+```
+
+Add:
+
+```css
+.v3d-xc-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  color: #dbeafe;
+}
+
+.v3d-xc-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.v3d-xc-file,
+.v3d-xc-route {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.v3d-xc-file {
+  border: 1px solid #3b82f6;
+  border-radius: 6px;
+  background: #1d4ed8;
+  color: #fff;
+  font-weight: 700;
+  padding: 6px 8px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.v3d-xc-route select {
+  min-width: 0;
+  height: 28px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 5px;
+  color: #dbeafe;
+  font-size: 12px;
+  padding: 3px 6px;
+}
+
+.v3d-xc-toolbar button {
+  border: 1px solid #475569;
+  border-radius: 6px;
+  background: #1e293b;
+  color: #dbeafe;
+  font-size: 12px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.v3d-xc-toolbar button:hover {
+  background: #334155;
+}
+
+.v3d-xc-status {
+  padding: 6px 8px;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #93c5fd;
+  font-size: 12px;
+}
+
+.v3d-xc-report-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.v3d-xc-route-card {
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0b1220;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.v3d-xc-route-card b {
+  color: #93c5fd;
+  font-size: 12px;
+}
+
+.v3d-xc-route-card span {
+  color: #cbd5e1;
+  overflow-wrap: anywhere;
+}
+
+.v3d-xc-route-card.is-ok {
+  border-color: rgba(34, 197, 94, 0.45);
+}
+
+.v3d-xc-route-card.is-fail {
+  border-color: rgba(248, 113, 113, 0.7);
+}
+
+.v3d-xc-route-card.is-empty {
+  opacity: 0.68;
+}
+```
+
+---
+
+# Tests to add
+
+## 4. Add
+
+```text
+viewer/tests/viewer3d-xml-compare-route-selector.test.js
+```
+
+```js
+import assert from 'assert/strict';
+import fs from 'fs';
+import path from 'path';
+
+function read(file) {
+  return fs.readFileSync(path.resolve(file), 'utf-8');
+}
+
+function run() {
+  console.log('--- viewer3d-xml-compare-route-selector.test.js ---');
+
+  const panel = read('viewer/tabs/viewer3d-xml-compare-panel.js');
+
+  const markers = [
+    'mountXmlComparePanel',
+    'data-v3d-xc-inputxml-route',
+    'UXML Round Trip',
+    'Native XML Builder',
+    'persistInputXmlImportRoute',
+    'importInputXmlByRoute',
+    'buildInputXmlRouteReport',
+    'formatInputXmlRouteReportLines',
+    'data-v3d-xc-load="A"',
+    'data-v3d-xc-load="B"',
+  ];
+
+  for (const marker of markers) {
+    assert.ok(panel.includes(marker), `viewer3d-xml-compare-panel.js missing marker: ${marker}`);
+  }
+
+  assert.ok(
+    !/viewer3d-rvm-tab|rvm-viewer|rvm-pcf-extract|viewer\/rvm\/|RvmPcf|RvmSupport|RvmTag/i.test(panel),
+    'panel must not reference RVM-specific modules'
+  );
+
+  console.log('[PASS] Viewer3D XML Compare route selector markers passed.');
+}
+
+try {
+  run();
+} catch (error) {
+  console.error('[FAIL] Viewer3D XML Compare route selector markers failed.');
+  console.error(error);
+  process.exit(1);
+}
+```
+
+---
+
+## 5. Add
+
+```text
+viewer/tests/viewer3d-xml-compare-panel-mount.test.js
+```
+
+```js
+import assert from 'assert/strict';
+import fs from 'fs';
+import path from 'path';
+
+function read(file) {
+  return fs.readFileSync(path.resolve(file), 'utf-8');
+}
+
+function run() {
+  console.log('--- viewer3d-xml-compare-panel-mount.test.js ---');
+
+  const tab = read('viewer/tabs/viewer3d-tab.js');
+
+  assert.ok(
+    tab.includes("import { mountXmlComparePanel } from './viewer3d-xml-compare-panel.js';"),
+    'viewer3d-tab.js must import mountXmlComparePanel'
+  );
+
+  assert.ok(
+    tab.includes('data-viewer3d-side-tab="xml-diff"') ||
+    tab.includes("data-viewer3d-side-tab='xml-diff'"),
+    'viewer3d-tab.js must add XML Diff side tab marker'
+  );
+
+  assert.ok(
+    tab.includes('data-viewer3d-side-panel="xml-diff"') ||
+    tab.includes("data-viewer3d-side-panel='xml-diff'"),
+    'viewer3d-tab.js must add XML Diff side panel marker'
+  );
+
+  assert.ok(
+    tab.includes('mountXmlComparePanel'),
+    'viewer3d-tab.js must mount XML compare panel'
+  );
+
+  assert.ok(
+    tab.includes('xmlDiffPanel?.destroy?.()') ||
+    tab.includes('xmlDiffPanel.destroy'),
+    'viewer3d-tab.js must destroy XML compare panel on cleanup'
+  );
+
+  console.log('[PASS] Viewer3D XML Compare panel mount markers passed.');
+}
+
+try {
+  run();
+} catch (error) {
+  console.error('[FAIL] Viewer3D XML Compare panel mount markers failed.');
+  console.error(error);
+  process.exit(1);
+}
+```
+
+---
+
+## 6. Add
+
+```text
+viewer/tests/viewer3d-xml-compare-route-report-ui.test.js
+```
+
+```js
+import assert from 'assert/strict';
+import fs from 'fs';
+import path from 'path';
+
+function read(file) {
+  return fs.readFileSync(path.resolve(file), 'utf-8');
+}
+
+function run() {
+  console.log('--- viewer3d-xml-compare-route-report-ui.test.js ---');
+
+  const panel = read('viewer/tabs/viewer3d-xml-compare-panel.js');
+  const css = read('viewer/styles/viewer3d.css');
+
+  const panelMarkers = [
+    'renderReportCard',
+    'v3d-xc-route-card',
+    'routeReports',
+    'XML ${esc(datasetId)}',
+    'formatInputXmlRouteReportLines(report)',
+    'Selected route:',
+  ];
+
+  for (const marker of panelMarkers) {
+    assert.ok(panel.includes(marker), `panel missing marker: ${marker}`);
+  }
+
+  const cssMarkers = [
+    '.v3d-xc-panel',
+    '.v3d-xc-toolbar',
+    '.v3d-xc-route',
+    '.v3d-xc-route-card',
+    '.v3d-xc-status',
+    '.v3d-xc-report-grid',
+  ];
+
+  for (const marker of cssMarkers) {
+    assert.ok(css.includes(marker), `viewer3d.css missing marker: ${marker}`);
+  }
+
+  console.log('[PASS] Viewer3D XML Compare route report UI markers passed.');
+}
+
+try {
+  run();
+} catch (error) {
+  console.error('[FAIL] Viewer3D XML Compare route report UI markers failed.');
+  console.error(error);
+  process.exit(1);
+}
+```
+
+---
+
+## 7. Add
+
+```text
+viewer/tests/viewer3d-xml-compare-ui-no-rvm-import.test.js
+```
+
+```js
+import assert from 'assert/strict';
+import fs from 'fs';
+import path from 'path';
+
+function readIfExists(file) {
+  const full = path.resolve(file);
+  return fs.existsSync(full) ? fs.readFileSync(full, 'utf-8') : '';
+}
+
+function run() {
+  console.log('--- viewer3d-xml-compare-ui-no-rvm-import.test.js ---');
+
+  const files = [
+    'viewer/tabs/viewer3d-xml-compare-panel.js',
+    'viewer/tabs/viewer3d-tab.js',
+    'viewer/styles/viewer3d.css',
+  ];
+
+  for (const file of files) {
+    const text = readIfExists(file);
+    assert.ok(text, `expected file to exist: ${file}`);
+
+    assert.ok(
+      !/viewer3d-rvm-tab|rvm-viewer|rvm-pcf-extract|viewer\/rvm\/|RvmPcf|RvmSupport|RvmTag/i.test(text),
+      `${file} must not import or reference RVM-specific modules for this feature`
+    );
+
+    assert.ok(
+      !/buildPcfFromContinuity|pcfxDocumentFromPcfText|PcfEmitter|CII/i.test(text),
+      `${file} must not emit PCF/CII`
+    );
+  }
+
+  console.log('[PASS] Viewer3D XML Compare UI no-RVM/no-emitter boundary passed.');
+}
+
+try {
+  run();
+} catch (error) {
+  console.error('[FAIL] Viewer3D XML Compare UI no-RVM/no-emitter boundary failed.');
+  console.error(error);
+  process.exit(1);
+}
+```
+
+---
+
+# Mandatory verification commands
+
+Run Agent D tests:
+
+```bash
+cd PCF_GLB_Viewer_Conv
+
+node viewer/tests/viewer3d-xml-compare-route-selector.test.js
+node viewer/tests/viewer3d-xml-compare-panel-mount.test.js
+node viewer/tests/viewer3d-xml-compare-route-report-ui.test.js
+node viewer/tests/viewer3d-xml-compare-ui-no-rvm-import.test.js
+```
+
+Re-run Agent A/B/C/E tests:
+
+```bash
+node viewer/tests/inputxml-import-routes.test.js
+node viewer/tests/native-xml-direct-builder-smoke.test.js
+node viewer/tests/import-from-raw-parser-native-route-regression.test.js
+node viewer/tests/inputxml-routing-no-rvm-import.test.js
+
+node viewer/tests/inputxml-uxml-to-viewer-components.test.js
+node viewer/tests/inputxml-uxml-roundtrip-route.test.js
+node viewer/tests/inputxml-uxml-roundtrip-diagnostics.test.js
+node viewer/tests/inputxml-uxml-roundtrip-no-rvm-import.test.js
+
+node viewer/tests/inputxml-import-router-native.test.js
+node viewer/tests/inputxml-import-router-uxml.test.js
+node viewer/tests/inputxml-import-router-schema.test.js
+node viewer/tests/inputxml-import-router-no-rvm-import.test.js
+
+node viewer/tests/inputxml-route-report-native.test.js
+node viewer/tests/inputxml-route-report-uxml.test.js
+node viewer/tests/inputxml-route-report-diagnostics.test.js
+node viewer/tests/inputxml-route-report-no-rvm-import.test.js
+```
+
+If Vitest is available:
+
+```bash
+pnpm vitest run \
+  viewer/tests/viewer3d-xml-compare-route-selector.test.js \
+  viewer/tests/viewer3d-xml-compare-panel-mount.test.js \
+  viewer/tests/viewer3d-xml-compare-route-report-ui.test.js \
+  viewer/tests/viewer3d-xml-compare-ui-no-rvm-import.test.js \
+  viewer/tests/inputxml-import-routes.test.js \
+  viewer/tests/native-xml-direct-builder-smoke.test.js \
+  viewer/tests/import-from-raw-parser-native-route-regression.test.js \
+  viewer/tests/inputxml-routing-no-rvm-import.test.js \
+  viewer/tests/inputxml-uxml-to-viewer-components.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-route.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-diagnostics.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-no-rvm-import.test.js \
+  viewer/tests/inputxml-import-router-native.test.js \
+  viewer/tests/inputxml-import-router-uxml.test.js \
+  viewer/tests/inputxml-import-router-schema.test.js \
+  viewer/tests/inputxml-import-router-no-rvm-import.test.js \
+  viewer/tests/inputxml-route-report-native.test.js \
+  viewer/tests/inputxml-route-report-uxml.test.js \
+  viewer/tests/inputxml-route-report-diagnostics.test.js \
+  viewer/tests/inputxml-route-report-no-rvm-import.test.js
+```
+
+If `pnpm` is unavailable, use `npx vitest run ...`.
+
+Do not claim Vitest passed if unavailable. Report:
+
+```text
+Vitest not available in environment; node tests passed.
+```
+
+---
+
+# Browser smoke test
+
+Mandatory if browser environment is available:
+
+```text
+1. Open app.
+2. Go to normal 3D Viewer, not 3D RVM Viewer.
+3. Confirm XML Diff side tab exists.
+4. Open XML Diff.
+5. Confirm route selector exists.
+6. Select UXML Round Trip.
+7. Load XML A.
+8. Confirm XML A route report appears.
+9. Select Native XML Builder.
+10. Load XML B.
+11. Confirm XML B route report appears.
+12. Click Preview.
+13. Click Clear.
+14. Confirm no console errors.
+15. Confirm 3D RVM Viewer was not modified.
+```
+
+If browser smoke cannot be run, report:
+
+```text
+Browser smoke not run in this environment.
+```
+
+---
+
+# Required final report format
+
+When complete, report exactly:
+
+```text
+Agent D complete.
+
+Changed files:
+- viewer/tabs/viewer3d-xml-compare-panel.js
+- viewer/tabs/viewer3d-tab.js
+- viewer/styles/viewer3d.css
+- viewer/tests/viewer3d-xml-compare-route-selector.test.js
+- viewer/tests/viewer3d-xml-compare-panel-mount.test.js
+- viewer/tests/viewer3d-xml-compare-route-report-ui.test.js
+- viewer/tests/viewer3d-xml-compare-ui-no-rvm-import.test.js
+
+Tests:
+[PASS/FAIL] node viewer/tests/viewer3d-xml-compare-route-selector.test.js
+[PASS/FAIL] node viewer/tests/viewer3d-xml-compare-panel-mount.test.js
+[PASS/FAIL] node viewer/tests/viewer3d-xml-compare-route-report-ui.test.js
+[PASS/FAIL] node viewer/tests/viewer3d-xml-compare-ui-no-rvm-import.test.js
+[PASS/FAIL] Agent A regression node tests
+[PASS/FAIL] Agent B regression node tests
+[PASS/FAIL] Agent C regression node tests
+[PASS/FAIL] Agent E regression node tests
+[PASS/FAIL/SKIPPED] vitest command
+[PASS/FAIL/SKIPPED] browser smoke
+
+Boundary:
+- Normal 3D Viewer XML Diff tab added: YES/NO
+- 3D RVM Viewer untouched: YES/NO
+- No RVM imports added: YES/NO
+- No PCF/CII emitter called: YES/NO
+- Route selector persists selected route: YES/NO
+- XML A/B route report displays: YES/NO
+
+git diff --name-only origin/main...HEAD:
+<paste output>
+```
+
+---
+
+# Pass criteria
+
+Agent D is accepted only when:
+
+```text
+viewer3d-xml-compare-panel.js exists.
+mountXmlComparePanel() exported.
+3D Viewer has XML Diff side tab.
+InputXML Route selector exists.
+Route selector uses persistInputXmlImportRoute().
+XML A/B load through importInputXmlByRoute().
+Route reports are built using buildInputXmlRouteReport().
+Route report lines display in panel.
+Clear action clears loaded state and callback.
+All Agent D node tests pass.
+Agent A/B/C/E regression tests still pass.
+Vitest attempted if available.
+Browser smoke attempted if available.
+No RVM-specific import/reference added.
+No PCF/CII emitter added.
+No unrelated files modified.
+```
+
+After Agent D passes, proceed to **Agent F — Certification Runner + Final Boundary Tests**.
+
+
+
+--------------------------------------------------
+Some earlier uploaded files have expired; re-upload only if the agent needs exact local-file inspection. Below is **Agent F prompt only**.
+
+---
+
+# Agent F Prompt — Certification Runner + Final Boundary Tests
+
+## Mission
+
+Create the final certification layer for the InputXML dual-route implementation.
+
+This agent must not add new feature logic. It only adds:
+
+```text
+1. One certification runner for all InputXML routing tests.
+2. Final no-RVM boundary test.
+3. Final app integration/source smoke test.
+4. Optional Playwright browser smoke.
+5. Final required verification command list.
+```
+
+This is the last QA/certification slice after Agents A, B, C, E, and D.
+
+---
+
+# Prerequisite
+
+Start only after these agents are complete:
+
+```text
+Agent A — route constants + native extraction
+Agent B — UXML round-trip route
+Agent C — common import router
+Agent E — route report model
+Agent D — 3D Viewer XML Diff route selector
+```
+
+Required files should already exist:
+
+```text
+viewer/xml-compare/InputXmlImportRoutes.js
+viewer/js/pcf2glb/import/NativeXmlDirectBuilder.js
+viewer/xml-compare/InputXmlUxmlToViewerComponents.js
+viewer/xml-compare/InputXmlUxmlRoundTripRoute.js
+viewer/xml-compare/InputXmlImportRouter.js
+viewer/xml-compare/InputXmlRouteReport.js
+viewer/tabs/viewer3d-xml-compare-panel.js
+```
+
+---
+
+# Mandatory boundaries
+
+## Do not touch
+
+```text
+viewer/tabs/viewer3d-rvm-tab.js
+viewer/rvm/**
+viewer/rvm-viewer/**
+viewer/rvm-pcf-extract/**
+```
+
+## Do not modify feature implementation unless a test exposes a real integration error
+
+Preferred Agent F files:
+
+```text
+viewer/tests/inputxml-routing-certification.mjs
+viewer/tests/inputxml-routing-final-boundary.test.js
+viewer/tests/inputxml-routing-final-integration.test.js
+viewer/tests/browser/viewer3d-inputxml-routing-smoke.spec.js
+```
+
+---
+
+# 1. Create certification runner
+
+Create:
+
+```text
+viewer/tests/inputxml-routing-certification.mjs
+```
+
+Use this exact style:
+
+```js
+import { spawnSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+
+const TESTS = [
+  // Agent A
+  'viewer/tests/inputxml-import-routes.test.js',
+  'viewer/tests/native-xml-direct-builder-smoke.test.js',
+  'viewer/tests/import-from-raw-parser-native-route-regression.test.js',
+  'viewer/tests/inputxml-routing-no-rvm-import.test.js',
+
+  // Agent B
+  'viewer/tests/inputxml-uxml-to-viewer-components.test.js',
+  'viewer/tests/inputxml-uxml-roundtrip-route.test.js',
+  'viewer/tests/inputxml-uxml-roundtrip-diagnostics.test.js',
+  'viewer/tests/inputxml-uxml-roundtrip-no-rvm-import.test.js',
+
+  // Agent C
+  'viewer/tests/inputxml-import-router-native.test.js',
+  'viewer/tests/inputxml-import-router-uxml.test.js',
+  'viewer/tests/inputxml-import-router-schema.test.js',
+  'viewer/tests/inputxml-import-router-no-rvm-import.test.js',
+
+  // Agent E
+  'viewer/tests/inputxml-route-report-native.test.js',
+  'viewer/tests/inputxml-route-report-uxml.test.js',
+  'viewer/tests/inputxml-route-report-diagnostics.test.js',
+  'viewer/tests/inputxml-route-report-no-rvm-import.test.js',
+
+  // Agent D
+  'viewer/tests/viewer3d-xml-compare-route-selector.test.js',
+  'viewer/tests/viewer3d-xml-compare-panel-mount.test.js',
+  'viewer/tests/viewer3d-xml-compare-route-report-ui.test.js',
+  'viewer/tests/viewer3d-xml-compare-ui-no-rvm-import.test.js',
+
+  // Agent F
+  'viewer/tests/inputxml-routing-final-boundary.test.js',
+  'viewer/tests/inputxml-routing-final-integration.test.js',
+];
+
+function exists(file) {
+  return fs.existsSync(path.resolve(file));
+}
+
+function run() {
+  console.log('--- InputXML routing certification runner ---');
+
+  const missing = TESTS.filter(test => !exists(test));
+
+  if (missing.length) {
+    console.error('\n[FAIL] Missing certification test file(s):');
+    for (const file of missing) {
+      console.error(` - ${file}`);
+    }
+    process.exit(1);
+  }
+
+  const failures = [];
+
+  for (const test of TESTS) {
+    console.log(`\n[RUN] ${test}`);
+
+    const result = spawnSync(process.execPath, [path.resolve(test)], {
+      stdio: 'inherit',
+      env: process.env,
+    });
+
+    if (result.status !== 0) {
+      failures.push(test);
+    }
+  }
+
+  if (failures.length) {
+    console.error('\n[FAIL] InputXML routing certification failed.');
+    for (const failure of failures) {
+      console.error(` - ${failure}`);
+    }
+    process.exit(1);
+  }
+
+  console.log('\n[PASS] InputXML routing certification passed.');
+}
+
+run();
+```
+
+---
+
+# 2. Add final boundary test
+
+Create:
+
+```text
+viewer/tests/inputxml-routing-final-boundary.test.js
+```
+
+```js
+import assert from 'assert/strict';
+import fs from 'fs';
+import path from 'path';
+
+function readIfExists(file) {
+  const full = path.resolve(file);
+  return fs.existsSync(full) ? fs.readFileSync(full, 'utf-8') : '';
+}
+
+function run() {
+  console.log('--- inputxml-routing-final-boundary.test.js ---');
+
+  const files = [
+    'viewer/xml-compare/InputXmlImportRoutes.js',
+    'viewer/js/pcf2glb/import/NativeXmlDirectBuilder.js',
+    'viewer/xml-compare/InputXmlUxmlToViewerComponents.js',
+    'viewer/xml-compare/InputXmlUxmlRoundTripRoute.js',
+    'viewer/xml-compare/InputXmlImportRouter.js',
+    'viewer/xml-compare/InputXmlRouteReport.js',
+    'viewer/tabs/viewer3d-xml-compare-panel.js',
+    'viewer/tabs/viewer3d-tab.js',
+    'viewer/styles/viewer3d.css',
+  ];
+
+  const rvmForbidden = /viewer3d-rvm-tab|rvm-viewer|rvm-pcf-extract|viewer\/rvm\/|RvmPcf|RvmSupport|RvmTag/i;
+  const emitterForbidden = /buildPcfFromContinuity|pcfxDocumentFromPcfText|PcfEmitter|CII/i;
+
+  for (const file of files) {
+    const text = readIfExists(file);
+
+    assert.ok(text, `expected file to exist: ${file}`);
+
+    assert.ok(
+      !rvmForbidden.test(text),
+      `${file} must not import or reference RVM-specific modules`
+    );
+
+    assert.ok(
+      !emitterForbidden.test(text),
+      `${file} must not emit PCF/CII`
+    );
+  }
+
+  const rvmTab = readIfExists('viewer/tabs/viewer3d-rvm-tab.js');
+  assert.ok(rvmTab, '3D RVM Viewer tab must still exist');
+
+  const normalTab = readIfExists('viewer/tabs/viewer3d-tab.js');
+  assert.ok(
+    normalTab.includes('viewer3d-xml-compare-panel.js'),
+    'normal 3D Viewer must mount XML Compare panel'
+  );
+
+  assert.ok(
+    normalTab.includes('data-viewer3d-side-tab="xml-diff"') ||
+    normalTab.includes("data-viewer3d-side-tab='xml-diff'"),
+    'normal 3D Viewer must contain XML Diff side-tab marker'
+  );
+
+  console.log('[PASS] InputXML routing final boundary passed.');
+}
+
+try {
+  run();
+} catch (error) {
+  console.error('[FAIL] InputXML routing final boundary failed.');
+  console.error(error);
+  process.exit(1);
+}
+```
+
+---
+
+# 3. Add final integration/source test
+
+Create:
+
+```text
+viewer/tests/inputxml-routing-final-integration.test.js
+```
+
+```js
+import assert from 'assert/strict';
+import fs from 'fs';
+import path from 'path';
+
+function read(file) {
+  return fs.readFileSync(path.resolve(file), 'utf-8');
+}
+
+async function run() {
+  console.log('--- inputxml-routing-final-integration.test.js ---');
+
+  const {
+    INPUTXML_IMPORT_ROUTES,
+    normalizeInputXmlImportRoute,
+  } = await import('../xml-compare/InputXmlImportRoutes.js');
+
+  const {
+    importInputXmlByRoute,
+  } = await import('../xml-compare/InputXmlImportRouter.js');
+
+  const {
+    buildInputXmlRouteReport,
+    formatInputXmlRouteReportLines,
+  } = await import('../xml-compare/InputXmlRouteReport.js');
+
+  assert.equal(
+    normalizeInputXmlImportRoute('BAD'),
+    INPUTXML_IMPORT_ROUTES.UXML_ROUND_TRIP,
+    'bad route must normalize to UXML_ROUND_TRIP'
+  );
+
+  const xmlText = `
+    <InputXML>
+      <Components>
+        <Component id="P1" type="PIPE" pipelineRef="LINE-1" refNo="10" seqNo="1" ep1="0 0 0" ep2="100 0 0" bore="100" />
+      </Components>
+    </InputXML>
+  `;
+
+  const nativeResult = importInputXmlByRoute(xmlText, {
+    route: INPUTXML_IMPORT_ROUTES.NATIVE_XML_BUILDER,
+    fileName: 'final-native.xml',
+    allowPartialImport: true,
+  });
+
+  assert.equal(nativeResult.schema, 'inputxml-import-router/v1');
+  assert.equal(nativeResult.route, INPUTXML_IMPORT_ROUTES.NATIVE_XML_BUILDER);
+  assert.ok(nativeResult.directPcfData, 'native route must return directPcfData');
+  assert.ok(Array.isArray(nativeResult.components), 'native route must return components array');
+
+  const nativeReport = buildInputXmlRouteReport(nativeResult);
+  assert.equal(nativeReport.schema, 'inputxml-route-report/v1');
+  assert.equal(nativeReport.route, INPUTXML_IMPORT_ROUTES.NATIVE_XML_BUILDER);
+  assert.equal(nativeReport.mode, 'native');
+  assert.ok(formatInputXmlRouteReportLines(nativeReport).some(line => line.includes('Native XML Builder')));
+
+  const uxmlResult = importInputXmlByRoute(xmlText, {
+    route: INPUTXML_IMPORT_ROUTES.UXML_ROUND_TRIP,
+    fileName: 'final-uxml.xml',
+    allowPartialImport: true,
+  });
+
+  assert.equal(uxmlResult.schema, 'inputxml-import-router/v1');
+  assert.equal(uxmlResult.route, INPUTXML_IMPORT_ROUTES.UXML_ROUND_TRIP);
+  assert.ok(uxmlResult.directPcfData, 'UXML route must return directPcfData wrapper');
+  assert.ok(uxmlResult.uxmlRoundTrip, 'UXML route must include uxmlRoundTrip payload');
+  assert.ok(Array.isArray(uxmlResult.components), 'UXML route must return components array');
+
+  const uxmlReport = buildInputXmlRouteReport(uxmlResult);
+  assert.equal(uxmlReport.schema, 'inputxml-route-report/v1');
+  assert.equal(uxmlReport.route, INPUTXML_IMPORT_ROUTES.UXML_ROUND_TRIP);
+  assert.equal(uxmlReport.mode, 'uxml-round-trip');
+  assert.ok(formatInputXmlRouteReportLines(uxmlReport).some(line => line.includes('UXML Round Trip')));
+
+  const panel = read('viewer/tabs/viewer3d-xml-compare-panel.js');
+  assert.ok(panel.includes('importInputXmlByRoute'), 'panel must use common router');
+  assert.ok(panel.includes('buildInputXmlRouteReport'), 'panel must build route reports');
+  assert.ok(panel.includes('persistInputXmlImportRoute'), 'panel must persist selected route');
+
+  const importer = read('viewer/js/pcf2glb/import/ImportFromRawParser.js');
+  assert.ok(
+    importer.includes('buildNativeXmlDirectData(parsed, fileName, defaults)'),
+    'ImportFromRawParser XML branch must use extracted native builder'
+  );
+
+  console.log('[PASS] InputXML routing final integration passed.');
+}
+
+run().catch(error => {
+  console.error('[FAIL] InputXML routing final integration failed.');
+  console.error(error);
+  process.exit(1);
+});
+```
+
+---
+
+# 4. Optional browser smoke
+
+Create:
+
+```text
+viewer/tests/browser/viewer3d-inputxml-routing-smoke.spec.js
+```
+
+```js
+import { test, expect } from '@playwright/test';
+
+test('3D Viewer XML Diff route selector shell renders', async ({ page }) => {
+  await page.goto('/');
+
+  await page.getByText('3D Viewer', { exact: true }).click();
+
+  const xmlDiffTab = page.getByText('XML Diff', { exact: true });
+  await expect(xmlDiffTab).toBeVisible();
+  await xmlDiffTab.click();
+
+  await expect(page.getByText('InputXML Route')).toBeVisible();
+  await expect(page.getByText('UXML Round Trip')).toBeVisible();
+  await expect(page.getByText('Native XML Builder')).toBeVisible();
+
+  await expect(page.getByText('Load XML A')).toBeVisible();
+  await expect(page.getByText('Load XML B')).toBeVisible();
+
+  await expect(page.getByText('Preview')).toBeVisible();
+  await expect(page.getByText('Compare')).toBeVisible();
+  await expect(page.getByText('Clear')).toBeVisible();
+});
+```
+
+Only run if Playwright is configured:
+
+```bash
+npx playwright test viewer/tests/browser/viewer3d-inputxml-routing-smoke.spec.js
+```
+
+---
+
+# 5. Optional package script
+
+Only add this if the project already uses `package.json` scripts for test runners. Do not add if not consistent.
+
+```json
+{
+  "scripts": {
+    "test:inputxml-routing": "node viewer/tests/inputxml-routing-certification.mjs"
+  }
+}
+```
+
+If modifying `package.json`, add it to final changed files and explain why.
+
+---
+
+# Mandatory verification commands
+
+Run:
+
+```bash
+cd PCF_GLB_Viewer_Conv
+
+node viewer/tests/inputxml-routing-final-boundary.test.js
+node viewer/tests/inputxml-routing-final-integration.test.js
+node viewer/tests/inputxml-routing-certification.mjs
+```
+
+If Vitest is available, run the full test list:
+
+```bash
+pnpm vitest run \
+  viewer/tests/inputxml-import-routes.test.js \
+  viewer/tests/native-xml-direct-builder-smoke.test.js \
+  viewer/tests/import-from-raw-parser-native-route-regression.test.js \
+  viewer/tests/inputxml-routing-no-rvm-import.test.js \
+  viewer/tests/inputxml-uxml-to-viewer-components.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-route.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-diagnostics.test.js \
+  viewer/tests/inputxml-uxml-roundtrip-no-rvm-import.test.js \
+  viewer/tests/inputxml-import-router-native.test.js \
+  viewer/tests/inputxml-import-router-uxml.test.js \
+  viewer/tests/inputxml-import-router-schema.test.js \
+  viewer/tests/inputxml-import-router-no-rvm-import.test.js \
+  viewer/tests/inputxml-route-report-native.test.js \
+  viewer/tests/inputxml-route-report-uxml.test.js \
+  viewer/tests/inputxml-route-report-diagnostics.test.js \
+  viewer/tests/inputxml-route-report-no-rvm-import.test.js \
+  viewer/tests/viewer3d-xml-compare-route-selector.test.js \
+  viewer/tests/viewer3d-xml-compare-panel-mount.test.js \
+  viewer/tests/viewer3d-xml-compare-route-report-ui.test.js \
+  viewer/tests/viewer3d-xml-compare-ui-no-rvm-import.test.js \
+  viewer/tests/inputxml-routing-final-boundary.test.js \
+  viewer/tests/inputxml-routing-final-integration.test.js
+```
+
+If `pnpm` is unavailable, use:
+
+```bash
+npx vitest run <same test list>
+```
+
+Do not claim Vitest passed if unavailable. Report:
+
+```text
+Vitest not available in environment; node certification passed.
+```
+
+Browser smoke, if available:
+
+```bash
+npx playwright test viewer/tests/browser/viewer3d-inputxml-routing-smoke.spec.js
+```
+
+---
+
+# Required final report format
+
+When complete, report exactly:
+
+```text
+Agent F complete.
+
+Changed files:
+- viewer/tests/inputxml-routing-certification.mjs
+- viewer/tests/inputxml-routing-final-boundary.test.js
+- viewer/tests/inputxml-routing-final-integration.test.js
+- viewer/tests/browser/viewer3d-inputxml-routing-smoke.spec.js
+- package.json   (ONLY IF MODIFIED)
+
+Tests:
+[PASS/FAIL] node viewer/tests/inputxml-routing-final-boundary.test.js
+[PASS/FAIL] node viewer/tests/inputxml-routing-final-integration.test.js
+[PASS/FAIL] node viewer/tests/inputxml-routing-certification.mjs
+[PASS/FAIL/SKIPPED] vitest command
+[PASS/FAIL/SKIPPED] playwright browser smoke
+
+Boundary:
+- No RVM files touched: YES/NO
+- No RVM imports added: YES/NO
+- No PCF/CII emitter called: YES/NO
+- Native route certified: YES/NO
+- UXML route certified: YES/NO
+- 3D Viewer XML Diff UI certified: YES/NO
+- Certification runner passes: YES/NO
+
+git diff --name-only origin/main...HEAD:
+<paste output>
+```
+
+---
+
+# Pass criteria
+
+Agent F is accepted only when:
+
+```text
+Certification runner exists.
+Final boundary test exists.
+Final integration test exists.
+Certification runner executes all Agent A/B/C/E/D/F tests.
+Native route passes certification.
+UXML route passes certification.
+3D Viewer XML Diff route selector passes certification.
+No RVM-specific import/reference added.
+No PCF/CII emitter added.
+Vitest attempted if available.
+Browser smoke attempted if available.
+No unrelated files modified.
+```
+--------------------------------------------------------
+
