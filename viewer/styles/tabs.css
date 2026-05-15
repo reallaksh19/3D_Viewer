@@ -60,5 +60,48 @@
   flex-direction: column;
 }
 
+/* Tab group separators and labels */
+.tab-group-sep {
+  display: inline-block;
+  width: 1px;
+  background: rgba(255,255,255,0.12);
+  margin: 6px 4px;
+  align-self: stretch;
+  flex-shrink: 0;
+}
+
+.tab-group-label {
+  display: inline-flex;
+  align-items: flex-end;
+  padding: 0 4px 4px;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(160,184,208,0.45);
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
+  align-self: flex-end;
+  line-height: 1;
+}
+
+/* Config group tabs — slightly muted to signal secondary nature */
+.tab-btn[data-group="Config"] {
+  color: #7a96b0;
+  font-size: 11px;
+}
+.tab-btn[data-group="Config"]:hover { color: #c0d4e8; }
+.tab-btn[data-group="Config"].active { color: #fff; }
+
+/* Dev group tabs */
+.tab-btn[data-group="Dev"] {
+  color: #5a7890;
+  font-size: 11px;
+  font-style: italic;
+}
+.tab-btn[data-group="Dev"]:hover { color: #90aac0; }
+.tab-btn[data-group="Dev"].active { color: #e0a870; border-bottom-color: #e0a870; }
+
 /* Print-only section wrappers (hidden on screen, shown only at @media print) */
 .print-only { display: none !important; }

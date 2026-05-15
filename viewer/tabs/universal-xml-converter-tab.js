@@ -59,24 +59,26 @@ const PIPELINE_STAGES = Object.freeze([
   { id: 'source', title: '1. Source Intake', description: 'Load PDF, REV, JSON, TXT, PCF, or XML source.' },
   { id: 'existing-converter', title: '2. Existing Converter Output', description: 'Use existing converter routes to produce InputXML or Standard XML.' },
   { id: 'uxml', title: '3. UXML Normalization', description: 'Normalize InputXML, Standard XML, or UXML into the Universal XML contract.' },
-  { id: 'validation', title: '4. UXML Validation', description: 'Validate UXML structure, anchors, bore, branches, supports, and loss contract.' },
-  { id: 'face-model', title: '5. Pre-Topology Face Model', description: 'Emit component/fitting faces for RayTopoBuilder before final topology.' },
-  { id: 'universal-topology', title: '6. UniversalTopoGraph', description: 'Build a source-faithful topology graph from UXML faces.' },
-  { id: 'ray-topology', title: '7. RayTopoGraph', description: 'Run the legacy-inspired Ray topology as an independent benchmark.' },
-  { id: 'comparison', title: '8. Topology Comparison', description: 'Compare UniversalTopoGraph and RayTopoGraph evidence.' },
-  { id: 'decision-gate', title: '9. Decision Gate', description: 'Convert comparator evidence into accepted, manual, or rejected topology decisions.' },
-  { id: 'route-handoff', title: '10. Route Handoff Policy', description: 'Decide what downstream route may receive accepted topology evidence.' },
-  { id: 'cl1-package', title: '11. CL1 Route Package', description: 'Create deterministic downstream route payload metadata without emitting PCF.' },
-  { id: 'cl1-snapshot', title: '12. CL1 Snapshot JSON', description: 'Create deterministic debug/replay JSON snapshot from the CL1 package.' },
-  { id: 'cl1-replay', title: '13. CL1 Replay Validator', description: 'Validate saved CL1 snapshot structure for debug/replay readiness.' },
-  { id: 'cl1-summary', title: '14. CL1 QA Summary', description: 'One-screen status summary for decision, route handoff, CL1 package, and replay validation.' },
-  { id: 'outputs', title: '15. Route Targets', description: 'Target routes such as Extract PCF, GLB, 2D, InputXML, or CII.' },
-  { id: 'masters', title: '16. Masters by Target Route', description: 'Masters are handled by the downstream route. JSON/RVM -> PCF uses the existing legacy master route.' },
+  { id: 'geometry-preview', title: '4. Geometry Preview', description: 'Render a lightweight UXML segment preview before topology decisions.' },
+  { id: 'validation', title: '5. UXML Validation', description: 'Validate UXML structure, anchors, bore, branches, supports, and loss contract.' },
+  { id: 'face-model', title: '6. Pre-Topology Face Model', description: 'Emit component/fitting faces for RayTopoBuilder before final topology.' },
+  { id: 'universal-topology', title: '7. UniversalTopoGraph', description: 'Build a source-faithful topology graph from UXML faces.' },
+  { id: 'ray-topology', title: '8. RayTopoGraph', description: 'Run the legacy-inspired Ray topology as an independent benchmark.' },
+  { id: 'comparison', title: '9. Topology Comparison', description: 'Compare UniversalTopoGraph and RayTopoGraph evidence.' },
+  { id: 'decision-gate', title: '10. Decision Gate', description: 'Convert comparator evidence into accepted, manual, or rejected topology decisions.' },
+  { id: 'route-handoff', title: '11. Route Handoff Policy', description: 'Decide what downstream route may receive accepted topology evidence.' },
+  { id: 'cl1-package', title: '12. Route Package', description: 'Create deterministic downstream route payload metadata without emitting PCF.' },
+  { id: 'cl1-snapshot', title: '13. Snapshot JSON', description: 'Create deterministic debug/replay JSON snapshot from the CL1 package.' },
+  { id: 'cl1-replay', title: '14. Replay Validator', description: 'Validate saved CL1 snapshot structure for debug/replay readiness.' },
+  { id: 'cl1-summary', title: '15. QA Summary', description: 'One-screen status summary for decision, route handoff, CL1 package, and replay validation.' },
+  { id: 'outputs', title: '16. Route Targets', description: 'Target routes such as Extract PCF, GLB, 2D, InputXML, or CII.' },
+  { id: 'masters', title: '17. Masters by Target Route', description: 'Masters are handled by the downstream route. JSON/RVM -> PCF uses the existing legacy master route.' },
 ]);
 
 const FULL_PIPELINE_ACTIONS = Object.freeze([
   'detect-profile',
   'convert-uxml',
+  'build-geometry-preview',
   'validate-uxml',
   'build-face-model',
   'build-universal-topology',
@@ -89,6 +91,57 @@ const FULL_PIPELINE_ACTIONS = Object.freeze([
   'run-cl1-replay',
   'run-cl1-summary',
 ]);
+
+// ── UI grouping constants ──────────────────────────────────────────────────
+
+const STAGE_SHORT_TITLES = Object.freeze({
+  'source':             'Source Intake',
+  'existing-converter': 'Existing Conv.',
+  'uxml':               'UXML Normalize',
+  'geometry-preview':   'Geometry Preview',
+  'validation':         'UXML Validation',
+  'face-model':         'Face Model',
+  'universal-topology': 'Universal Topo',
+  'ray-topology':       'Ray TopoGraph',
+  'comparison':         'Topo Compare',
+  'decision-gate':      'Decision Gate',
+  'route-handoff':      'Route Handoff',
+  'cl1-package':        'Package',
+  'cl1-snapshot':       'Snapshot',
+  'cl1-replay':         'Replay',
+  'cl1-summary':        'QA Summary',
+  'outputs':            'Route Targets',
+  'masters':            'Masters/Route',
+});
+
+const STAGE_GROUPS = Object.freeze([
+  { label: 'Input',        stages: ['source', 'existing-converter'] },
+  { label: 'Normalize',    stages: ['uxml', 'geometry-preview'] },
+  { label: 'Validate',     stages: ['validation', 'face-model'] },
+  { label: 'Topology',     stages: ['universal-topology', 'ray-topology', 'comparison', 'decision-gate'] },
+  { label: 'Pipeline', stages: ['route-handoff', 'cl1-package', 'cl1-snapshot', 'cl1-replay', 'cl1-summary'] },
+  { label: 'Downstream',   stages: ['outputs', 'masters'] },
+]);
+
+const STAGE_TO_ACTION = Object.freeze({
+  'source':             null,
+  'existing-converter': null,
+  'uxml':               'convert-uxml',
+  'geometry-preview':   'build-geometry-preview',
+  'validation':         'validate-uxml',
+  'face-model':         'build-face-model',
+  'universal-topology': 'build-universal-topology',
+  'ray-topology':       'build-ray-topology',
+  'comparison':         'compare-topology',
+  'decision-gate':      'run-decision-gate',
+  'route-handoff':      'run-route-handoff',
+  'cl1-package':        'run-cl1-package',
+  'cl1-snapshot':       'run-cl1-snapshot',
+  'cl1-replay':         'run-cl1-replay',
+  'cl1-summary':        'run-cl1-summary',
+  'outputs':            null,
+  'masters':            null,
+});
 
 function esc(value) {
   return String(value ?? '')
@@ -189,6 +242,7 @@ function createInitialState() {
       profileReport: null,
       normalizerResult: null,
       uxml: null,
+      geometryPreview: null,
       validationReport: null,
       faceModel: null,
       universalGraph: null,
@@ -205,6 +259,7 @@ function createInitialState() {
       source: null,
       'existing-converter': null,
       uxml: null,
+      'geometry-preview': null,
       validation: null,
       'face-model': null,
       'universal-topology': null,
@@ -290,6 +345,131 @@ function setSourceReport(state, profileReport) {
   });
 }
 
+function isFinitePoint(point) {
+  return point &&
+    Number.isFinite(Number(point.x)) &&
+    Number.isFinite(Number(point.y)) &&
+    Number.isFinite(Number(point.z));
+}
+
+function pointKey(point) {
+  return [
+    Number(point.x).toFixed(3),
+    Number(point.y).toFixed(3),
+    Number(point.z).toFixed(3),
+  ].join(',');
+}
+
+function buildUxmlGeometryPreview(uxml) {
+  const anchors = Array.isArray(uxml?.anchors) ? uxml.anchors : [];
+  const segments = Array.isArray(uxml?.segments) ? uxml.segments : [];
+  const components = Array.isArray(uxml?.components) ? uxml.components : [];
+  const anchorById = new Map(anchors.map(anchor => [anchor.id, anchor]));
+  const componentById = new Map(components.map(component => [component.id, component]));
+  const lines = [];
+  const coordCounts = new Map();
+  const componentTypeCounts = {};
+  let zeroBoreComponentCount = 0;
+  let missingSegmentComponentCount = 0;
+
+  for (const anchor of anchors) {
+    if (!isFinitePoint(anchor.point)) continue;
+    const key = pointKey(anchor.point);
+    coordCounts.set(key, (coordCounts.get(key) || 0) + 1);
+  }
+
+  for (const component of components) {
+    const componentType = String(component.normalizedType || component.type || 'UNKNOWN').toUpperCase();
+    componentTypeCounts[componentType] = (componentTypeCounts[componentType] || 0) + 1;
+
+    if (!Number.isFinite(Number(component.bore)) || Number(component.bore) <= 0) {
+      zeroBoreComponentCount += 1;
+    }
+    if (!Array.isArray(component.segmentIds) || component.segmentIds.length === 0) {
+      missingSegmentComponentCount += 1;
+    }
+  }
+
+  for (const segment of segments) {
+    const start = anchorById.get(segment.startAnchorId);
+    const end = anchorById.get(segment.endAnchorId);
+    if (!isFinitePoint(start?.point) || !isFinitePoint(end?.point)) continue;
+
+    const component = componentById.get(segment.componentId);
+    lines.push({
+      componentId: segment.componentId,
+      type: component?.normalizedType || component?.type || segment.type || 'UNKNOWN',
+      bore: Number(segment.bore || component?.bore || 0),
+      start: start.point,
+      end: end.point,
+    });
+  }
+
+  const finitePoints = lines.flatMap(line => [line.start, line.end]);
+  const xs = finitePoints.map(point => Number(point.x));
+  const ys = finitePoints.map(point => Number(point.y));
+  const zs = finitePoints.map(point => Number(point.z));
+  const bounds = finitePoints.length ? {
+    minX: Math.min(...xs),
+    maxX: Math.max(...xs),
+    minY: Math.min(...ys),
+    maxY: Math.max(...ys),
+    minZ: Math.min(...zs),
+    maxZ: Math.max(...zs),
+  } : null;
+  const collapsedAnchorGroupCount = [...coordCounts.values()].filter(value => value > 12).length;
+  const allFiniteAnchorsCollapsed = coordCounts.size === 1 && anchors.length > 2;
+  const caesarDetails = (Array.isArray(uxml?.diagnostics) ? uxml.diagnostics : [])
+    .find(diagnostic => diagnostic.code === 'UXML-INPUTXML-CAESAR-PIPINGELEMENTS')?.details || {};
+  const absoluteGeometryCommentCount = count(caesarDetails.absoluteGeometryCommentCount);
+  const seededComponentCount = count(caesarDetails.seededComponentCount);
+  const fallbackCoordinateReconstruction =
+    absoluteGeometryCommentCount === 0 && seededComponentCount > 1;
+  const geometrySource = absoluteGeometryCommentCount > 0
+    ? 'absolute UXML_GEOM'
+    : fallbackCoordinateReconstruction
+      ? 'delta fallback only'
+      : 'source coordinates';
+  const ok = lines.length > 0 &&
+    !allFiniteAnchorsCollapsed &&
+    zeroBoreComponentCount === 0 &&
+    !fallbackCoordinateReconstruction;
+
+  return {
+    schema: 'uxml-geometry-preview/v1',
+    ok,
+    summary: {
+      componentCount: components.length,
+      anchorCount: anchors.length,
+      segmentCount: segments.length,
+      lineCount: lines.length,
+      uniqueAnchorCoordinateCount: coordCounts.size,
+      collapsedAnchorGroupCount,
+      zeroBoreComponentCount,
+      missingSegmentComponentCount,
+      componentTypeCounts,
+      allFiniteAnchorsCollapsed,
+      geometrySource,
+      absoluteGeometryCommentCount,
+      seededComponentCount,
+      fallbackCoordinateReconstruction,
+    },
+    bounds,
+    lines,
+  };
+}
+
+function ensureValidationReady(state, stageName) {
+  if (!state.pipeline.uxml) runPipelineAction(state, 'convert-uxml');
+  const report = state.pipeline.validationReport || runPipelineAction(state, 'validate-uxml');
+
+  if (!report.ready) {
+    throw new Error(`${stageName} blocked because UXML validation has ${count(report.stats?.blockerCount)} blocker(s).`);
+  }
+
+  return report;
+}
+
 export function runPipelineAction(state, action) {
   if (!state || typeof state !== 'object') {
     throw new Error('runPipelineAction requires a state object.');
@@ -331,6 +511,17 @@ export function runPipelineAction(state, action) {
     return result;
   }
 
+  if (action === 'build-geometry-preview') {
+    if (!state.pipeline.uxml) runPipelineAction(state, 'convert-uxml');
+    const preview = buildUxmlGeometryPreview(state.pipeline.uxml);
+    state.pipeline.geometryPreview = preview;
+    state.reports['geometry-preview'] = stageReport('geometry-preview', preview);
+    state.status = preview.ok
+      ? { kind: 'ok', message: `Geometry preview built. Segments=${count(preview.summary?.lineCount)}.` }
+      : { kind: 'warn', message: 'Geometry preview needs review before topology.' };
+    return preview;
+  }
+
   if (action === 'validate-uxml') {
     if (!state.pipeline.uxml) runPipelineAction(state, 'convert-uxml');
     const report = validateUxmlDocument(state.pipeline.uxml);
@@ -343,8 +534,8 @@ export function runPipelineAction(state, action) {
   }
 
   if (action === 'build-face-model') {
-    if (!state.pipeline.uxml) runPipelineAction(state, 'convert-uxml');
-    const model = buildUxmlFaceModel(state.pipeline.uxml, { allowPartial: true });
+    ensureValidationReady(state, 'Face model');
+    const model = buildUxmlFaceModel(state.pipeline.uxml, { allowPartial: false });
     state.pipeline.faceModel = model;
     state.reports['face-model'] = stageReport('face-model', model);
     state.status = model.ok
@@ -354,12 +545,12 @@ export function runPipelineAction(state, action) {
   }
 
   if (action === 'build-universal-topology') {
-    if (!state.pipeline.uxml) runPipelineAction(state, 'convert-uxml');
+    ensureValidationReady(state, 'UniversalTopoGraph');
     if (!state.pipeline.faceModel) runPipelineAction(state, 'build-face-model');
     const graph = buildUxmlUniversalTopoGraph(state.pipeline.uxml, {
       faceModel: state.pipeline.faceModel,
-      allowPartialFaceModel: true,
-      allowBlockedFaceModel: true,
+      allowPartialFaceModel: false,
+      allowBlockedFaceModel: false,
     });
     state.pipeline.universalGraph = graph;
     state.reports['universal-topology'] = stageReport('universal-topology', graph);
@@ -370,14 +561,14 @@ export function runPipelineAction(state, action) {
   }
 
   if (action === 'build-ray-topology') {
-    if (!state.pipeline.uxml) runPipelineAction(state, 'convert-uxml');
+    ensureValidationReady(state, 'RayTopoGraph');
     if (!state.pipeline.faceModel) runPipelineAction(state, 'build-face-model');
     if (!state.pipeline.universalGraph) runPipelineAction(state, 'build-universal-topology');
     const graph = buildUxmlRayTopoGraph(state.pipeline.uxml, {
       faceModel: state.pipeline.faceModel,
       universalGraph: state.pipeline.universalGraph,
-      allowPartialFaceModel: true,
-      allowBlockedFaceModel: true,
+      allowPartialFaceModel: false,
+      allowBlockedFaceModel: false,
     });
     state.pipeline.rayGraph = graph;
     state.reports['ray-topology'] = stageReport('ray-topology', graph);
@@ -388,6 +579,7 @@ export function runPipelineAction(state, action) {
   }
 
   if (action === 'compare-topology') {
+    ensureValidationReady(state, 'Topology comparison');
     if (!state.pipeline.universalGraph) runPipelineAction(state, 'build-universal-topology');
     if (!state.pipeline.rayGraph) runPipelineAction(state, 'build-ray-topology');
     const comparison = compareUxmlTopoGraphs(state.pipeline.uxml, {
@@ -404,11 +596,12 @@ export function runPipelineAction(state, action) {
   }
 
   if (action === 'run-decision-gate') {
+    ensureValidationReady(state, 'Decision gate');
     if (!state.pipeline.comparison) runPipelineAction(state, 'compare-topology');
     const decision = decideUxmlTopologyAcceptance(state.pipeline.uxml, {
       comparison: state.pipeline.comparison,
-      allowPartialExport: true,
-      acceptUniversalOnly: true,
+      allowPartialExport: false,
+      acceptUniversalOnly: false,
       allowSafeRayPromotions: true,
       allowFaceProximityPromotions: false,
       maxPromotionDistanceAlongRayMm: 500,
@@ -426,6 +619,7 @@ export function runPipelineAction(state, action) {
   }
 
   if (action === 'run-route-handoff') {
+    ensureValidationReady(state, 'Route handoff');
     if (!state.pipeline.topologyDecision) runPipelineAction(state, 'run-decision-gate');
     const routeHandoff = createUxmlRouteHandoffPayload({
       targetRoute: UXML_ROUTE_TARGETS.DIAGNOSTICS_ONLY,
@@ -434,7 +628,7 @@ export function runPipelineAction(state, action) {
       acceptedTopologyHandoff: null,
       diagnostics: state.pipeline.uxml?.diagnostics || [],
       lossContract: state.pipeline.uxml?.lossContract || [],
-      allowPartialExport: true,
+      allowPartialExport: false,
     });
     state.pipeline.routeHandoff = routeHandoff;
     state.reports['route-handoff'] = stageReport('route-handoff', routeHandoff);
@@ -446,6 +640,7 @@ export function runPipelineAction(state, action) {
   }
 
   if (action === 'run-cl1-package') {
+    ensureValidationReady(state, 'CL1 package');
     if (!state.pipeline.routeHandoff) runPipelineAction(state, 'run-route-handoff');
     const cl1RoutePackage = createUxmlCl1RoutePackage({
       targetRoute: UXML_ROUTE_TARGETS.EXTRACT_PCF_LEGACY,
@@ -454,7 +649,7 @@ export function runPipelineAction(state, action) {
       acceptedTopologyHandoff: state.pipeline.routeHandoff,
       diagnostics: state.pipeline.uxml?.diagnostics || [],
       lossContract: state.pipeline.uxml?.lossContract || [],
-      allowPartialExport: true,
+      allowPartialExport: false,
       sourceInfo: {
         sourceFile: state.sourceFile?.name || '',
         selectedSourceType: state.selectedSourceType,
@@ -532,12 +727,65 @@ function canRunXmlActions(state) {
   return Boolean(String(state.sourceText || '').trim()) && ['AUTO', 'UXML', 'INPUT_XML', 'EXISTING_XML'].includes(selected);
 }
 
-function renderStageCard(stage, state) {
+// ── Stage rail (compact timeline) ─────────────────────────────────────────
+
+function computeProgress(state) {
+  const active = PIPELINE_STAGES.filter(s => !s.deferred);
+  const done = active.filter(s => state.reports?.[s.id] && reportPass(state.reports[s.id]));
+  const next = active.find(s => !state.reports?.[s.id]);
+  return { total: active.length, done: done.length, next };
+}
+
+function renderPanelHeader(state) {
+  const { total, done, next } = computeProgress(state);
+  const pct = total ? Math.round(done / total * 100) : 0;
+  const nextAction = next ? STAGE_TO_ACTION[next.id] : null;
+  const nextLabel = next ? (STAGE_SHORT_TITLES[next.id] || next.title) : 'All done';
+  const nextBtnHtml = nextAction
+    ? `<button class="uxml-panel-next-btn" data-uxml-action="${esc(nextAction)}" type="button">▶ Next: ${esc(nextLabel)}</button>`
+    : `<span class="uxml-panel-all-done">✓ All stages complete</span>`;
+  return `<div class="uxml-panel-header"><span class="uxml-panel-progress-text">${done} of ${total} complete</span><div class="uxml-panel-progress-bar"><div style="width:${pct}%"></div></div>${nextBtnHtml}</div>`;
+}
+
+function collapsibleSection(label, content, defaultOpen) {
+  return `<details class="uxml-collapsible"${defaultOpen ? ' open' : ''}><summary class="uxml-collapsible-summary">${esc(label)}</summary><div class="uxml-collapsible-body">${content}</div></details>`;
+}
+
+function renderStageItem(stage, stageIndex, state, nextId) {
   const report = state.reports?.[stage.id] || null;
   const isActive = state.activePanel === stage.id;
   const pass = reportPass(report);
   const deferred = stage.deferred === true;
-  return `<button class="uxml-stage-card ${isActive ? 'is-active' : ''} ${deferred ? 'is-deferred' : ''}" data-uxml-panel="${esc(stage.id)}" type="button"><div class="uxml-stage-title">${esc(stage.title)}</div><div class="uxml-stage-description">${esc(stage.description)}</div><div class="uxml-stage-meta">${deferred ? '<span class="uxml-pill muted">Deferred</span>' : report ? `<span class="uxml-pill ${pass ? 'ok' : 'warn'}">${pass ? 'Ready' : 'Review'}</span>` : '<span class="uxml-pill muted">Not run</span>'}</div></button>`;
+  const isNext = stage.id === nextId;
+  let badgeClass, pillText;
+  if (deferred)     { badgeClass = 'deferred'; pillText = ''; }
+  else if (isNext)  { badgeClass = 'next';     pillText = 'Next'; }
+  else if (!report) { badgeClass = 'idle';     pillText = ''; }
+  else if (pass)    { badgeClass = 'ok';       pillText = 'Ready'; }
+  else              { badgeClass = 'warn';     pillText = 'Review'; }
+  const shortTitle = esc(STAGE_SHORT_TITLES[stage.id] || stage.title);
+  const pillHtml = pillText ? `<span class="uxml-stage-pill ${badgeClass}">${pillText}</span>` : '';
+  return `<button class="uxml-stage-item${isActive ? ' is-active' : ''}" data-uxml-panel="${esc(stage.id)}" type="button"><span class="uxml-stage-num ${badgeClass}">${stageIndex + 1}</span><span class="uxml-stage-name">${shortTitle}</span>${pillHtml}</button>`;
+}
+
+function renderStages(state) {
+  const active = PIPELINE_STAGES.filter(s => !s.deferred);
+  const nextStage = active.find(s => !state.reports?.[s.id]);
+  const nextId = nextStage?.id;
+  return STAGE_GROUPS.map(group => {
+    const items = group.stages.map(id => {
+      const stage = PIPELINE_STAGES.find(s => s.id === id);
+      const idx = PIPELINE_STAGES.findIndex(s => s.id === id);
+      return stage ? renderStageItem(stage, idx, state, nextId) : '';
+    }).join('');
+    return `<div class="uxml-stage-group"><div class="uxml-stage-group-label">${esc(group.label)}</div>${items}</div>`;
+  }).join('');
+}
+
+// kept for backward-compat if anything calls it externally
+function renderStageCard(stage, state) {
+  const idx = PIPELINE_STAGES.findIndex(s => s.id === stage.id);
+  return renderStageItem(stage, idx, state, undefined);
 }
 
 function sourceSummaryHtml(state) {
@@ -549,12 +797,131 @@ function sourceSummaryHtml(state) {
 function reportSummaryHtml(report, title) {
   if (!report) return '<div class="uxml-empty">Not run yet.</div>';
   const summary = summarizeReport(report);
-  const rows = summary.rows.map(([key, value]) => `<div>${esc(key)}</div><div>${esc(value)}</div>`).join('');
-  return `<div class="uxml-report-card"><div class="uxml-report-title">${esc(title)} <span class="uxml-pill ${summary.pass ? 'ok' : 'warn'}">${esc(summary.label)}</span></div><div class="uxml-kv-grid uxml-kv-compact">${rows}</div></div>`;
+
+  // Tier 1 — compact summary card (always visible)
+  const stats = report.stats || report.summary || {};
+  const chips = [
+    stats.componentCount != null ? `${count(stats.componentCount)} comps` : '',
+    stats.anchorCount    != null ? `${count(stats.anchorCount)} anchors` : '',
+    stats.segmentCount   != null ? `${count(stats.segmentCount)} segs` : '',
+    stats.edgeCount      != null ? `${count(stats.edgeCount)} edges` : '',
+    stats.faceCount      != null ? `${count(stats.faceCount)} faces` : '',
+    stats.lineCount      != null ? `${count(stats.lineCount)} lines` : '',
+  ].filter(Boolean).join(' · ');
+  const sc = summary.pass ? 'ok' : 'warn';
+  const icon = summary.pass ? '✓' : '⚠';
+  const summaryCard = `<div class="uxml-summary-card"><span class="uxml-summary-status ${sc}">${icon} ${esc(summary.label)}</span>${chips ? `<span class="uxml-summary-chips">${esc(chips)}</span>` : ''}<span class="uxml-summary-meta">${esc(report.schema || '')}</span></div>`;
+
+  // Tier 2 — collapsible full details
+  const rows = summary.rows.map(([key, value]) => `<div>${esc(key)}</div><div>${esc(String(value ?? ''))}</div>`).join('');
+  const detailsHtml = rows ? `<div class="uxml-kv-grid uxml-kv-compact">${rows}</div>` : '<div class="uxml-empty">No fields.</div>';
+
+  return summaryCard + collapsibleSection('Full report details', detailsHtml, false);
+}
+
+function geometryColorFor(type) {
+  const t = String(type || '').toUpperCase();
+  if (t.includes('BEND') || t.includes('ELBOW')) return '#c084fc';
+  if (t.includes('VALVE')) return '#22c55e';
+  if (t.includes('FLANGE')) return '#f59e0b';
+  if (t.includes('TEE') || t.includes('OLET')) return '#fb7185';
+  return '#38bdf8';
+}
+
+function isBranchFittingType(type) {
+  const t = String(type || '').toUpperCase();
+  return t.includes('TEE') || t.includes('OLET');
+}
+
+function componentTypeCountsText(countsByType) {
+  const entries = Object.entries(countsByType || {})
+    .filter(([, value]) => Number(value) > 0)
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+
+  if (!entries.length) return '';
+
+  return entries
+    .map(([type, value]) => `${type}:${count(value)}`)
+    .join(', ');
+}
+
+function projectPreviewPoint(point, projection, zScale) {
+  const x = Number(point.x);
+  const y = Number(point.y);
+  const z = Number(point.z) * zScale;
+
+  if (projection === 'XY') return { a: x, b: y };
+  if (projection === 'XZ') return { a: x, b: z };
+  if (projection === 'YZ') return { a: y, b: z };
+
+  return {
+    a: (x - y) * 0.8660254,
+    b: (x + y) * 0.5 - z,
+  };
+}
+
+function renderGeometrySvg(lines, projection, label, width, height, zScale) {
+  const projected = [];
+
+  for (const line of lines) {
+    projected.push({
+      line,
+      start: projectPreviewPoint(line.start, projection, zScale),
+      end: projectPreviewPoint(line.end, projection, zScale),
+    });
+  }
+
+  const all = projected.flatMap(item => [item.start, item.end]);
+  const minA = all.length ? Math.min(...all.map(point => point.a)) : 0;
+  const maxA = all.length ? Math.max(...all.map(point => point.a)) : 1;
+  const minB = all.length ? Math.min(...all.map(point => point.b)) : 0;
+  const maxB = all.length ? Math.max(...all.map(point => point.b)) : 1;
+  const padSize = 24;
+  const spanA = Math.max(1, maxA - minA);
+  const spanB = Math.max(1, maxB - minB);
+  const sx = point => padSize + ((point.a - minA) / spanA) * (width - padSize * 2);
+  const sy = point => height - padSize - ((point.b - minB) / spanB) * (height - padSize * 2);
+  const paths = projected.map(item => {
+    const title = esc(`${item.line.type} ${item.line.componentId}`);
+    const color = geometryColorFor(item.line.type);
+    const lineSvg = `<line x1="${sx(item.start).toFixed(2)}" y1="${sy(item.start).toFixed(2)}" x2="${sx(item.end).toFixed(2)}" y2="${sy(item.end).toFixed(2)}" stroke="${color}" stroke-width="2" stroke-linecap="round"><title>${title}</title></line>`;
+    if (!isBranchFittingType(item.line.type)) return lineSvg;
+
+    const cx = ((sx(item.start) + sx(item.end)) / 2).toFixed(2);
+    const cy = ((sy(item.start) + sy(item.end)) / 2).toFixed(2);
+    return `${lineSvg}<circle cx="${cx}" cy="${cy}" r="4" fill="${color}" stroke="#f8fafc" stroke-width="1.5"><title>${title}</title></circle>`;
+  }).join('');
+
+  return `<div class="uxml-geometry-card"><div class="uxml-preview-title">${esc(label)}</div><svg class="uxml-geometry-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(label)}">${paths || `<text x="24" y="48" fill="#94a3b8">No drawable segments.</text>`}</svg></div>`;
+}
+
+function renderGeometryOrientationControls(mainSvg) {
+  return `<div class="uxml-geometry-orient-shell"><div class="uxml-geometry-orient-controls" aria-label="Preview orientation controls"><input id="uxml-geometry-orient-original" name="uxml-geometry-orientation" type="radio" checked><label for="uxml-geometry-orient-original">Original</label><input id="uxml-geometry-orient-rotate180" name="uxml-geometry-orientation" type="radio"><label for="uxml-geometry-orient-rotate180">Rotate 180</label><input id="uxml-geometry-orient-flipx" name="uxml-geometry-orientation" type="radio"><label for="uxml-geometry-orient-flipx">Flip X</label><input id="uxml-geometry-orient-flipy" name="uxml-geometry-orientation" type="radio"><label for="uxml-geometry-orient-flipy">Flip Y</label></div><div class="uxml-geometry-orient-frame">${mainSvg}</div></div>`;
+}
+
+function renderGeometryPreviewHtml(preview) {
+  if (!preview) return '<div class="uxml-placeholder">Run geometry preview after UXML normalization.</div>';
+
+  const bounds = preview.bounds;
+  const lines = Array.isArray(preview.lines) ? preview.lines.slice(0, 700) : [];
+  const spanX = bounds ? Math.abs(bounds.maxX - bounds.minX) : 1;
+  const spanY = bounds ? Math.abs(bounds.maxY - bounds.minY) : 1;
+  const spanZ = bounds ? Math.abs(bounds.maxZ - bounds.minZ) : 1;
+  const zScale = Math.max(1, Math.min(8, Math.max(spanX, spanY) / Math.max(spanZ, 1) / 6));
+  const mainSvg = renderGeometrySvg(lines, 'ISO', `Isometric preview (Z x ${zScale.toFixed(1)})`, 720, 420, zScale);
+  const orientableMainSvg = renderGeometryOrientationControls(mainSvg);
+  const xySvg = renderGeometrySvg(lines, 'XY', 'Top XY', 360, 220, 1);
+  const xzSvg = renderGeometrySvg(lines, 'XZ', 'Side XZ', 360, 220, 1);
+  const yzSvg = renderGeometrySvg(lines, 'YZ', 'End YZ', 360, 220, 1);
+  const fallbackWarning = preview.summary?.fallbackCoordinateReconstruction
+    ? '<div class="uxml-placeholder uxml-geometry-warning">InputXML has disconnected delta-only coordinate islands and no UXML_GEOM absolute source coordinates. This is a fallback sketch, not a reality preview. Regenerate InputXML from staged JSON with the current converter to embed APOS/LPOS geometry.</div>'
+    : '';
+
+  return `<div class="uxml-preview-block"><div class="uxml-preview-title">Geometry Preview</div><div class="uxml-kv-grid uxml-kv-compact"><div>Components</div><div>${count(preview.summary?.componentCount)}</div><div>Segments drawn</div><div>${count(preview.summary?.lineCount)}</div><div>Unique coordinates</div><div>${count(preview.summary?.uniqueAnchorCoordinateCount)}</div><div>Component types</div><div>${esc(componentTypeCountsText(preview.summary?.componentTypeCounts))}</div><div>Geometry source</div><div>${esc(preview.summary?.geometrySource || '')}</div><div>Absolute geometry comments</div><div>${count(preview.summary?.absoluteGeometryCommentCount)}</div><div>Seeded coordinate islands</div><div>${count(preview.summary?.seededComponentCount)}</div><div>Zero/missing bore components</div><div>${count(preview.summary?.zeroBoreComponentCount)}</div></div>${fallbackWarning}${orientableMainSvg}<div class="uxml-geometry-projections">${xySvg}${xzSvg}${yzSvg}</div>${preview.summary?.allFiniteAnchorsCollapsed ? '<div class="uxml-placeholder">All finite anchors collapsed to one coordinate. This is blocked from topology.</div>' : ''}</div>`;
 }
 
 function renderRouteAndCl1Guide() {
-  return `<div class="uxml-placeholder"><b>Route Handoff</b><br>Topology decisions are routed through the handoff policy before any downstream package is created.</div><div class="uxml-placeholder"><b>CL1 Route Package</b><br>This route package is deterministic metadata only. It does not emit PCF, does not resolve masters, and does not mutate topology.</div><div class="uxml-placeholder"><b>Masters by Target Route</b><br>Masters are handled by the downstream route. This tab only prepares topology and CL1 route evidence.</div><div class="uxml-placeholder"><b>Route contract</b><br>UXML mutates coordinates: NO<br>UXML applies fixes: NO<br>UXML emits PCF directly: NO</div>`;
+  return `<div class="uxml-placeholder"><b>Route Handoff</b><br>Topology decisions are routed through the handoff policy before any downstream package is created.</div><div class="uxml-placeholder"><b>Route Package</b><br>This route package is deterministic metadata only. It does not emit PCF, does not resolve masters, and does not mutate topology.</div><div class="uxml-placeholder"><b>Masters by Target Route</b><br>Masters are handled by the downstream route. This tab only prepares topology and CL1 route evidence.</div><div class="uxml-placeholder"><b>Route contract</b><br>UXML mutates coordinates: NO<br>UXML applies fixes: NO<br>UXML emits PCF directly: NO</div>`;
 }
 
 function panelHtml(state) {
@@ -562,7 +929,8 @@ function panelHtml(state) {
   const pipeline = state.pipeline;
 
   if (panel === 'source') {
-    return `<section class="uxml-panel-section"><h3>Source Intake</h3><p>Load XML, InputXML, or UXML directly. For JSON/RVM -> PCF, use the RVM / JSON -> PCF Extract tab and select UXML topology mode.</p>${renderRouteAndCl1Guide()}${sourceSummaryHtml(state)}${reportSummaryHtml(pipeline.profileReport, 'Profile Detection')}<div class="uxml-preview-block"><div class="uxml-preview-title">Source Preview</div><pre>${esc((state.sourceText || '').slice(0, 12000))}</pre></div></section>`;
+    const sourcePreviewHtml = `<pre>${esc((state.sourceText || '').slice(0, 12000))}</pre>`;
+    return `<section class="uxml-panel-section"><h3>Source Intake</h3><p>Load XML, InputXML, or UXML directly. For JSON/RVM -> PCF, use the RVM / JSON -> PCF Extract tab and select UXML topology mode.</p>${sourceSummaryHtml(state)}${reportSummaryHtml(pipeline.profileReport, 'Profile Detection')}${collapsibleSection('Source preview (first 12 000 chars)', sourcePreviewHtml, false)}${collapsibleSection('Route guide', renderRouteAndCl1Guide(), false)}</section>`;
   }
 
   if (panel === 'existing-converter') {
@@ -570,8 +938,11 @@ function panelHtml(state) {
   }
 
   if (panel === 'uxml') {
-    return `<section class="uxml-panel-section"><h3>UXML Normalization</h3>${reportSummaryHtml(pipeline.uxml, 'UXML Result')}<div class="uxml-preview-block"><div class="uxml-preview-title">Normalized UXML</div><pre>${esc(JSON.stringify(pipeline.uxml?.uxml || null, null, 2).slice(0, 24000))}</pre></div></section>`;
+    const uxmlJsonHtml = `<pre>${esc(JSON.stringify(pipeline.uxml || null, null, 2).slice(0, 24000))}</pre>`;
+    return `<section class="uxml-panel-section"><h3>UXML Normalization</h3>${reportSummaryHtml(pipeline.normalizerResult, 'UXML Result')}${collapsibleSection('Normalized UXML JSON (first 24 000 chars)', uxmlJsonHtml, false)}</section>`;
   }
+
+  if (panel === 'geometry-preview') return `<section class="uxml-panel-section"><h3>Geometry Preview</h3>${reportSummaryHtml(pipeline.geometryPreview, 'Geometry Preview')}${renderGeometryPreviewHtml(pipeline.geometryPreview)}</section>`;
 
   if (panel === 'validation') return `<section class="uxml-panel-section"><h3>UXML Validation</h3>${reportSummaryHtml(pipeline.validationReport, 'Validation')}</section>`;
   if (panel === 'face-model') return `<section class="uxml-panel-section"><h3>Face Model</h3>${reportSummaryHtml(pipeline.faceModel, 'Face Model')}</section>`;
@@ -585,19 +956,19 @@ function panelHtml(state) {
   }
 
   if (panel === 'cl1-package') {
-    return `<section class="uxml-panel-section"><h3>CL1 Route Package</h3><p>This route package is deterministic metadata only. It does not emit PCF, does not resolve masters, and does not mutate topology.</p>${pipeline.cl1RoutePackage ? `<div class="uxml-kv-grid"><div><b>Schema</b></div><div>${esc(pipeline.cl1RoutePackage.schema)}</div><div><b>Package ID</b></div><div>${esc(pipeline.cl1RoutePackage.packageId)}</div><div><b>Target route</b></div><div>${esc(pipeline.cl1RoutePackage.targetRoute)}</div><div><b>Allowed</b></div><div>${pipeline.cl1RoutePackage.allowed ? 'YES' : 'NO'}</div><div><b>Components</b></div><div>${count(pipeline.cl1RoutePackage.entityCounts?.componentCount)}</div><div><b>Accepted topology</b></div><div>${count(pipeline.cl1RoutePackage.topologyCounts?.acceptedConnectionCount)}</div></div><div class="uxml-placeholder" style="margin-top:12px;"><b>Route contract</b><br>Does not emit PCF: ${pipeline.cl1RoutePackage.routeContract?.uxmlEmitsPcfDirectly ? 'YES' : 'NO'}<br>Does not resolve masters: YES<br>Does not mutate coordinates: ${pipeline.cl1RoutePackage.routeContract?.uxmlMutatesCoordinates ? 'NO' : 'YES'}</div>` : '<div class="uxml-placeholder">Run route handoff, then build CL1 package.</div>'}</section>`;
+    return `<section class="uxml-panel-section"><h3>Route Package</h3><p>This route package is deterministic metadata only. It does not emit PCF, does not resolve masters, and does not mutate topology.</p>${pipeline.cl1RoutePackage ? `<div class="uxml-kv-grid"><div><b>Schema</b></div><div>${esc(pipeline.cl1RoutePackage.schema)}</div><div><b>Package ID</b></div><div>${esc(pipeline.cl1RoutePackage.packageId)}</div><div><b>Target route</b></div><div>${esc(pipeline.cl1RoutePackage.targetRoute)}</div><div><b>Allowed</b></div><div>${pipeline.cl1RoutePackage.allowed ? 'YES' : 'NO'}</div><div><b>Components</b></div><div>${count(pipeline.cl1RoutePackage.entityCounts?.componentCount)}</div><div><b>Accepted topology</b></div><div>${count(pipeline.cl1RoutePackage.topologyCounts?.acceptedConnectionCount)}</div></div><div class="uxml-placeholder" style="margin-top:12px;"><b>Route contract</b><br>Does not emit PCF: ${pipeline.cl1RoutePackage.routeContract?.uxmlEmitsPcfDirectly ? 'YES' : 'NO'}<br>Does not resolve masters: YES<br>Does not mutate coordinates: ${pipeline.cl1RoutePackage.routeContract?.uxmlMutatesCoordinates ? 'NO' : 'YES'}</div>` : '<div class="uxml-placeholder">Run route handoff, then build CL1 package.</div>'}</section>`;
   }
 
   if (panel === 'cl1-snapshot') {
-    return `<section class="uxml-panel-section"><h3>CL1 Snapshot JSON</h3><p>Creates a deterministic debug/replay JSON snapshot from the CL1 route package. This is not PCF export and does not resolve masters.</p>${pipeline.cl1Snapshot ? `<div class="uxml-kv-grid"><div><b>Schema</b></div><div>${esc(pipeline.cl1Snapshot.schema)}</div><div><b>Snapshot ID</b></div><div>${esc(pipeline.cl1Snapshot.snapshotId)}</div><div><b>Package ID</b></div><div>${esc(pipeline.cl1Snapshot.packageId)}</div><div><b>Target route</b></div><div>${esc(pipeline.cl1Snapshot.targetRoute)}</div><div><b>Debug only</b></div><div>${pipeline.cl1Snapshot.debugOnly ? 'YES' : 'NO'}</div><div><b>Payload included</b></div><div>${pipeline.cl1Snapshot.payloadIncluded ? 'YES' : 'NO'}</div><div><b>Components</b></div><div>${count(pipeline.cl1Snapshot.entityCounts?.componentCount)}</div><div><b>Accepted topology</b></div><div>${count(pipeline.cl1Snapshot.topologyCounts?.acceptedConnectionCount)}</div></div><div class="uxml-placeholder" style="margin-top:12px;"><b>Snapshot contract</b><br>PCF generated: ${pipeline.cl1Snapshot.pcfGenerated ? 'YES' : 'NO'}<br>Masters resolved: ${pipeline.cl1Snapshot.mastersResolved ? 'YES' : 'NO'}<br>Coordinates mutated: ${pipeline.cl1Snapshot.coordinatesMutated ? 'YES' : 'NO'}<br>Fixes applied: ${pipeline.cl1Snapshot.fixesApplied ? 'YES' : 'NO'}</div><div class="uxml-preview-block" style="margin-top:12px;"><div class="uxml-preview-title">Snapshot preview</div><pre>${esc(serializeUxmlCl1PackageSnapshot(pipeline.cl1Snapshot))}</pre></div>` : '<div class="uxml-placeholder">Run route handoff, then build CL1 snapshot.</div>'}</section>`;
+    return `<section class="uxml-panel-section"><h3>Snapshot JSON</h3><p>Creates a deterministic debug/replay JSON snapshot from the CL1 route package. This is not PCF export and does not resolve masters.</p>${pipeline.cl1Snapshot ? `<div class="uxml-kv-grid"><div><b>Schema</b></div><div>${esc(pipeline.cl1Snapshot.schema)}</div><div><b>Snapshot ID</b></div><div>${esc(pipeline.cl1Snapshot.snapshotId)}</div><div><b>Package ID</b></div><div>${esc(pipeline.cl1Snapshot.packageId)}</div><div><b>Target route</b></div><div>${esc(pipeline.cl1Snapshot.targetRoute)}</div><div><b>Debug only</b></div><div>${pipeline.cl1Snapshot.debugOnly ? 'YES' : 'NO'}</div><div><b>Payload included</b></div><div>${pipeline.cl1Snapshot.payloadIncluded ? 'YES' : 'NO'}</div><div><b>Components</b></div><div>${count(pipeline.cl1Snapshot.entityCounts?.componentCount)}</div><div><b>Accepted topology</b></div><div>${count(pipeline.cl1Snapshot.topologyCounts?.acceptedConnectionCount)}</div></div><div class="uxml-placeholder" style="margin-top:12px;"><b>Snapshot contract</b><br>PCF generated: ${pipeline.cl1Snapshot.pcfGenerated ? 'YES' : 'NO'}<br>Masters resolved: ${pipeline.cl1Snapshot.mastersResolved ? 'YES' : 'NO'}<br>Coordinates mutated: ${pipeline.cl1Snapshot.coordinatesMutated ? 'YES' : 'NO'}<br>Fixes applied: ${pipeline.cl1Snapshot.fixesApplied ? 'YES' : 'NO'}</div>${collapsibleSection('Snapshot JSON preview', `<pre>${esc(serializeUxmlCl1PackageSnapshot(pipeline.cl1Snapshot))}</pre>`, false)}` : '<div class="uxml-placeholder">Run route handoff, then build CL1 snapshot.</div>'}</section>`;
   }
 
   if (panel === 'cl1-replay') {
-    return `<section class="uxml-panel-section"><h3>CL1 Replay Validator</h3><p>Validates a CL1 snapshot for debug/replay readiness. This does not parse XML, rebuild topology, emit PCF, resolve masters, mutate coordinates, or apply fixes.</p>${pipeline.cl1ReplayValidation ? `<div class="uxml-kv-grid"><div><b>Schema</b></div><div>${esc(pipeline.cl1ReplayValidation.schema)}</div><div><b>Replay ready</b></div><div>${pipeline.cl1ReplayValidation.replayReady ? 'YES' : 'NO'}</div><div><b>Blocking issues</b></div><div>${count(pipeline.cl1ReplayValidation.summary?.blockingIssueCount)}</div><div><b>Warnings</b></div><div>${count(pipeline.cl1ReplayValidation.summary?.warningCount)}</div><div><b>Components</b></div><div>${count(pipeline.cl1ReplayValidation.countSummary?.componentCount)}</div><div><b>Accepted topology</b></div><div>${count(pipeline.cl1ReplayValidation.countSummary?.acceptedConnectionCount)}</div><div><b>Manual / rejected / unresolved</b></div><div>${count(pipeline.cl1ReplayValidation.countSummary?.manualReviewCount)} / ${count(pipeline.cl1ReplayValidation.countSummary?.rejectedCount)} / ${count(pipeline.cl1ReplayValidation.countSummary?.unresolvedCount)}</div></div><div class="uxml-placeholder" style="margin-top:12px;"><b>Replay safety flags</b><br>Debug only: ${pipeline.cl1ReplayValidation.debugOnly ? 'YES' : 'NO'}<br>PCF generated: ${pipeline.cl1ReplayValidation.pcfGenerated ? 'YES' : 'NO'}<br>Masters resolved: ${pipeline.cl1ReplayValidation.mastersResolved ? 'YES' : 'NO'}<br>Coordinates mutated: ${pipeline.cl1ReplayValidation.coordinatesMutated ? 'YES' : 'NO'}<br>Fixes applied: ${pipeline.cl1ReplayValidation.fixesApplied ? 'YES' : 'NO'}</div>${pipeline.cl1ReplayValidation.issues?.length ? `<div class="uxml-placeholder" style="margin-top:12px;"><b>Issues</b><ul>${pipeline.cl1ReplayValidation.issues.map((issue) => `<li><code>${esc(issue.code)}</code> - ${esc(issue.message)}</li>`).join('')}</ul></div>` : ''}` : '<div class="uxml-placeholder">Build CL1 snapshot, then validate replay readiness.</div>'}</section>`;
+    return `<section class="uxml-panel-section"><h3>Replay Validator</h3><p>Validates a CL1 snapshot for debug/replay readiness. This does not parse XML, rebuild topology, emit PCF, resolve masters, mutate coordinates, or apply fixes.</p>${pipeline.cl1ReplayValidation ? `<div class="uxml-kv-grid"><div><b>Schema</b></div><div>${esc(pipeline.cl1ReplayValidation.schema)}</div><div><b>Replay ready</b></div><div>${pipeline.cl1ReplayValidation.replayReady ? 'YES' : 'NO'}</div><div><b>Blocking issues</b></div><div>${count(pipeline.cl1ReplayValidation.summary?.blockingIssueCount)}</div><div><b>Warnings</b></div><div>${count(pipeline.cl1ReplayValidation.summary?.warningCount)}</div><div><b>Components</b></div><div>${count(pipeline.cl1ReplayValidation.countSummary?.componentCount)}</div><div><b>Accepted topology</b></div><div>${count(pipeline.cl1ReplayValidation.countSummary?.acceptedConnectionCount)}</div><div><b>Manual / rejected / unresolved</b></div><div>${count(pipeline.cl1ReplayValidation.countSummary?.manualReviewCount)} / ${count(pipeline.cl1ReplayValidation.countSummary?.rejectedCount)} / ${count(pipeline.cl1ReplayValidation.countSummary?.unresolvedCount)}</div></div><div class="uxml-placeholder" style="margin-top:12px;"><b>Replay safety flags</b><br>Debug only: ${pipeline.cl1ReplayValidation.debugOnly ? 'YES' : 'NO'}<br>PCF generated: ${pipeline.cl1ReplayValidation.pcfGenerated ? 'YES' : 'NO'}<br>Masters resolved: ${pipeline.cl1ReplayValidation.mastersResolved ? 'YES' : 'NO'}<br>Coordinates mutated: ${pipeline.cl1ReplayValidation.coordinatesMutated ? 'YES' : 'NO'}<br>Fixes applied: ${pipeline.cl1ReplayValidation.fixesApplied ? 'YES' : 'NO'}</div>${pipeline.cl1ReplayValidation.issues?.length ? `<div class="uxml-placeholder" style="margin-top:12px;"><b>Issues</b><ul>${pipeline.cl1ReplayValidation.issues.map((issue) => `<li><code>${esc(issue.code)}</code> - ${esc(issue.message)}</li>`).join('')}</ul></div>` : ''}` : '<div class="uxml-placeholder">Build CL1 snapshot, then validate replay readiness.</div>'}</section>`;
   }
 
   if (panel === 'cl1-summary') {
-    return `<section class="uxml-panel-section"><h3>CL1 QA Summary</h3><p>One-screen status for Decision Gate, Route Handoff, CL1 Route Package, Snapshot, and Replay Validation. This is read-only QA status.</p>${pipeline.cl1WorkbenchSummary ? `<div class="uxml-kv-grid"><div><b>Overall status</b></div><div>${esc(pipeline.cl1WorkbenchSummary.overallStatus)}</div><div><b>Ready for route consumption</b></div><div>${pipeline.cl1WorkbenchSummary.readyForRouteConsumption ? 'YES' : 'NO'}</div><div><b>Blocked / warning / not-run</b></div><div>${count(pipeline.cl1WorkbenchSummary.blockedCount)} / ${count(pipeline.cl1WorkbenchSummary.warningCount)} / ${count(pipeline.cl1WorkbenchSummary.notRunCount)}</div><div><b>Components</b></div><div>${count(pipeline.cl1WorkbenchSummary.counts?.componentCount)}</div><div><b>Accepted topology</b></div><div>${count(pipeline.cl1WorkbenchSummary.counts?.acceptedConnectionCount)}</div></div><div class="uxml-placeholder" style="margin-top:12px;"><b>Safety summary</b><br>PCF generated: ${pipeline.cl1WorkbenchSummary.safety?.pcfGenerated ? 'YES' : 'NO'}<br>Masters resolved: ${pipeline.cl1WorkbenchSummary.safety?.mastersResolved ? 'YES' : 'NO'}<br>Coordinates mutated: ${pipeline.cl1WorkbenchSummary.safety?.coordinatesMutated ? 'YES' : 'NO'}<br>Fixes applied: ${pipeline.cl1WorkbenchSummary.safety?.fixesApplied ? 'YES' : 'NO'}</div>` : '<div class="uxml-placeholder">Run CL1 replay validator, then build CL1 QA summary.</div>'}</section>`;
+    return `<section class="uxml-panel-section"><h3>QA Summary</h3><p>One-screen status for Decision Gate, Route Handoff, Route Package, Snapshot, and Replay Validation. This is read-only QA status.</p>${pipeline.cl1WorkbenchSummary ? `<div class="uxml-kv-grid"><div><b>Overall status</b></div><div>${esc(pipeline.cl1WorkbenchSummary.overallStatus)}</div><div><b>Ready for route consumption</b></div><div>${pipeline.cl1WorkbenchSummary.readyForRouteConsumption ? 'YES' : 'NO'}</div><div><b>Blocked / warning / not-run</b></div><div>${count(pipeline.cl1WorkbenchSummary.blockedCount)} / ${count(pipeline.cl1WorkbenchSummary.warningCount)} / ${count(pipeline.cl1WorkbenchSummary.notRunCount)}</div><div><b>Components</b></div><div>${count(pipeline.cl1WorkbenchSummary.counts?.componentCount)}</div><div><b>Accepted topology</b></div><div>${count(pipeline.cl1WorkbenchSummary.counts?.acceptedConnectionCount)}</div></div><div class="uxml-placeholder" style="margin-top:12px;"><b>Safety summary</b><br>PCF generated: ${pipeline.cl1WorkbenchSummary.safety?.pcfGenerated ? 'YES' : 'NO'}<br>Masters resolved: ${pipeline.cl1WorkbenchSummary.safety?.mastersResolved ? 'YES' : 'NO'}<br>Coordinates mutated: ${pipeline.cl1WorkbenchSummary.safety?.coordinatesMutated ? 'YES' : 'NO'}<br>Fixes applied: ${pipeline.cl1WorkbenchSummary.safety?.fixesApplied ? 'YES' : 'NO'}</div>` : '<div class="uxml-placeholder">Run CL1 replay validator, then build CL1 QA summary.</div>'}</section>`;
   }
 
   if (panel === 'masters') {
@@ -611,12 +982,90 @@ function panelHtml(state) {
   return `<section class="uxml-panel-section"><h3>Unknown panel</h3><div class="uxml-placeholder">${esc(panel)}</div></section>`;
 }
 
+function renderToolbar(state, xmlReady, canConvert) {
+  const p = state.pipeline;
+  const d = (cond) => cond ? '' : ' disabled';
+  const sourceTypeOptions = SOURCE_TYPES.map(o =>
+    `<option value="${esc(o.value)}"${state.selectedSourceType === o.value ? ' selected' : ''}>${esc(o.label)}</option>`
+  ).join('');
+
+  const sep = '<div class="uxml-tb-sep"></div>';
+
+  const grpSource = `<div class="uxml-tb-group">
+    <div class="uxml-tb-group-label">Source</div>
+    <div class="uxml-tb-group-row">
+      <select class="uxml-tb-select" data-uxml-source-type>${sourceTypeOptions}</select>
+      <label class="uxml-file-btn">Load<input data-uxml-file-input type="file" /></label>
+      <button data-uxml-action="run-existing-converter" type="button" class="uxml-tb-btn-ghost" disabled>Existing Conv.</button>
+    </div>
+  </div>`;
+
+  const grpNorm = `<div class="uxml-tb-group">
+    <div class="uxml-tb-group-label">Normalize</div>
+    <div class="uxml-tb-group-row">
+      <button data-uxml-action="detect-profile" type="button">Detect Profile</button>
+      <button data-uxml-action="convert-uxml" type="button"${d(canConvert)}>Convert→UXML</button>
+      <button data-uxml-action="build-geometry-preview" type="button"${d(p.uxml)}>Preview Geom</button>
+    </div>
+  </div>`;
+
+  const grpValidate = `<div class="uxml-tb-group">
+    <div class="uxml-tb-group-label">Validate</div>
+    <div class="uxml-tb-group-row">
+      <button data-uxml-action="validate-uxml" type="button"${d(p.uxml)}>Validate</button>
+      <button data-uxml-action="build-face-model" type="button"${d(p.uxml)}>Face Model</button>
+    </div>
+  </div>`;
+
+  const grpTopo = `<div class="uxml-tb-group">
+    <div class="uxml-tb-group-label">Topology</div>
+    <div class="uxml-tb-group-row">
+      <button data-uxml-action="build-universal-topology" type="button"${d(p.faceModel)}>Universal</button>
+      <button data-uxml-action="build-ray-topology" type="button"${d(p.faceModel)}>Ray</button>
+      <button data-uxml-action="compare-topology" type="button"${d(p.universalGraph && p.rayGraph)}>Compare</button>
+      <button data-uxml-action="run-decision-gate" type="button"${d(p.comparison)}>Decision</button>
+    </div>
+  </div>`;
+
+  const grpCl1 = `<div class="uxml-tb-group">
+    <div class="uxml-tb-group-label">Pipeline</div>
+    <div class="uxml-tb-group-row">
+      <button data-uxml-action="run-route-handoff" type="button"${d(p.topologyDecision)}>Handoff</button>
+      <button data-uxml-action="run-cl1-package" type="button"${d(p.routeHandoff)}>Pkg</button>
+      <button data-uxml-action="run-cl1-snapshot" type="button"${d(p.cl1RoutePackage)}>Snapshot</button>
+      <button data-uxml-action="run-cl1-replay" type="button"${d(p.cl1Snapshot)}>Replay</button>
+      <button data-uxml-action="run-cl1-summary" type="button"${d(p.cl1ReplayValidation)}>QA</button>
+    </div>
+  </div>`;
+
+  const grpActions = `<div class="uxml-tb-group">
+    <div class="uxml-tb-group-label">Actions</div>
+    <div class="uxml-tb-group-row">
+      <button data-uxml-action="run-full-pipeline" type="button" class="uxml-tb-btn-primary"${d(canConvert)}>▶ Run Full</button>
+      <button data-uxml-action="export-summary" type="button">Export JSON</button>
+    </div>
+  </div>`;
+
+  return `<div class="uxml-toolbar">${grpSource}${sep}${grpNorm}${sep}${grpValidate}${sep}${grpTopo}${sep}${grpCl1}${sep}${grpActions}</div>`;
+}
+
 function render(container, state) {
   const xmlReady = canRunXmlActions(state);
   const selected = state.selectedSourceType === 'AUTO' ? state.detectedSourceType : state.selectedSourceType;
   const canConvert = xmlReady && ['AUTO', 'UXML', 'INPUT_XML', 'EXISTING_XML'].includes(selected);
 
-  container.innerHTML = `<div class="uxml-tab"><header class="uxml-header"><div><h2>Universal XML Converter</h2><p>XML/InputXML/UXML topology workbench: source -> UXML -> validation -> face model -> UniversalTopoGraph + RayTopoGraph comparison -> route handoff -> CL1 package -> CL1 snapshot -> CL1 replay -> CL1 summary.</p></div><div class="uxml-header-badges"><span class="uxml-badge">Agent 09</span><span class="uxml-badge">Integrated Pipeline</span><span class="uxml-badge muted">Masters by target route</span></div></header><section class="uxml-toolbar"><label class="uxml-field"><span>Source type</span><select data-uxml-source-type>${SOURCE_TYPES.map((option) => `<option value="${esc(option.value)}" ${state.selectedSourceType === option.value ? 'selected' : ''}>${esc(option.label)}</option>`).join('')}</select></label><label class="uxml-file-btn">Load Source<input data-uxml-file-input type="file" /></label><button data-uxml-action="run-existing-converter" type="button" disabled>Run existing converter</button><button data-uxml-action="detect-profile" type="button">Detect Profile</button><button data-uxml-action="convert-uxml" type="button" ${canConvert ? '' : 'disabled'}>Convert to UXML</button><button data-uxml-action="validate-uxml" type="button" ${state.pipeline.uxml ? '' : 'disabled'}>Validate UXML</button><button data-uxml-action="build-face-model" type="button" ${state.pipeline.uxml ? '' : 'disabled'}>Build Face Model</button><button data-uxml-action="build-universal-topology" type="button" ${state.pipeline.faceModel ? '' : 'disabled'}>Build UniversalTopoGraph</button><button data-uxml-action="build-ray-topology" type="button" ${state.pipeline.faceModel ? '' : 'disabled'}>Build RayTopoGraph</button><button data-uxml-action="compare-topology" type="button" ${state.pipeline.universalGraph && state.pipeline.rayGraph ? '' : 'disabled'}>Compare</button><button data-uxml-action="run-decision-gate" type="button" ${state.pipeline.comparison ? '' : 'disabled'}>Run decision gate</button><button data-uxml-action="run-route-handoff" type="button" ${state.pipeline.topologyDecision ? '' : 'disabled'}>Run route handoff</button><button data-uxml-action="run-cl1-package" type="button" ${state.pipeline.routeHandoff ? '' : 'disabled'}>Build CL1 package</button><button data-uxml-action="run-cl1-snapshot" type="button" ${state.pipeline.cl1RoutePackage ? '' : 'disabled'}>Build CL1 snapshot</button><button data-uxml-action="run-cl1-replay" type="button" ${state.pipeline.cl1Snapshot ? '' : 'disabled'}>Validate CL1 replay</button><button data-uxml-action="run-cl1-summary" type="button" ${state.pipeline.cl1ReplayValidation ? '' : 'disabled'}>Build CL1 QA summary</button><button data-uxml-action="run-full-pipeline" type="button" ${canConvert ? '' : 'disabled'}>Run Full Pipeline</button><button data-uxml-action="export-summary" type="button">Export Summary JSON</button></section><div class="uxml-status ${statusClass(state.status.kind)}">${esc(state.status.message)}</div><main class="uxml-layout"><aside class="uxml-stages">${PIPELINE_STAGES.map((stage) => renderStageCard(stage, state)).join('')}</aside><section class="uxml-panel">${panelHtml(state)}</section></main></div>`;
+  container.innerHTML = `<div class="uxml-tab">
+    <header class="uxml-header">
+      <div><h2>Universal XML Converter</h2><p>XML/InputXML/UXML topology workbench → UXML → validation → topology → route handoff → package chain.</p></div>
+      <div class="uxml-header-badges"></div>
+    </header>
+    ${renderToolbar(state, xmlReady, canConvert)}
+    <div class="uxml-status ${statusClass(state.status.kind)}">${esc(state.status.message)}</div>
+    <main class="uxml-layout">
+      <aside class="uxml-stages">${renderStages(state)}</aside>
+      <section class="uxml-panel">${renderPanelHeader(state)}${panelHtml(state)}</section>
+    </main>
+  </div>`;
 }
 
 function buildSummary(state) {

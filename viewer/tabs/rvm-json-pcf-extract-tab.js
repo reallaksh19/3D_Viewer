@@ -195,6 +195,8 @@ function _bindTopologyModeSettings(container) {
   control.addEventListener('change', () => {
     const topologyMode = normalizeRvmPcfTopologyMode(control.value);
 
+    try { localStorage.setItem('rvm_pcf_topology_mode', topologyMode); } catch {}
+
     updateRvmPcfExtractState({
       topologyMode,
     }, 'topology-mode-settings');
@@ -688,10 +690,25 @@ function _groupDiagnosticsForDisplay(diags = []) {
     }
     host.innerHTML = refs.map(ref => `
       <div class="rvm-pcf-ref-block">
+        <button class="rvm-pcf-copy-btn" data-copy-pcf="${_esc(ref)}" title="Copy PCF to clipboard">⎘</button>
         <div class="rvm-pcf-ref-title">${_esc(ref)}</div>
         <pre class="rvm-pcf-extract-pre">${_esc(byRef[ref])}</pre>
       </div>
     `).join('');
+    host.querySelectorAll('.rvm-pcf-copy-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const ref = btn.dataset.copyPcf;
+        const text = (state.rvmPcfExtract?.pcfTextByPipelineRef || {})[ref] || '';
+        try {
+          await navigator.clipboard.writeText(text);
+          btn.textContent = '✓';
+          btn.classList.add('copied');
+          setTimeout(() => { btn.textContent = '⎘'; btn.classList.remove('copied'); }, 1800);
+        } catch {
+          btn.title = 'Copy failed — try selecting and Ctrl+C';
+        }
+      });
+    });
     return;
   }
 }
@@ -818,6 +835,14 @@ async function _runRebuildCsv(container) {
       });
     } else {
       _setStatus(container, `Built ${rows.length} row(s). Master resolution complete.`);
+    }
+
+    // Auto-run UXML topology immediately after CSV build when mode is set
+    const _currentTopologyMode = normalizeRvmPcfTopologyMode(
+      state.rvmPcfExtract?.topologyMode || DEFAULT_RVM_PCF_TOPOLOGY_MODE
+    );
+    if (isUxmlTopologyMode(_currentTopologyMode)) {
+      await _runUxmlTopologyReadinessGate(container);
     }
 
     return true;
@@ -1313,6 +1338,18 @@ async function _exportReadinessReport(container, format = 'json') {
 }
 
 async function _ensureReadinessBeforePcfExport(container) {
+  const _topMode = normalizeRvmPcfTopologyMode(
+    state.rvmPcfExtract?.topologyMode || DEFAULT_RVM_PCF_TOPOLOGY_MODE
+  );
+
+  // Auto-run UXML topology if mode is active but gate hasn't been computed yet
+  if (isUxmlTopologyMode(_topMode) && !state.rvmPcfExtract?.readinessGate?.report) {
+    const rows = state.rvmPcfExtract?.rows || [];
+    if (rows.length) {
+      await _runUxmlTopologyReadinessGate(container);
+    }
+  }
+
   let readinessGate = state.rvmPcfExtract?.readinessGate;
 
   if (!readinessGate?.report) {
@@ -1328,6 +1365,52 @@ async function _ensureReadinessBeforePcfExport(container) {
   }
 
   return true;
+}
+
+// ── Units auto-assign ─────────────────────────────────────────────────────────
+// CA1 = design pressure (kPa), CA2 = design temperature (°C),
+// CA5 = insulation thickness (mm), CA10 = hydro test pressure (kPa)
+const _DEFAULT_UNITS = {
+  'COMPONENT-ATTRIBUTE1':  'kPa',
+  'COMPONENT-ATTRIBUTE2':  'DegC',
+  'COMPONENT-ATTRIBUTE5':  'mm',
+  'COMPONENT-ATTRIBUTE10': 'kPa',
+};
+
+function _applyDefaultUnits(pcfTextByPipelineRef) {
+  const applied = new Set();
+  const result = {};
+  for (const [ref, text] of Object.entries(pcfTextByPipelineRef)) {
+    result[ref] = text.replace(
+      /^(COMPONENT-ATTRIBUTE(?:1|2|5|10))\s+(\S+)\s*$/gm,
+      (match, key, val) => {
+        // Only patch if value is purely numeric (no letters/units already)
+        if (/^-?\d+(\.\d+)?$/.test(val) && _DEFAULT_UNITS[key]) {
+          applied.add(`${key} → ${_DEFAULT_UNITS[key]}`);
+          return `${key}    ${val} ${_DEFAULT_UNITS[key]}`;
+        }
+        return match;
+      }
+    );
+  }
+  if (applied.size) _showUnitsToast([...applied]);
+  return result;
+}
+
+function _showUnitsToast(lines) {
+  const existing = document.getElementById('rvm-units-toast');
+  if (existing) existing.remove();
+  const toast = document.createElement('div');
+  toast.id = 'rvm-units-toast';
+  toast.className = 'rvm-units-toast';
+  toast.innerHTML = `
+    <button class="rvm-units-toast-close" title="Dismiss">×</button>
+    <div class="rvm-units-toast-title">Default units applied</div>
+    <div>No units found — assigned defaults:<br>${lines.map(l => `&nbsp;• ${l}`).join('<br>')}</div>
+  `;
+  toast.querySelector('.rvm-units-toast-close').addEventListener('click', () => toast.remove());
+  document.body.appendChild(toast);
+  setTimeout(() => { if (toast.isConnected) toast.remove(); }, 8000);
 }
 
 async function _runGeneratePcf(container) {
@@ -1363,7 +1446,8 @@ async function _runGeneratePcf(container) {
     rows = continuityResult.components || rows;
     const continuityReport = continuityResult.report || null;
     const emitter = new RvmPcfEmitter({ allowPartialPcf: true });
-    const { pcfTextByPipelineRef, errors, warnings } = emitter.emit(rows);
+    let { pcfTextByPipelineRef, errors, warnings } = emitter.emit(rows);
+    pcfTextByPipelineRef = _applyDefaultUnits(pcfTextByPipelineRef);
     const continuityDiag = continuityReport
       ? [{
           severity: continuityReport.ok ? 'INFO' : 'WARNING',
@@ -1406,8 +1490,14 @@ async function _runGeneratePcf(container) {
 }
 
 async function _runDownloadCsv(container) {
-  const rows = state.rvmPcfExtract?.rows || [];
-  if (!rows.length) { _setStatus(container, 'No rows — rebuild CSV first.', true); return; }
+  let rows = state.rvmPcfExtract?.rows || [];
+  if (!rows.length) {
+    _setStatus(container, 'No rows yet — rebuilding CSV…');
+    const ok = await _runRebuildCsv(container);
+    if (!ok) return;
+    rows = state.rvmPcfExtract?.rows || [];
+    if (!rows.length) { _setStatus(container, 'No rows to download.', true); return; }
+  }
   const { downloadCsv } = await _importRvmPcfModule('RvmPcfDownload.js');
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   downloadCsv(`rvm-pcf-extract-${ts}.csv`, rows);
@@ -1439,69 +1529,82 @@ export function mount(container) {
     <span class="rvm-pcf-extract-run-status" style="margin-left:auto;font-size:11px;color:#7ddc9a;"></span>
   </div>
   <div class="rvm-pcf-extract-toolbar">
-    <button data-action="RELOAD_SCOPE">Reload Scope</button>
-    <button data-action="REBUILD_CSV">Rebuild 2D CSV</button>
-    <button data-action="VALIDATE">Validate</button>
-    <button data-action="RUN_PCF_READINESS">Run Readiness Check</button>
-    <button data-action="EXPORT_READINESS_JSON">Export Report (JSON)</button>
-    <button data-action="EXPORT_READINESS_MD">Export Report (MD)</button>
 
-    <label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#9aa9bd;">
-      <input data-readiness-skip-all-errors type="checkbox">
-      Skip all Errors
-    </label>
+    <!-- Step 1: Data preparation -->
+    <div class="rvm-pcf-tb-group">
+      <div class="rvm-pcf-tb-group-label">1 · Data</div>
+      <div class="rvm-pcf-tb-group-row">
+        <button data-action="RELOAD_SCOPE">Reload Scope</button>
+        <button data-action="REBUILD_CSV">Rebuild 2D CSV</button>
+        <button data-action="VALIDATE">Validate</button>
+      </div>
+    </div>
 
-    <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#9aa9bd;">
-      Gap/Overlap Fix mm
-      <input
-        data-topo-fix-tolerance-mm
-        type="number"
-        min="0"
-        max="100"
-        step="1"
-        value="25"
-        style="width:58px;background:#0f172a;color:#dbeafe;border:1px solid #334155;border-radius:4px;padding:3px 5px;"
-      >
-    </label>
-    <button data-action="DRY_RUN_GAP_OVERLAP">Dry Run Gap/Overlap</button>
-    <button data-action="APPLY_SAFE_GAP_OVERLAP">Apply Safe Gap/Overlap Fix</button>
+    <div class="rvm-pcf-tb-sep"></div>
 
-    <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#9aa9bd;">
-      Ray max mm
-      <input
-        data-ray-second-pass-max-mm
-        type="number"
-        min="1"
-        max="5000"
-        step="1"
-        value="500"
-        style="width:70px;background:#0f172a;color:#dbeafe;border:1px solid #334155;border-radius:4px;padding:3px 5px;"
-      >
-    </label>
+    <!-- Step 2: Readiness check -->
+    <div class="rvm-pcf-tb-group">
+      <div class="rvm-pcf-tb-group-label">2 · Readiness Check</div>
+      <div class="rvm-pcf-tb-group-row">
+        <button data-action="RUN_PCF_READINESS">Run Readiness Check</button>
+        <button data-action="EXPORT_READINESS_JSON" class="rvm-pcf-tb-btn-secondary" title="Download readiness report as JSON">Export JSON</button>
+        <button data-action="EXPORT_READINESS_MD" class="rvm-pcf-tb-btn-secondary" title="Download readiness report as Markdown">Export MD</button>
+      </div>
+    </div>
 
-    <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#9aa9bd;">
-      Ray miss mm
-      <input
-        data-ray-second-pass-miss-mm
-        type="number"
-        min="0"
-        max="100"
-        step="1"
-        value="12"
-        style="width:64px;background:#0f172a;color:#dbeafe;border:1px solid #334155;border-radius:4px;padding:3px 5px;"
-      >
-    </label>
+    <div class="rvm-pcf-tb-sep"></div>
 
-    <label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#9aa9bd;">
-      <input data-ray-second-pass-allow-medium type="checkbox" checked>
-      Allow TEE midpoint fallback
-    </label>
+    <!-- Step 3a: Gap/Overlap topology fix -->
+    <div class="rvm-pcf-tb-group">
+      <div class="rvm-pcf-tb-group-label">3a · Gap / Overlap Fix</div>
+      <div class="rvm-pcf-tb-group-row">
+        <label class="rvm-pcf-tb-input-label" title="Maximum gap or overlap length in mm that will be auto-fixed">
+          Fix mm
+          <input data-topo-fix-tolerance-mm type="number" min="0" max="100" step="1" value="25" class="rvm-pcf-tb-numbox">
+        </label>
+        <button data-action="DRY_RUN_GAP_OVERLAP" title="Preview which gaps/overlaps would be fixed — does not modify data">Dry Run</button>
+        <button data-action="APPLY_SAFE_GAP_OVERLAP" title="Apply only the gap/overlap fixes that are unambiguously safe">Apply Safe Fix</button>
+      </div>
+    </div>
 
-    <button data-action="APPLY_RAY_SECOND_PASS">Apply Ray 2nd Pass</button>
+    <div class="rvm-pcf-tb-sep"></div>
 
-    <button data-action="GENERATE_PCF">Generate PCF</button>
-    <button data-action="DOWNLOAD_CSV">Download CSV</button>
-    <button data-action="DOWNLOAD_PCF">Download PCF</button>
+    <!-- Step 3b: Ray second pass (alternative topology fix) -->
+    <div class="rvm-pcf-tb-group">
+      <div class="rvm-pcf-tb-group-label">3b · Ray 2nd Pass</div>
+      <div class="rvm-pcf-tb-group-row">
+        <label class="rvm-pcf-tb-input-label" title="Maximum pipe segment length (mm) that the ray will travel">
+          Max mm
+          <input data-ray-second-pass-max-mm type="number" min="1" max="5000" step="1" value="500" class="rvm-pcf-tb-numbox" style="width:64px;">
+        </label>
+        <label class="rvm-pcf-tb-input-label" title="Allowable miss distance (mm) when the ray narrowly misses an endpoint">
+          Miss mm
+          <input data-ray-second-pass-miss-mm type="number" min="0" max="100" step="1" value="12" class="rvm-pcf-tb-numbox">
+        </label>
+        <label class="rvm-pcf-tb-check" title="Also accept TEE midpoint connections when no direct endpoint is found">
+          <input data-ray-second-pass-allow-medium type="checkbox" checked>
+          TEE fallback
+        </label>
+        <button data-action="APPLY_RAY_SECOND_PASS">Apply Ray 2nd Pass</button>
+      </div>
+    </div>
+
+    <div class="rvm-pcf-tb-sep"></div>
+
+    <!-- Step 4: Output — Skip all Errors is here so it comes after all topology fixes -->
+    <div class="rvm-pcf-tb-group">
+      <div class="rvm-pcf-tb-group-label">4 · Output</div>
+      <div class="rvm-pcf-tb-group-row">
+        <label class="rvm-pcf-tb-check" title="Downgrade all remaining readiness errors to warnings so PCF export is not blocked. Run Readiness Check again after checking this.">
+          <input data-readiness-skip-all-errors type="checkbox">
+          Skip all Errors
+        </label>
+        <button data-action="GENERATE_PCF" class="rvm-pcf-tb-btn-primary">Generate PCF</button>
+        <button data-action="DOWNLOAD_CSV" class="rvm-pcf-tb-btn-secondary">Download CSV</button>
+        <button data-action="DOWNLOAD_PCF" class="rvm-pcf-tb-btn-secondary">Download PCF</button>
+      </div>
+    </div>
+
   </div>
   <div class="rvm-pcf-extract-body"><div class="rvm-pcf-extract-layout"><aside class="rvm-pcf-extract-rail">
     <button data-panel="scope" class="is-active">Scope</button><button data-panel="masters">Masters</button><button data-panel="table">2D CSV</button><button data-panel="diagnostics">Diagnostics</button><button data-panel="pcf">PCF</button>
