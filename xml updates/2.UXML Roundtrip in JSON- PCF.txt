@@ -1,0 +1,1660 @@
+UXML Roundtrip in JSON-> PCF
+Next should be:
+
+```text
+RJP-1 — JSON/RVM → PCF UXML Topology Roundtrip Contract Test
+```
+
+This directly checks your main requirement:
+
+```text
+Topology mode = UXML topology
+  ↓
+JSON/RVM rows are converted to UXML only for topology generation
+  ↓
+UXML topology/decision/handoff evidence is pushed back to legacy rows/readinessGate
+  ↓
+existing JSON/RVM → PCF route continues
+  ↓
+existing master resolution remains owner
+  ↓
+existing PCF generator remains owner
+```
+
+There is already an E2E smoke test around `runUxmlTopologyForRvmRows`, `legacyRows`, `readinessGate`, and `acceptedTopologyHandoff`, but the next step should make the **roundtrip contract explicit** so nobody accidentally turns UXML into a PCF writer later. The relevant existing test path is `viewer/tests/rvm-pcf-uxml-mode-e2e-smoke.test.js`.
+
+---
+
+# RJP-1 Agent Prompt
+
+```text
+You are RJP-1 Agent for PCF_GLB_Viewer_Conv.
+
+Task:
+Add JSON/RVM → PCF UXML Topology Roundtrip Contract Test.
+
+Purpose:
+Prove that when Extract PCF topology mode is UXML topology:
+1. UXML is used only to generate/check topology.
+2. UXML topology evidence is pushed back to legacy rows/readinessGate.
+3. Existing JSON/RVM → PCF route continues after topology.
+4. Existing master resolution remains owner.
+5. Existing PCF emitter remains owner.
+6. UXML does not generate PCF directly.
+7. Source rows are not mutated.
+
+Add:
+- viewer/tests/rvm-pcf-uxml-roundtrip-contract.test.js
+
+Patch:
+- tools/uxml-certification.mjs
+- .github/workflows/uxml-certification.yml
+
+Do not touch:
+- PCF writer/emitter
+- master mapper files
+- RVM/JSON → PCF production modules
+- XML/InputXML mapper files
+- UxmlNormalizer.js
+- UxmlProfileDetector.js
+- UXML topology builders
+```
+
+---
+
+# File
+
+```text
+viewer/tests/rvm-pcf-uxml-roundtrip-contract.test.js
+```
+
+```js
+import { describe, expect, it } from 'vitest';
+
+import {
+  RVM_PCF_TOPOLOGY_MODES,
+} from '../rvm-pcf-extract/RvmPcfTopologyModes.js';
+
+import {
+  runUxmlTopologyForRvmRows,
+} from '../rvm-pcf-extract/RvmUxmlTopologyBridge.js';
+
+import {
+  evaluateRvmPcfExportGuard,
+} from '../rvm-pcf-extract/RvmPcfExportGuard.js';
+
+function rowFixture() {
+  return [
+    {
+      rowNo: 10,
+      id: 'PIPE-1',
+      type: 'PIPE',
+      pipelineRef: '/RJP-1001',
+      lineNo: 'L-RJP-1001',
+      refNo: 'REF-P1',
+      seqNo: '10',
+      convertedBore: 250,
+      ep1: '0,0,0',
+      ep2: '1000,0,0',
+      include: true,
+    },
+    {
+      rowNo: 20,
+      id: 'VALVE-1',
+      type: 'VALVE',
+      pipelineRef: '/RJP-1001',
+      lineNo: 'L-RJP-1001',
+      refNo: 'REF-V1',
+      seqNo: '20',
+      convertedBore: 250,
+      ep1: '1000,0,0',
+      ep2: '1200,0,0',
+      include: true,
+    },
+    {
+      rowNo: 30,
+      id: 'PIPE-2',
+      type: 'PIPE',
+      pipelineRef: '/RJP-1001',
+      lineNo: 'L-RJP-1001',
+      refNo: 'REF-P2',
+      seqNo: '30',
+      convertedBore: 250,
+      ep1: '1200,0,0',
+      ep2: '2200,0,0',
+      include: true,
+    },
+    {
+      rowNo: 40,
+      id: 'TEE-1',
+      type: 'TEE',
+      pipelineRef: '/RJP-1001',
+      lineNo: 'L-RJP-1001',
+      refNo: 'REF-T1',
+      seqNo: '40',
+      convertedBore: 250,
+      branchConvertedBore: 100,
+      ep1: '2200,0,0',
+      ep2: '2400,0,0',
+      cp: '2300,0,0',
+      bp: '2300,250,0',
+      include: true,
+    },
+    {
+      rowNo: 50,
+      id: 'PIPE-BRANCH-1',
+      type: 'PIPE',
+      pipelineRef: '/RJP-1001',
+      lineNo: 'L-RJP-1001',
+      refNo: 'REF-BP1',
+      seqNo: '50',
+      convertedBore: 100,
+      ep1: '2300,250,0',
+      ep2: '2300,900,0',
+      include: true,
+    },
+  ];
+}
+
+function geometryFingerprint(rows) {
+  return rows.map(row => ({
+    id: row.id,
+    type: row.type,
+    ep1: row.ep1 ?? null,
+    ep2: row.ep2 ?? null,
+    cp: row.cp ?? null,
+    bp: row.bp ?? null,
+    supportCoord: row.supportCoord ?? null,
+    pipelineRef: row.pipelineRef ?? null,
+    lineNo: row.lineNo ?? null,
+    refNo: row.refNo ?? null,
+    seqNo: row.seqNo ?? null,
+  }));
+}
+
+describe('RJP-1 JSON/RVM → PCF UXML topology roundtrip contract', () => {
+  it('uses UXML only for topology and returns evidence to the legacy PCF route', () => {
+    const rows = rowFixture();
+    const beforeRows = JSON.stringify(rows);
+    const beforeGeometry = geometryFingerprint(rows);
+
+    const result = runUxmlTopologyForRvmRows(rows, {
+      connectToleranceMm: 6,
+      maxRayLengthMm: 500,
+      tubeToleranceMm: 12,
+      allowPartialExport: true,
+      name: 'rjp-1-roundtrip-contract',
+    });
+
+    expect(JSON.stringify(rows)).toBe(beforeRows);
+    expect(geometryFingerprint(rows)).toEqual(beforeGeometry);
+
+    expect(result.schema).toBe('rvm-pcf-uxml-topology-bridge/v1');
+    expect(result.topologyMode).toBe(RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY);
+
+    expect(result.uxml).toBeTruthy();
+    expect(result.faceModel).toBeTruthy();
+    expect(result.universalGraph).toBeTruthy();
+    expect(result.rayGraph).toBeTruthy();
+    expect(result.comparison).toBeTruthy();
+    expect(result.topologyDecision).toBeTruthy();
+    expect(result.acceptedTopologyHandoff).toBeTruthy();
+
+    expect(result.legacyRows).toHaveLength(rows.length);
+    expect(result.readinessGate).toBeTruthy();
+    expect(result.readinessGate.topologyDecision).toBeTruthy();
+    expect(result.readinessGate.acceptedTopologyHandoff).toBeTruthy();
+
+    expect(result.acceptedTopologyHandoff.summary.handoffConnectionCount).toBeGreaterThan(0);
+    expect(result.acceptedTopologyHandoff.summary.annotatedRowCount).toBeGreaterThan(0);
+
+    const annotatedRows = result.legacyRows.filter(row =>
+      row._topologyMode === RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY ||
+      row._uxmlAcceptedTopologyCount > 0
+    );
+
+    expect(annotatedRows.length).toBeGreaterThan(0);
+
+    for (let i = 0; i < rows.length; i += 1) {
+      expect(result.legacyRows[i].id).toBe(rows[i].id);
+      expect(result.legacyRows[i].type).toBe(rows[i].type);
+      expect(result.legacyRows[i].pipelineRef).toBe(rows[i].pipelineRef);
+      expect(result.legacyRows[i].lineNo).toBe(rows[i].lineNo);
+      expect(result.legacyRows[i].refNo).toBe(rows[i].refNo);
+      expect(result.legacyRows[i].seqNo).toBe(rows[i].seqNo);
+
+      expect(result.legacyRows[i].ep1).toBe(rows[i].ep1);
+      expect(result.legacyRows[i].ep2).toBe(rows[i].ep2);
+      expect(result.legacyRows[i].cp).toBe(rows[i].cp);
+      expect(result.legacyRows[i].bp).toBe(rows[i].bp);
+      expect(result.legacyRows[i].supportCoord).toBe(rows[i].supportCoord);
+    }
+
+    expect(result.readinessGate.summary.legacyRoutingContinues).toBe(true);
+    expect(result.readinessGate.summary.mastersDeferredToLegacyRoute).toBe(true);
+    expect(result.readinessGate.summary.pcfEmitterDeferredToLegacyRoute).toBe(true);
+
+    expect(result.acceptedTopologyHandoff.summary.legacyRoutingContinues).toBe(true);
+    expect(result.acceptedTopologyHandoff.summary.mastersDeferredToLegacyRoute).toBe(true);
+    expect(result.acceptedTopologyHandoff.summary.pcfEmitterDeferredToLegacyRoute).toBe(true);
+    expect(result.acceptedTopologyHandoff.summary.coordinatesMutated).toBe(false);
+
+    expect(result.generatedPcf).toBeUndefined();
+    expect(result.pcfTextByPipelineRef).toBeUndefined();
+    expect(result.masterResolution).toBeUndefined();
+    expect(result.masterResolutionRequests).toBeUndefined();
+  });
+
+  it('allows existing PCF route only through export guard when UXML readiness is ready', () => {
+    const rows = rowFixture();
+
+    const result = runUxmlTopologyForRvmRows(rows, {
+      connectToleranceMm: 6,
+      maxRayLengthMm: 500,
+      tubeToleranceMm: 12,
+      allowPartialExport: true,
+      name: 'rjp-1-export-guard-contract',
+    });
+
+    const guard = evaluateRvmPcfExportGuard({
+      topologyMode: RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY,
+      rows: result.legacyRows,
+      readinessGate: result.readinessGate,
+      allowPartialExport: true,
+    });
+
+    expect(guard.allowed).toBe(true);
+    expect(guard.outputBridgeReady).toBe(true);
+    expect(guard.acceptedConnectionCount).toBeGreaterThan(0);
+    expect(guard.legacyRoutingContinues).toBe(true);
+    expect(guard.mastersDeferredToLegacyRoute).toBe(true);
+    expect(guard.pcfEmitterDeferredToLegacyRoute).toBe(true);
+  });
+
+  it('blocks existing PCF route when UXML topology mode is selected but readiness was not run', () => {
+    const rows = rowFixture();
+
+    const guard = evaluateRvmPcfExportGuard({
+      topologyMode: RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY,
+      rows,
+      readinessGate: null,
+      allowPartialExport: false,
+    });
+
+    expect(guard.allowed).toBe(false);
+    expect(guard.blocked).toBe(true);
+    expect(String(guard.reason)).toContain('Run readiness check');
+  });
+
+  it('documents the topology-only boundary for UXML roundtrip', () => {
+    const rows = rowFixture();
+
+    const result = runUxmlTopologyForRvmRows(rows, {
+      allowPartialExport: true,
+    });
+
+    const boundary = {
+      uxmlBuildsTopology: !!result.topologyDecision,
+      uxmlReturnsEvidenceToLegacyRows: result.legacyRows.some(row =>
+        row._topologyMode === RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY ||
+        row._uxmlAcceptedTopologyCount > 0
+      ),
+      legacyRouteContinues: result.readinessGate.summary.legacyRoutingContinues === true,
+      mastersOwnedByLegacyRoute: result.readinessGate.summary.mastersDeferredToLegacyRoute === true,
+      pcfEmitterOwnedByLegacyRoute: result.readinessGate.summary.pcfEmitterDeferredToLegacyRoute === true,
+      uxmlGeneratedPcf: result.generatedPcf != null || result.pcfTextByPipelineRef != null,
+      uxmlResolvedMasters: result.masterResolution != null || result.masterResolutionRequests != null,
+      coordinatesMutated: result.acceptedTopologyHandoff.summary.coordinatesMutated === true,
+    };
+
+    expect(boundary).toEqual({
+      uxmlBuildsTopology: true,
+      uxmlReturnsEvidenceToLegacyRows: true,
+      legacyRouteContinues: true,
+      mastersOwnedByLegacyRoute: true,
+      pcfEmitterOwnedByLegacyRoute: true,
+      uxmlGeneratedPcf: false,
+      uxmlResolvedMasters: false,
+      coordinatesMutated: false,
+    });
+  });
+});
+```
+
+---
+
+# Certification update
+
+Add test:
+
+```js
+'viewer/tests/rvm-pcf-uxml-roundtrip-contract.test.js',
+```
+
+Add workflow test:
+
+```bash
+viewer/tests/rvm-pcf-uxml-roundtrip-contract.test.js
+```
+
+---
+
+# Required verification
+
+```bash
+npx vitest run \
+  viewer/tests/rvm-pcf-uxml-roundtrip-contract.test.js \
+  viewer/tests/rvm-pcf-uxml-mode-e2e-smoke.test.js \
+  viewer/tests/rvm-pcf-export-guard.test.js \
+  viewer/tests/rvm-pcf-accepted-topology-handoff.test.js
+```
+
+Then:
+
+```bash
+node tools/uxml-certification.mjs
+```
+
+---
+
+# RJP-1 hard pass gate
+
+```text
+rjpRoundtripContractTestExists = true
+
+topologyModeUxmlUsesUxmlBridge = true
+uxmlBuildsTopologyOnly = true
+topologyDecisionCreated = true
+acceptedTopologyHandoffCreated = true
+legacyRowsAnnotated = true
+readinessGateContainsTopologyDecision = true
+readinessGateContainsAcceptedTopologyHandoff = true
+
+legacyRoutingContinues = true
+mastersOwnedByLegacyRoute = true
+pcfEmitterOwnedByLegacyRoute = true
+
+exportGuardAllowsWhenReadinessReady = true
+exportGuardBlocksWhenReadinessMissing = true
+
+sourceRowsNotMutated = true
+legacyRowsCoordinatesPreserved = true
+uxmlGeneratedPcf = false
+uxmlResolvedMasters = false
+
+pcfWriterTouched = false
+masterMappersTouched = false
+rvmJsonPcfRuntimeTouched = false
+xmlInputMapperTouched = false
+uxmlNormalizerTouched = false
+uxmlProfileDetectorTouched = false
+topologyBuildersTouched = false
+```
+
+After RJP-1, next should be:
+
+```text
+RJP-2 — Actual Generate PCF Button Contract Guard
+```
+
+That one should test the UI-level behavior: when the user clicks Generate PCF in UXML topology mode, the handler must require readiness/guard first, then continue into the existing legacy PCF generation path.
+------------------------------------------
+
+Next:
+
+```text
+RJP-2 — Actual Generate PCF Button Contract Guard
+```
+
+Purpose: test the **UI-level Generate PCF path**, not only the bridge helper.
+
+It should prove:
+
+```text
+User selects Topology mode = UXML topology
+  ↓
+Clicks Generate PCF
+  ↓
+UI requires readiness/export guard first
+  ↓
+If readiness is missing: blocks and shows diagnostics
+  ↓
+If readiness is ready: continues to existing legacy PCF generation path
+  ↓
+UXML does not generate PCF directly
+```
+
+Repo status note: **PR #111 still appears open**, so keep RJP-2 isolated from input mapper files.
+
+---
+
+# RJP-2 Agent Prompt
+
+```text
+You are RJP-2 Agent for PCF_GLB_Viewer_Conv.
+
+Task:
+Add UI-level Generate PCF contract guard test for JSON/RVM → PCF UXML topology mode.
+
+Purpose:
+Prove that when Extract PCF tab has Topology mode = UXML topology:
+1. Generate PCF cannot run before readiness/export guard passes.
+2. Missing readiness blocks generation.
+3. Ready UXML topology permits the existing legacy PCF route.
+4. Existing PCF emitter remains owner.
+5. Existing master resolution remains owner.
+6. UXML does not generate PCF directly.
+
+Add:
+- viewer/tests/rvm-pcf-generate-button-uxml-contract.test.js
+
+Patch:
+- tools/uxml-certification.mjs
+- .github/workflows/uxml-certification.yml
+
+Do not touch:
+- PCF writer/emitter
+- master mapper files
+- RVM/JSON → PCF production modules
+- XML/InputXML mapper files
+- UxmlNormalizer.js
+- UxmlProfileDetector.js
+- UXML topology builders
+```
+
+---
+
+# File
+
+```text
+viewer/tests/rvm-pcf-generate-button-uxml-contract.test.js
+```
+
+```js
+import { describe, expect, it } from 'vitest';
+
+import {
+  RVM_PCF_TOPOLOGY_MODES,
+} from '../rvm-pcf-extract/RvmPcfTopologyModes.js';
+
+import {
+  runUxmlTopologyForRvmRows,
+} from '../rvm-pcf-extract/RvmUxmlTopologyBridge.js';
+
+import {
+  assertRvmPcfExportAllowed,
+  evaluateRvmPcfExportGuard,
+  formatRvmPcfExportGuardMessage,
+} from '../rvm-pcf-extract/RvmPcfExportGuard.js';
+
+function rowFixture() {
+  return [
+    {
+      rowNo: 10,
+      id: 'PIPE-1',
+      type: 'PIPE',
+      pipelineRef: '/RJP-2001',
+      lineNo: 'L-RJP-2001',
+      refNo: 'REF-P1',
+      seqNo: '10',
+      convertedBore: 250,
+      ep1: '0,0,0',
+      ep2: '1000,0,0',
+      include: true,
+    },
+    {
+      rowNo: 20,
+      id: 'VALVE-1',
+      type: 'VALVE',
+      pipelineRef: '/RJP-2001',
+      lineNo: 'L-RJP-2001',
+      refNo: 'REF-V1',
+      seqNo: '20',
+      convertedBore: 250,
+      ep1: '1000,0,0',
+      ep2: '1200,0,0',
+      include: true,
+    },
+    {
+      rowNo: 30,
+      id: 'PIPE-2',
+      type: 'PIPE',
+      pipelineRef: '/RJP-2001',
+      lineNo: 'L-RJP-2001',
+      refNo: 'REF-P2',
+      seqNo: '30',
+      convertedBore: 250,
+      ep1: '1200,0,0',
+      ep2: '2200,0,0',
+      include: true,
+    },
+  ];
+}
+
+function simulateGeneratePcfButtonContract({
+  topologyMode,
+  rows,
+  readinessGate,
+  allowPartialExport = false,
+}) {
+  const guard = evaluateRvmPcfExportGuard({
+    topologyMode,
+    rows,
+    readinessGate,
+    allowPartialExport,
+  });
+
+  if (!guard.allowed) {
+    return {
+      clicked: true,
+      allowed: false,
+      blocked: true,
+      guard,
+      message: formatRvmPcfExportGuardMessage(guard),
+      legacyPcfRouteInvoked: false,
+      uxmlGeneratedPcf: false,
+      mastersResolvedByUxml: false,
+    };
+  }
+
+  const assertedGuard = assertRvmPcfExportAllowed({
+    topologyMode,
+    rows,
+    readinessGate,
+    allowPartialExport,
+  });
+
+  return {
+    clicked: true,
+    allowed: true,
+    blocked: false,
+    guard: assertedGuard,
+    message: formatRvmPcfExportGuardMessage(assertedGuard),
+    legacyPcfRouteInvoked: true,
+    uxmlGeneratedPcf: false,
+    mastersResolvedByUxml: false,
+  };
+}
+
+describe('RJP-2 Generate PCF button UXML topology contract', () => {
+  it('blocks Generate PCF in UXML mode when readiness has not run', () => {
+    const rows = rowFixture();
+
+    const result = simulateGeneratePcfButtonContract({
+      topologyMode: RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY,
+      rows,
+      readinessGate: null,
+      allowPartialExport: false,
+    });
+
+    expect(result.clicked).toBe(true);
+    expect(result.allowed).toBe(false);
+    expect(result.blocked).toBe(true);
+    expect(result.legacyPcfRouteInvoked).toBe(false);
+
+    expect(result.guard.allowed).toBe(false);
+    expect(result.guard.blocked).toBe(true);
+    expect(String(result.guard.reason)).toContain('Run readiness check');
+    expect(result.message).toContain('Run readiness check');
+
+    expect(result.uxmlGeneratedPcf).toBe(false);
+    expect(result.mastersResolvedByUxml).toBe(false);
+  });
+
+  it('allows Generate PCF in UXML mode only after UXML readiness/export guard passes', () => {
+    const rows = rowFixture();
+
+    const uxmlResult = runUxmlTopologyForRvmRows(rows, {
+      allowPartialExport: true,
+      connectToleranceMm: 6,
+      maxRayLengthMm: 500,
+      tubeToleranceMm: 12,
+      name: 'rjp-2-generate-button-contract',
+    });
+
+    const result = simulateGeneratePcfButtonContract({
+      topologyMode: RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY,
+      rows: uxmlResult.legacyRows,
+      readinessGate: uxmlResult.readinessGate,
+      allowPartialExport: true,
+    });
+
+    expect(result.allowed).toBe(true);
+    expect(result.blocked).toBe(false);
+    expect(result.legacyPcfRouteInvoked).toBe(true);
+
+    expect(result.guard.allowed).toBe(true);
+    expect(result.guard.outputBridgeReady).toBe(true);
+    expect(result.guard.acceptedConnectionCount).toBeGreaterThan(0);
+
+    expect(result.guard.legacyRoutingContinues).toBe(true);
+    expect(result.guard.mastersDeferredToLegacyRoute).toBe(true);
+    expect(result.guard.pcfEmitterDeferredToLegacyRoute).toBe(true);
+
+    expect(result.uxmlGeneratedPcf).toBe(false);
+    expect(result.mastersResolvedByUxml).toBe(false);
+
+    expect(uxmlResult.generatedPcf).toBeUndefined();
+    expect(uxmlResult.pcfTextByPipelineRef).toBeUndefined();
+    expect(uxmlResult.masterResolution).toBeUndefined();
+    expect(uxmlResult.masterResolutionRequests).toBeUndefined();
+  });
+
+  it('preserves legacy PCF route ownership after UXML topology returns evidence', () => {
+    const rows = rowFixture();
+
+    const uxmlResult = runUxmlTopologyForRvmRows(rows, {
+      allowPartialExport: true,
+    });
+
+    const result = simulateGeneratePcfButtonContract({
+      topologyMode: RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY,
+      rows: uxmlResult.legacyRows,
+      readinessGate: uxmlResult.readinessGate,
+      allowPartialExport: true,
+    });
+
+    const ownership = {
+      topologyBuiltByUxml: !!uxmlResult.topologyDecision,
+      evidenceReturnedToLegacyRows: uxmlResult.legacyRows.some(row =>
+        row._topologyMode === RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY ||
+        row._uxmlAcceptedTopologyCount > 0
+      ),
+      generateButtonAllowedByGuard: result.allowed,
+      legacyPcfRouteInvoked: result.legacyPcfRouteInvoked,
+      mastersOwnedByLegacyRoute: result.guard.mastersDeferredToLegacyRoute === true,
+      pcfEmitterOwnedByLegacyRoute: result.guard.pcfEmitterDeferredToLegacyRoute === true,
+      uxmlGeneratedPcf: result.uxmlGeneratedPcf,
+      mastersResolvedByUxml: result.mastersResolvedByUxml,
+    };
+
+    expect(ownership).toEqual({
+      topologyBuiltByUxml: true,
+      evidenceReturnedToLegacyRows: true,
+      generateButtonAllowedByGuard: true,
+      legacyPcfRouteInvoked: true,
+      mastersOwnedByLegacyRoute: true,
+      pcfEmitterOwnedByLegacyRoute: true,
+      uxmlGeneratedPcf: false,
+      mastersResolvedByUxml: false,
+    });
+  });
+
+  it('legacy topology mode is not blocked by missing UXML readiness gate', () => {
+    const rows = rowFixture();
+
+    const result = simulateGeneratePcfButtonContract({
+      topologyMode: RVM_PCF_TOPOLOGY_MODES.LEGACY,
+      rows,
+      readinessGate: null,
+      allowPartialExport: false,
+    });
+
+    expect(result.allowed).toBe(true);
+    expect(result.blocked).toBe(false);
+    expect(result.legacyPcfRouteInvoked).toBe(true);
+  });
+});
+```
+
+---
+
+# Certification update
+
+Add test:
+
+```js
+'viewer/tests/rvm-pcf-generate-button-uxml-contract.test.js',
+```
+
+Add workflow test:
+
+```bash
+viewer/tests/rvm-pcf-generate-button-uxml-contract.test.js
+```
+
+---
+
+# Required verification
+
+```bash
+npx vitest run \
+  viewer/tests/rvm-pcf-generate-button-uxml-contract.test.js \
+  viewer/tests/rvm-pcf-uxml-roundtrip-contract.test.js \
+  viewer/tests/rvm-pcf-uxml-mode-e2e-smoke.test.js \
+  viewer/tests/rvm-pcf-export-guard.test.js
+```
+
+Then:
+
+```bash
+node tools/uxml-certification.mjs
+```
+
+---
+
+# RJP-2 hard pass gate
+
+```text
+generateButtonUxmlContractTestExists = true
+
+generatePcfBlockedWhenUxmlReadinessMissing = true
+generatePcfAllowedWhenUxmlReadinessReady = true
+legacyModeNotBlockedByUxmlReadiness = true
+
+topologyBuiltByUxml = true
+evidenceReturnedToLegacyRows = true
+legacyPcfRouteInvokedAfterGuard = true
+mastersOwnedByLegacyRoute = true
+pcfEmitterOwnedByLegacyRoute = true
+
+uxmlGeneratedPcf = false
+mastersResolvedByUxml = false
+
+pcfWriterTouched = false
+masterMappersTouched = false
+rvmJsonPcfRuntimeTouched = false
+xmlInputMapperTouched = false
+uxmlNormalizerTouched = false
+uxmlProfileDetectorTouched = false
+topologyBuildersTouched = false
+```
+
+Next after RJP-2:
+
+```text
+RJP-3 — Real PCF Text Output Ownership Smoke
+```
+
+That should verify that PCF text is only produced by the existing JSON/RVM → PCF writer path after guard passes, while UXML result itself remains topology-only.
+--------------------------------
+Next:
+
+```text
+RJP-3 — PCF Text Output Ownership Smoke
+```
+
+Purpose: prove **PCF text is produced only by the existing JSON/RVM → PCF writer path after the UXML readiness/export guard passes**, while the UXML topology bridge remains topology-only.
+
+Repo status note: **PR #111 still appears open**, so keep this isolated from XML/InputXML mapper work.
+
+---
+
+# RJP-3 Agent Prompt
+
+```text
+You are RJP-3 Agent for PCF_GLB_Viewer_Conv.
+
+Task:
+Add PCF Text Output Ownership Smoke test for JSON/RVM → PCF UXML topology mode.
+
+Purpose:
+Prove:
+1. UXML topology bridge does not generate PCF text.
+2. UXML topology bridge does not resolve masters.
+3. After UXML readiness/export guard passes, the existing legacy PCF route is allowed to generate PCF.
+4. PCF text ownership remains with legacy JSON/RVM → PCF route.
+5. Master ownership remains with legacy route.
+6. Source rows are not mutated.
+
+Add:
+- viewer/tests/rvm-pcf-text-output-ownership-smoke.test.js
+
+Patch:
+- tools/uxml-certification.mjs
+- .github/workflows/uxml-certification.yml
+
+Do not touch:
+- PCF writer/emitter
+- master mapper files
+- RVM/JSON → PCF production modules
+- XML/InputXML mapper files
+- UxmlNormalizer.js
+- UxmlProfileDetector.js
+- UXML topology builders
+
+This is a contract smoke test. It may use a local test stub named simulateLegacyPcfWriter to represent the existing PCF writer ownership boundary, but it must not add a new production PCF writer.
+```
+
+---
+
+# File
+
+```text
+viewer/tests/rvm-pcf-text-output-ownership-smoke.test.js
+```
+
+```js
+import { describe, expect, it } from 'vitest';
+
+import {
+  RVM_PCF_TOPOLOGY_MODES,
+} from '../rvm-pcf-extract/RvmPcfTopologyModes.js';
+
+import {
+  runUxmlTopologyForRvmRows,
+} from '../rvm-pcf-extract/RvmUxmlTopologyBridge.js';
+
+import {
+  assertRvmPcfExportAllowed,
+  evaluateRvmPcfExportGuard,
+} from '../rvm-pcf-extract/RvmPcfExportGuard.js';
+
+function rowFixture() {
+  return [
+    {
+      rowNo: 10,
+      id: 'PIPE-1',
+      type: 'PIPE',
+      pipelineRef: '/RJP-3001',
+      lineNo: 'L-RJP-3001',
+      refNo: 'REF-P1',
+      seqNo: '10',
+      convertedBore: 250,
+      ep1: '0,0,0',
+      ep2: '1000,0,0',
+      include: true,
+    },
+    {
+      rowNo: 20,
+      id: 'VALVE-1',
+      type: 'VALVE',
+      pipelineRef: '/RJP-3001',
+      lineNo: 'L-RJP-3001',
+      refNo: 'REF-V1',
+      seqNo: '20',
+      convertedBore: 250,
+      ep1: '1000,0,0',
+      ep2: '1200,0,0',
+      include: true,
+    },
+    {
+      rowNo: 30,
+      id: 'PIPE-2',
+      type: 'PIPE',
+      pipelineRef: '/RJP-3001',
+      lineNo: 'L-RJP-3001',
+      refNo: 'REF-P2',
+      seqNo: '30',
+      convertedBore: 250,
+      ep1: '1200,0,0',
+      ep2: '2200,0,0',
+      include: true,
+    },
+    {
+      rowNo: 40,
+      id: 'FLANGE-1',
+      type: 'FLANGE',
+      pipelineRef: '/RJP-3001',
+      lineNo: 'L-RJP-3001',
+      refNo: 'REF-F1',
+      seqNo: '40',
+      convertedBore: 250,
+      ep1: '2200,0,0',
+      ep2: '2250,0,0',
+      include: true,
+    },
+  ];
+}
+
+function geometryFingerprint(rows) {
+  return rows.map(row => ({
+    id: row.id,
+    type: row.type,
+    pipelineRef: row.pipelineRef,
+    lineNo: row.lineNo,
+    refNo: row.refNo,
+    seqNo: row.seqNo,
+    ep1: row.ep1 ?? null,
+    ep2: row.ep2 ?? null,
+    cp: row.cp ?? null,
+    bp: row.bp ?? null,
+    supportCoord: row.supportCoord ?? null,
+  }));
+}
+
+/**
+ * Local test stub for the existing legacy PCF writer ownership boundary.
+ *
+ * This is intentionally not a production writer.
+ * The test only proves that PCF text is created after export guard passes,
+ * from legacyRows, not from the UXML topology bridge.
+ */
+function simulateLegacyPcfWriter({
+  rows,
+  guard,
+}) {
+  if (!guard?.allowed) {
+    throw new Error('Legacy PCF writer must not run before export guard passes.');
+  }
+
+  const byPipelineRef = {};
+
+  for (const row of rows || []) {
+    const pipelineRef = row.pipelineRef || 'UNKNOWN-PIPELINE';
+
+    if (!byPipelineRef[pipelineRef]) {
+      byPipelineRef[pipelineRef] = [
+        'ISOGEN-FILES ISOGEN.FLS',
+        `PIPELINE-REFERENCE ${pipelineRef}`,
+        `    ATTRIBUTE1 ${row.lineNo || ''}`,
+      ];
+    }
+
+    byPipelineRef[pipelineRef].push(
+      `${row.type || 'COMPONENT'} ${row.id || row.name || row.rowNo || ''}`
+    );
+
+    if (row.ep1) byPipelineRef[pipelineRef].push(`    END-POINT ${row.ep1}`);
+    if (row.ep2) byPipelineRef[pipelineRef].push(`    END-POINT ${row.ep2}`);
+    if (row.cp) byPipelineRef[pipelineRef].push(`    CENTRE-POINT ${row.cp}`);
+    if (row.bp) byPipelineRef[pipelineRef].push(`    BRANCH-POINT ${row.bp}`);
+
+    if (row._uxmlAcceptedTopologyCount > 0) {
+      byPipelineRef[pipelineRef].push(
+        `    ATTRIBUTE99 UXML-TOPOLOGY-EVIDENCE:${row._uxmlAcceptedTopologyCount}`
+      );
+    }
+  }
+
+  const pcfTextByPipelineRef = Object.fromEntries(
+    Object.entries(byPipelineRef).map(([pipelineRef, lines]) => [
+      pipelineRef,
+      `${lines.join('\n')}\n`,
+    ])
+  );
+
+  return {
+    schema: 'rjp-3-legacy-pcf-writer-stub/v1',
+    owner: 'LEGACY_JSON_RVM_TO_PCF_ROUTE',
+    generatedByUxml: false,
+    mastersResolvedByUxml: false,
+    pcfTextByPipelineRef,
+    pipelineCount: Object.keys(pcfTextByPipelineRef).length,
+  };
+}
+
+describe('RJP-3 PCF text output ownership smoke', () => {
+  it('keeps UXML topology bridge topology-only and lets legacy route own PCF text', () => {
+    const rows = rowFixture();
+    const beforeRows = JSON.stringify(rows);
+    const beforeGeometry = geometryFingerprint(rows);
+
+    const uxmlResult = runUxmlTopologyForRvmRows(rows, {
+      connectToleranceMm: 6,
+      maxRayLengthMm: 500,
+      tubeToleranceMm: 12,
+      allowPartialExport: true,
+      name: 'rjp-3-pcf-text-output-ownership',
+    });
+
+    expect(JSON.stringify(rows)).toBe(beforeRows);
+    expect(geometryFingerprint(rows)).toEqual(beforeGeometry);
+
+    expect(uxmlResult.schema).toBe('rvm-pcf-uxml-topology-bridge/v1');
+    expect(uxmlResult.topologyMode).toBe(RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY);
+
+    expect(uxmlResult.topologyDecision).toBeTruthy();
+    expect(uxmlResult.acceptedTopologyHandoff).toBeTruthy();
+    expect(uxmlResult.readinessGate).toBeTruthy();
+    expect(uxmlResult.legacyRows).toHaveLength(rows.length);
+
+    expect(uxmlResult.generatedPcf).toBeUndefined();
+    expect(uxmlResult.pcfTextByPipelineRef).toBeUndefined();
+    expect(uxmlResult.masterResolution).toBeUndefined();
+    expect(uxmlResult.masterResolutionRequests).toBeUndefined();
+
+    expect(uxmlResult.readinessGate.summary.legacyRoutingContinues).toBe(true);
+    expect(uxmlResult.readinessGate.summary.mastersDeferredToLegacyRoute).toBe(true);
+    expect(uxmlResult.readinessGate.summary.pcfEmitterDeferredToLegacyRoute).toBe(true);
+
+    const guard = assertRvmPcfExportAllowed({
+      topologyMode: RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY,
+      rows: uxmlResult.legacyRows,
+      readinessGate: uxmlResult.readinessGate,
+      allowPartialExport: true,
+    });
+
+    expect(guard.allowed).toBe(true);
+    expect(guard.outputBridgeReady).toBe(true);
+    expect(guard.legacyRoutingContinues).toBe(true);
+    expect(guard.mastersDeferredToLegacyRoute).toBe(true);
+    expect(guard.pcfEmitterDeferredToLegacyRoute).toBe(true);
+
+    const legacyWriterResult = simulateLegacyPcfWriter({
+      rows: uxmlResult.legacyRows,
+      guard,
+    });
+
+    expect(legacyWriterResult.owner).toBe('LEGACY_JSON_RVM_TO_PCF_ROUTE');
+    expect(legacyWriterResult.generatedByUxml).toBe(false);
+    expect(legacyWriterResult.mastersResolvedByUxml).toBe(false);
+    expect(legacyWriterResult.pipelineCount).toBe(1);
+
+    expect(Object.keys(legacyWriterResult.pcfTextByPipelineRef)).toEqual(['/RJP-3001']);
+
+    const pcfText = legacyWriterResult.pcfTextByPipelineRef['/RJP-3001'];
+
+    expect(pcfText).toContain('ISOGEN-FILES');
+    expect(pcfText).toContain('PIPELINE-REFERENCE /RJP-3001');
+    expect(pcfText).toContain('PIPE PIPE-1');
+    expect(pcfText).toContain('VALVE VALVE-1');
+    expect(pcfText).toContain('PIPE PIPE-2');
+    expect(pcfText).toContain('FLANGE FLANGE-1');
+
+    expect(pcfText).toContain('UXML-TOPOLOGY-EVIDENCE');
+
+    expect(uxmlResult.generatedPcf).toBeUndefined();
+    expect(uxmlResult.pcfTextByPipelineRef).toBeUndefined();
+  });
+
+  it('does not allow legacy PCF text ownership before UXML export guard passes', () => {
+    const rows = rowFixture();
+
+    const guard = evaluateRvmPcfExportGuard({
+      topologyMode: RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY,
+      rows,
+      readinessGate: null,
+      allowPartialExport: false,
+    });
+
+    expect(guard.allowed).toBe(false);
+
+    expect(() => simulateLegacyPcfWriter({
+      rows,
+      guard,
+    })).toThrow('Legacy PCF writer must not run before export guard passes.');
+  });
+
+  it('documents PCF ownership boundary as a deterministic contract', () => {
+    const rows = rowFixture();
+
+    const uxmlResult = runUxmlTopologyForRvmRows(rows, {
+      allowPartialExport: true,
+    });
+
+    const guard = assertRvmPcfExportAllowed({
+      topologyMode: RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY,
+      rows: uxmlResult.legacyRows,
+      readinessGate: uxmlResult.readinessGate,
+      allowPartialExport: true,
+    });
+
+    const legacyWriterResult = simulateLegacyPcfWriter({
+      rows: uxmlResult.legacyRows,
+      guard,
+    });
+
+    const contract = {
+      topologyMode: RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY,
+      topologyGeneratedByUxml: !!uxmlResult.topologyDecision,
+      topologyEvidenceReturnedToLegacyRows: uxmlResult.legacyRows.some(row =>
+        row._topologyMode === RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY ||
+        row._uxmlAcceptedTopologyCount > 0
+      ),
+      exportGuardPassed: guard.allowed === true,
+      pcfTextProduced: Object.keys(legacyWriterResult.pcfTextByPipelineRef).length > 0,
+      pcfTextOwner: legacyWriterResult.owner,
+      pcfTextProducedByUxml: legacyWriterResult.generatedByUxml,
+      mastersResolvedByUxml: legacyWriterResult.mastersResolvedByUxml,
+      uxmlResultContainsPcfText: uxmlResult.pcfTextByPipelineRef != null,
+      uxmlResultContainsMasterResolution: uxmlResult.masterResolution != null,
+      sourceCoordinatesMutated: uxmlResult.acceptedTopologyHandoff.summary.coordinatesMutated === true,
+    };
+
+    expect(contract).toEqual({
+      topologyMode: RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY,
+      topologyGeneratedByUxml: true,
+      topologyEvidenceReturnedToLegacyRows: true,
+      exportGuardPassed: true,
+      pcfTextProduced: true,
+      pcfTextOwner: 'LEGACY_JSON_RVM_TO_PCF_ROUTE',
+      pcfTextProducedByUxml: false,
+      mastersResolvedByUxml: false,
+      uxmlResultContainsPcfText: false,
+      uxmlResultContainsMasterResolution: false,
+      sourceCoordinatesMutated: false,
+    });
+  });
+});
+```
+
+---
+
+# Certification update
+
+Add test:
+
+```js
+'viewer/tests/rvm-pcf-text-output-ownership-smoke.test.js',
+```
+
+Add workflow test:
+
+```bash
+viewer/tests/rvm-pcf-text-output-ownership-smoke.test.js
+```
+
+---
+
+# Required verification
+
+```bash
+npx vitest run \
+  viewer/tests/rvm-pcf-text-output-ownership-smoke.test.js \
+  viewer/tests/rvm-pcf-generate-button-uxml-contract.test.js \
+  viewer/tests/rvm-pcf-uxml-roundtrip-contract.test.js \
+  viewer/tests/rvm-pcf-uxml-mode-e2e-smoke.test.js \
+  viewer/tests/rvm-pcf-export-guard.test.js
+```
+
+Then:
+
+```bash
+node tools/uxml-certification.mjs
+```
+
+---
+
+# RJP-3 hard pass gate
+
+```text
+pcfTextOwnershipSmokeTestExists = true
+
+uxmlBridgeTopologyOnly = true
+uxmlResultHasNoGeneratedPcf = true
+uxmlResultHasNoPcfTextByPipelineRef = true
+uxmlResultHasNoMasterResolution = true
+
+exportGuardRequiredBeforePcfText = true
+legacyPcfWriterRunsOnlyAfterGuard = true
+pcfTextProducedByLegacyRoute = true
+pcfTextProducedByUxml = false
+
+mastersOwnedByLegacyRoute = true
+pcfEmitterOwnedByLegacyRoute = true
+
+sourceRowsNotMutated = true
+legacyRowsAnnotatedWithTopologyEvidence = true
+
+pcfWriterTouched = false
+masterMappersTouched = false
+rvmJsonPcfRuntimeTouched = false
+xmlInputMapperTouched = false
+uxmlNormalizerTouched = false
+uxmlProfileDetectorTouched = false
+topologyBuildersTouched = false
+```
+
+Next after RJP-3:
+
+```text
+RJP-4 — Real Generate PCF Integration Smoke with Existing Writer
+
+```
+
+That should use the actual current PCF generation function/module if it is safely importable in tests, instead of a local ownership stub.
+-----------------------------
+Next:
+
+```text
+RJP-5 — UI Button Smoke / DOM Test for Generate PCF in UXML Mode
+```
+
+Purpose: validate the **actual Extract PCF tab UI flow**, not just service/helper logic.
+
+```text
+User opens RVM / JSON → PCF Extract tab
+  ↓
+Selects Topology mode = UXML topology
+  ↓
+Runs readiness check
+  ↓
+Clicks Generate PCF
+  ↓
+Export guard allows only after readiness
+  ↓
+Existing legacy PCF route generates PCF text
+  ↓
+PCF panel/status updates
+```
+
+Search did not find an obvious existing DOM test for the Generate PCF button, so this should be added as a focused UI smoke test.
+
+---
+
+# RJP-5 Agent Prompt
+
+```text
+You are RJP-5 Agent for PCF_GLB_Viewer_Conv.
+
+Task:
+Add UI Button Smoke / DOM Test for Generate PCF in UXML topology mode.
+
+Purpose:
+Verify the real Extract PCF tab UI behavior:
+1. Topology mode selector can be set to UXML topology.
+2. Generate PCF is blocked if UXML readiness/export guard has not passed.
+3. Readiness check creates UXML topology/readiness evidence.
+4. Generate PCF then continues through existing legacy PCF route.
+5. PCF panel/status shows generated PCF output.
+6. UXML does not generate PCF directly.
+7. Masters remain owned by existing legacy route.
+
+Add:
+- viewer/tests/rvm-pcf-generate-button-dom-smoke.test.js
+
+Allowed minimal patch:
+- viewer/tabs/rvm-json-pcf-extract-tab.js
+  Only if required to expose stable test selectors or test-safe helper hooks.
+
+Allowed certification updates:
+- tools/uxml-certification.mjs
+- .github/workflows/uxml-certification.yml
+
+Do not touch:
+- PCF writer/emitter logic
+- master mapper logic
+- XML/InputXML mapper files
+- UxmlNormalizer.js
+- UxmlProfileDetector.js
+- UXML topology builders
+```
+
+---
+
+# Required selectors / hooks
+
+If the current tab does not have stable selectors, add only harmless `data-testid` attributes:
+
+```html
+data-testid="rvm-pcf-topology-mode-select"
+data-testid="rvm-pcf-run-readiness"
+data-testid="rvm-pcf-generate-pcf"
+data-testid="rvm-pcf-status"
+data-testid="rvm-pcf-panel-pcf"
+data-testid="rvm-pcf-panel-diagnostics"
+```
+
+Do **not** change behavior just to satisfy the test.
+
+---
+
+# Test file
+
+```text
+viewer/tests/rvm-pcf-generate-button-dom-smoke.test.js
+```
+
+```js
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { JSDOM } from 'jsdom';
+
+import {
+  RVM_PCF_TOPOLOGY_MODES,
+} from '../rvm-pcf-extract/RvmPcfTopologyModes.js';
+
+import {
+  runUxmlTopologyForRvmRows,
+} from '../rvm-pcf-extract/RvmUxmlTopologyBridge.js';
+
+import {
+  evaluateRvmPcfExportGuard,
+} from '../rvm-pcf-extract/RvmPcfExportGuard.js';
+
+function rowFixture() {
+  return [
+    {
+      rowNo: 10,
+      id: 'PIPE-1',
+      type: 'PIPE',
+      pipelineRef: '/RJP-5001',
+      lineNo: 'L-RJP-5001',
+      refNo: 'REF-P1',
+      seqNo: '10',
+      convertedBore: 250,
+      ep1: '0,0,0',
+      ep2: '1000,0,0',
+      include: true,
+    },
+    {
+      rowNo: 20,
+      id: 'VALVE-1',
+      type: 'VALVE',
+      pipelineRef: '/RJP-5001',
+      lineNo: 'L-RJP-5001',
+      refNo: 'REF-V1',
+      seqNo: '20',
+      convertedBore: 250,
+      ep1: '1000,0,0',
+      ep2: '1200,0,0',
+      include: true,
+    },
+    {
+      rowNo: 30,
+      id: 'PIPE-2',
+      type: 'PIPE',
+      pipelineRef: '/RJP-5001',
+      lineNo: 'L-RJP-5001',
+      refNo: 'REF-P2',
+      seqNo: '30',
+      convertedBore: 250,
+      ep1: '1200,0,0',
+      ep2: '2200,0,0',
+      include: true,
+    },
+  ];
+}
+
+function createDom() {
+  const dom = new JSDOM(`
+    <!doctype html>
+    <html>
+      <body>
+        <section id="rvm-pcf-extract-test-host">
+          <select data-testid="rvm-pcf-topology-mode-select">
+            <option value="legacy">Legacy — present logic</option>
+            <option value="uxml-topology">UXML topology — topology only</option>
+          </select>
+
+          <button data-testid="rvm-pcf-run-readiness">Run Readiness Check</button>
+          <button data-testid="rvm-pcf-generate-pcf">Generate PCF</button>
+
+          <div data-testid="rvm-pcf-status"></div>
+          <div data-testid="rvm-pcf-panel-diagnostics"></div>
+          <div data-testid="rvm-pcf-panel-pcf"></div>
+        </section>
+      </body>
+    </html>
+  `);
+
+  global.window = dom.window;
+  global.document = dom.window.document;
+  global.HTMLElement = dom.window.HTMLElement;
+  global.Event = dom.window.Event;
+
+  return dom;
+}
+
+function simulateLegacyPcfText(rows) {
+  const byRef = {};
+
+  for (const row of rows) {
+    const ref = row.pipelineRef || 'UNKNOWN';
+    if (!byRef[ref]) {
+      byRef[ref] = [
+        'ISOGEN-FILES ISOGEN.FLS',
+        `PIPELINE-REFERENCE ${ref}`,
+      ];
+    }
+
+    byRef[ref].push(`${row.type} ${row.id}`);
+    if (row.ep1) byRef[ref].push(`    END-POINT ${row.ep1}`);
+    if (row.ep2) byRef[ref].push(`    END-POINT ${row.ep2}`);
+  }
+
+  return Object.fromEntries(
+    Object.entries(byRef).map(([ref, lines]) => [ref, `${lines.join('\n')}\n`])
+  );
+}
+
+function wireTestUi({
+  rows,
+  onLegacyGenerate = vi.fn(),
+}) {
+  const state = {
+    topologyMode: RVM_PCF_TOPOLOGY_MODES.LEGACY,
+    rows,
+    readinessGate: null,
+    uxmlResult: null,
+    pcfTextByPipelineRef: {},
+  };
+
+  const select = document.querySelector('[data-testid="rvm-pcf-topology-mode-select"]');
+  const runReadiness = document.querySelector('[data-testid="rvm-pcf-run-readiness"]');
+  const generate = document.querySelector('[data-testid="rvm-pcf-generate-pcf"]');
+  const status = document.querySelector('[data-testid="rvm-pcf-status"]');
+  const diagnostics = document.querySelector('[data-testid="rvm-pcf-panel-diagnostics"]');
+  const pcfPanel = document.querySelector('[data-testid="rvm-pcf-panel-pcf"]');
+
+  select.addEventListener('change', () => {
+    state.topologyMode = select.value === 'uxml-topology'
+      ? RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY
+      : RVM_PCF_TOPOLOGY_MODES.LEGACY;
+
+    status.textContent = `Topology mode: ${state.topologyMode}`;
+  });
+
+  runReadiness.addEventListener('click', () => {
+    if (state.topologyMode === RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY) {
+      const result = runUxmlTopologyForRvmRows(state.rows, {
+        allowPartialExport: true,
+        connectToleranceMm: 6,
+        maxRayLengthMm: 500,
+        tubeToleranceMm: 12,
+        name: 'rjp-5-dom-smoke',
+      });
+
+      state.uxmlResult = result;
+      state.rows = result.legacyRows;
+      state.readinessGate = result.readinessGate;
+
+      status.textContent = 'UXML readiness complete';
+      diagnostics.textContent = `Accepted topology: ${result.topologyDecision.summary.acceptedConnectionCount}`;
+    } else {
+      status.textContent = 'Legacy readiness path';
+    }
+  });
+
+  generate.addEventListener('click', () => {
+    const guard = evaluateRvmPcfExportGuard({
+      topologyMode: state.topologyMode,
+      rows: state.rows,
+      readinessGate: state.readinessGate,
+      allowPartialExport: true,
+    });
+
+    if (!guard.allowed) {
+      status.textContent = guard.reason || 'Generate PCF blocked';
+      diagnostics.textContent = 'PCF export guard blocked generation';
+      return;
+    }
+
+    const pcfTextByPipelineRef = simulateLegacyPcfText(state.rows);
+
+    state.pcfTextByPipelineRef = pcfTextByPipelineRef;
+
+    onLegacyGenerate({
+      owner: 'LEGACY_JSON_RVM_TO_PCF_ROUTE',
+      pcfTextByPipelineRef,
+      generatedByUxml: false,
+      mastersResolvedByUxml: false,
+      guard,
+    });
+
+    status.textContent = 'PCF generated by legacy route';
+    pcfPanel.textContent = Object.values(pcfTextByPipelineRef).join('\n');
+  });
+
+  return {
+    state,
+    select,
+    runReadiness,
+    generate,
+    status,
+    diagnostics,
+    pcfPanel,
+  };
+}
+
+describe('RJP-5 Generate PCF button DOM smoke in UXML topology mode', () => {
+  beforeEach(() => {
+    createDom();
+  });
+
+  it('blocks Generate PCF before UXML readiness is run', () => {
+    const onLegacyGenerate = vi.fn();
+
+    const ui = wireTestUi({
+      rows: rowFixture(),
+      onLegacyGenerate,
+    });
+
+    ui.select.value = 'uxml-topology';
+    ui.select.dispatchEvent(new Event('change'));
+
+    ui.generate.click();
+
+    expect(onLegacyGenerate).not.toHaveBeenCalled();
+    expect(ui.status.textContent).toContain('Run readiness check');
+    expect(ui.diagnostics.textContent).toContain('guard blocked');
+    expect(ui.pcfPanel.textContent).toBe('');
+  });
+
+  it('runs readiness then Generate PCF through legacy route', () => {
+    const onLegacyGenerate = vi.fn();
+
+    const ui = wireTestUi({
+      rows: rowFixture(),
+      onLegacyGenerate,
+    });
+
+    ui.select.value = 'uxml-topology';
+    ui.select.dispatchEvent(new Event('change'));
+
+    ui.runReadiness.click();
+
+    expect(ui.state.uxmlResult).toBeTruthy();
+    expect(ui.state.uxmlResult.generatedPcf).toBeUndefined();
+    expect(ui.state.uxmlResult.pcfTextByPipelineRef).toBeUndefined();
+    expect(ui.state.uxmlResult.masterResolution).toBeUndefined();
+
+    expect(ui.status.textContent).toContain('UXML readiness complete');
+    expect(ui.diagnostics.textContent).toContain('Accepted topology');
+
+    ui.generate.click();
+
+    expect(onLegacyGenerate).toHaveBeenCalledTimes(1);
+
+    const payload = onLegacyGenerate.mock.calls[0][0];
+
+    expect(payload.owner).toBe('LEGACY_JSON_RVM_TO_PCF_ROUTE');
+    expect(payload.generatedByUxml).toBe(false);
+    expect(payload.mastersResolvedByUxml).toBe(false);
+    expect(payload.guard.allowed).toBe(true);
+    expect(payload.guard.mastersDeferredToLegacyRoute).toBe(true);
+    expect(payload.guard.pcfEmitterDeferredToLegacyRoute).toBe(true);
+
+    expect(ui.status.textContent).toContain('legacy route');
+    expect(ui.pcfPanel.textContent).toContain('PIPELINE-REFERENCE /RJP-5001');
+    expect(ui.pcfPanel.textContent).toContain('PIPE PIPE-1');
+    expect(ui.pcfPanel.textContent).toContain('VALVE VALVE-1');
+    expect(ui.pcfPanel.textContent).toContain('PIPE PIPE-2');
+
+    expect(ui.state.uxmlResult.generatedPcf).toBeUndefined();
+    expect(ui.state.uxmlResult.pcfTextByPipelineRef).toBeUndefined();
+  });
+
+  it('legacy mode Generate PCF is not blocked by missing UXML readiness', () => {
+    const onLegacyGenerate = vi.fn();
+
+    const ui = wireTestUi({
+      rows: rowFixture(),
+      onLegacyGenerate,
+    });
+
+    ui.select.value = 'legacy';
+    ui.select.dispatchEvent(new Event('change'));
+
+    ui.generate.click();
+
+    expect(onLegacyGenerate).toHaveBeenCalledTimes(1);
+    expect(ui.status.textContent).toContain('legacy route');
+    expect(ui.pcfPanel.textContent).toContain('PIPELINE-REFERENCE /RJP-5001');
+  });
+});
+```
+
+---
+
+# Important note
+
+This test uses a **test UI harness** and a **local PCF text simulation**, because the repo search did not expose a stable standalone writer/import path. That is acceptable for RJP-5 only if the final report states:
+
+```text
+This is DOM contract smoke, not PCF writer certification.
+Actual PCF writer certification remains RJP-4.
+```
+
+---
+
+# Certification update
+
+Add test:
+
+```js
+'viewer/tests/rvm-pcf-generate-button-dom-smoke.test.js',
+```
+
+Add workflow test:
+
+```bash
+viewer/tests/rvm-pcf-generate-button-dom-smoke.test.js
+```
+
+---
+
+# Required verification
+
+```bash
+npx vitest run \
+  viewer/tests/rvm-pcf-generate-button-dom-smoke.test.js \
+  viewer/tests/rvm-pcf-real-generate-integration-smoke.test.js \
+  viewer/tests/rvm-pcf-generate-button-uxml-contract.test.js \
+  viewer/tests/rvm-pcf-export-guard.test.js
+```
+
+Then:
+
+```bash
+node tools/uxml-certification.mjs
+```
+
+---
+
+# RJP-5 hard pass gate
+
+```text
+generateButtonDomSmokeExists = true
+
+uXmlTopologyCanBeSelected = true
+generatePcfBlockedBeforeReadiness = true
+readinessCreatesUxmlTopologyEvidence = true
+generatePcfAllowedAfterReadiness = true
+pcfPanelShowsLegacyGeneratedText = true
+
+legacyModeNotBlockedByUxmlReadiness = true
+
+uxmlResultHasNoGeneratedPcf = true
+uxmlResultHasNoPcfTextByPipelineRef = true
+legacyRouteOwnsPcfText = true
+mastersOwnedByLegacyRoute = true
+
+pcfWriterTouched = false
+masterMappersTouched = false
+rvmJsonPcfRuntimeTouched = false
+xmlInputMapperTouched = false
+uxmlNormalizerTouched = false
+uxmlProfileDetectorTouched = false
+topologyBuildersTouched = false
+```
+
+Next after RJP-5:
+
+```text
+RJP-6 — UXML Topology Mode Regression Dashboard / Certification Summary
+```
+
+That should create a single certification summary test/report proving RJP-1 to RJP-5 all exist and preserve the JSON/RVM → PCF boundary.
+
+--------------------------

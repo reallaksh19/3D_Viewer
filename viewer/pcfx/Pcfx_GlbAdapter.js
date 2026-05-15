@@ -83,6 +83,7 @@ function glbComponentFromCanonicalItem(item) {
     ep2: cloneJson(normalized.ep2),
     centrePoint: cloneJson(normalized.cp),
     branch1Point: cloneJson(normalized.bp),
+    branchPoint: cloneJson(normalized.branchPoint || normalized.bp),
     coOrds: cloneJson(normalized.supportCoord),
     attributes: buildPcfAttributesFromCanonicalItem(normalized),
   };
@@ -102,11 +103,14 @@ export function viewerComponentFromCanonicalItem(item) {
   const n = normalizeCanonicalItem(item);
   const type = mapCanonicalTypeToViewerType(n.type);
   const bore = n.bore || toFiniteNumber(n.ep1 && n.ep1.bore) || toFiniteNumber(n.ep2 && n.ep2.bore) || 0;
+  const branchSource = n.branchPoint || n.bp || null;
+  const isBranchType = type.includes('TEE') || type.includes('OLET');
 
   const toPoint = (p) => p ? { x: p.x, y: p.y, z: p.z, bore: toFiniteNumber(p.bore) ?? bore } : null;
 
   const p1 = toPoint(n.ep1);
   const p2 = toPoint(n.ep2);
+  const branchPoint = branchSource ? { x: branchSource.x, y: branchSource.y, z: branchSource.z, bore: toFiniteNumber(branchSource.bore) ?? bore } : null;
   const supportCoord = type === 'SUPPORT'
     ? toPoint(n.supportCoord || n.ep1)
     : null;
@@ -121,9 +125,10 @@ export function viewerComponentFromCanonicalItem(item) {
   return {
     id:           n.id,
     type,
-    points:       p1 && p2 ? [p1, p2] : (p1 ? [p1] : []),
+    points:       ((p1 && p2) ? [p1, p2] : (p1 ? [p1] : [])).concat((branchPoint && isBranchType) ? [branchPoint] : []),
     centrePoint,
-    branch1Point: n.bp  ? { x: n.bp.x,  y: n.bp.y,  z: n.bp.z  } : null,
+    branch1Point: branchPoint,
+    branchPoint,
     coOrds:       supportCoord,
     bore,
     fixingAction: '',

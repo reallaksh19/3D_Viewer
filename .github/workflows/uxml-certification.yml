@@ -5,6 +5,7 @@ on:
     paths:
       - "viewer/uxml/**"
       - "viewer/tests/uxml-*.test.js"
+      - "viewer/tests/rvm-pcf-*.test.js"
       - "tools/uxml-certification.mjs"
       - ".github/workflows/uxml-certification.yml"
       - "Benchmarks/RVM JSON to PCF UXML Topology/**"
@@ -14,6 +15,7 @@ on:
     paths:
       - "viewer/uxml/**"
       - "viewer/tests/uxml-*.test.js"
+      - "viewer/tests/rvm-pcf-*.test.js"
       - "tools/uxml-certification.mjs"
       - ".github/workflows/uxml-certification.yml"
       - "Benchmarks/RVM JSON to PCF UXML Topology/**"
@@ -71,8 +73,13 @@ jobs:
               viewer/tests/uxml-face-model-builder.test.js \
               viewer/tests/uxml-universal-topo-graph-builder.test.js \
               viewer/tests/uxml-ray-topo-graph-builder.test.js \
-              viewer/tests/uxml-topo-graph-comparator.test.js \
-              viewer/tests/universal-xml-converter-tab.test.js \
+            viewer/tests/uxml-topo-graph-comparator.test.js \
+            viewer/tests/universal-xml-converter-tab.test.js \
+            viewer/tests/uxml-cl1-route-package.test.js \
+            viewer/tests/uxml-cl1-package-snapshot.test.js \
+            viewer/tests/uxml-cl1-snapshot-replay-validator.test.js \
+            viewer/tests/uxml-cl1-workbench-summary.test.js \
+            viewer/tests/uxml-cl1-workbench-e2e.test.js \
             viewer/tests/rvm-pcf-uxml-topology-bridge.test.js \
             viewer/tests/uxml-topology-decision-gate.test.js \
             viewer/tests/rvm-pcf-uxml-topology-diagnostics-panel.test.js \
@@ -80,6 +87,10 @@ jobs:
             viewer/tests/rvm-pcf-export-guard.test.js \
             viewer/tests/rvm-pcf-accepted-topology-handoff.test.js \
             viewer/tests/rvm-pcf-uxml-mode-e2e-smoke.test.js \
+            viewer/tests/rvm-pcf-uxml-roundtrip-contract.test.js \
+            viewer/tests/rvm-pcf-generate-button-uxml-contract.test.js \
+            viewer/tests/rvm-pcf-text-output-ownership-smoke.test.js \
+            viewer/tests/rvm-pcf-generate-button-dom-smoke.test.js \
             viewer/tests/uxml-route-handoff-policy.test.js
           else
             npx vitest run \
@@ -92,8 +103,13 @@ jobs:
               viewer/tests/uxml-face-model-builder.test.js \
               viewer/tests/uxml-universal-topo-graph-builder.test.js \
               viewer/tests/uxml-ray-topo-graph-builder.test.js \
-              viewer/tests/uxml-topo-graph-comparator.test.js \
-              viewer/tests/universal-xml-converter-tab.test.js \
+            viewer/tests/uxml-topo-graph-comparator.test.js \
+            viewer/tests/universal-xml-converter-tab.test.js \
+            viewer/tests/uxml-cl1-route-package.test.js \
+            viewer/tests/uxml-cl1-package-snapshot.test.js \
+            viewer/tests/uxml-cl1-snapshot-replay-validator.test.js \
+            viewer/tests/uxml-cl1-workbench-summary.test.js \
+            viewer/tests/uxml-cl1-workbench-e2e.test.js \
             viewer/tests/rvm-pcf-uxml-topology-bridge.test.js \
             viewer/tests/uxml-topology-decision-gate.test.js \
             viewer/tests/rvm-pcf-uxml-topology-diagnostics-panel.test.js \
@@ -101,6 +117,10 @@ jobs:
             viewer/tests/rvm-pcf-export-guard.test.js \
             viewer/tests/rvm-pcf-accepted-topology-handoff.test.js \
             viewer/tests/rvm-pcf-uxml-mode-e2e-smoke.test.js \
+            viewer/tests/rvm-pcf-uxml-roundtrip-contract.test.js \
+            viewer/tests/rvm-pcf-generate-button-uxml-contract.test.js \
+            viewer/tests/rvm-pcf-text-output-ownership-smoke.test.js \
+            viewer/tests/rvm-pcf-generate-button-dom-smoke.test.js \
             viewer/tests/uxml-route-handoff-policy.test.js
           fi
 
@@ -122,7 +142,7 @@ jobs:
             echo "Summary"
             echo "Certification: ✅ PASS"
             echo "Required modules: ✅ 18 / 18"
-            echo "Required tests: ✅ 18 / 18"
+            echo "Required tests: ✅ 23 / 23"
             echo "Vitest: ✅ PASS"
             echo "Other: 0 skip expected"
             echo "Annotations: 0 errors and 0 warnings"

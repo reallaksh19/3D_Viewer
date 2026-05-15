@@ -40,6 +40,10 @@ const REQUIRED_MODULES = Object.freeze([
   'viewer/rvm-pcf-extract/RvmPcfExportGuard.js',
   'viewer/rvm-pcf-extract/RvmPcfAcceptedTopologyHandoff.js',
   'viewer/uxml/UxmlRouteHandoffPolicy.js',
+  'viewer/uxml/UxmlCl1RoutePackage.js',
+  'viewer/uxml/UxmlCl1PackageSnapshot.js',
+  'viewer/uxml/UxmlCl1SnapshotReplayValidator.js',
+  'viewer/uxml/UxmlCl1WorkbenchSummary.js',
 ]);
 
 const REQUIRED_TESTS = Object.freeze([
@@ -48,6 +52,7 @@ const REQUIRED_TESTS = Object.freeze([
   'viewer/tests/uxml-normalizer.test.js',
   'viewer/tests/uxml-inputxml-schema-mapper.test.js',
   'viewer/tests/uxml-standard-xml-schema-mapper.test.js',
+  'viewer/tests/uxml-real-inputxml-schema-audit.test.js',
   'viewer/tests/uxml-validation-gate.test.js',
   'viewer/tests/uxml-face-model-builder.test.js',
   'viewer/tests/uxml-universal-topo-graph-builder.test.js',
@@ -61,7 +66,16 @@ const REQUIRED_TESTS = Object.freeze([
   'viewer/tests/rvm-pcf-export-guard.test.js',
   'viewer/tests/rvm-pcf-accepted-topology-handoff.test.js',
   'viewer/tests/rvm-pcf-uxml-mode-e2e-smoke.test.js',
+  'viewer/tests/rvm-pcf-uxml-roundtrip-contract.test.js',
+  'viewer/tests/rvm-pcf-generate-button-uxml-contract.test.js',
+  'viewer/tests/rvm-pcf-text-output-ownership-smoke.test.js',
+  'viewer/tests/rvm-pcf-generate-button-dom-smoke.test.js',
   'viewer/tests/uxml-route-handoff-policy.test.js',
+  'viewer/tests/uxml-cl1-route-package.test.js',
+  'viewer/tests/uxml-cl1-package-snapshot.test.js',
+  'viewer/tests/uxml-cl1-snapshot-replay-validator.test.js',
+  'viewer/tests/uxml-cl1-workbench-summary.test.js',
+  'viewer/tests/uxml-cl1-workbench-e2e.test.js',
 ]);
 
 const REQUIRED_EXPORT_MARKERS = Object.freeze([
@@ -174,6 +188,38 @@ const REQUIRED_EXPORT_MARKERS = Object.freeze([
       'evaluateUxmlRouteHandoffPolicy',
       'createUxmlRouteHandoffPayload',
       'summarizeUxmlRouteHandoff',
+    ],
+  },
+  {
+    file: 'viewer/uxml/UxmlCl1RoutePackage.js',
+    markers: [
+      'createUxmlCl1RoutePackage',
+      'assertUxmlCl1RoutePackageAllowed',
+      'summarizeUxmlCl1RoutePackage',
+    ],
+  },
+  {
+    file: 'viewer/uxml/UxmlCl1PackageSnapshot.js',
+    markers: [
+      'buildUxmlCl1PackageSnapshot',
+      'createUxmlCl1SnapshotDownload',
+      'serializeUxmlCl1PackageSnapshot',
+    ],
+  },
+  {
+    file: 'viewer/uxml/UxmlCl1SnapshotReplayValidator.js',
+    markers: [
+      'validateUxmlCl1SnapshotReplay',
+      'assertUxmlCl1SnapshotReplayReady',
+      'summarizeUxmlCl1SnapshotReplay',
+    ],
+  },
+  {
+    file: 'viewer/uxml/UxmlCl1WorkbenchSummary.js',
+    markers: [
+      'buildUxmlCl1WorkbenchSummary',
+      'summarizeUxmlCl1WorkbenchSummary',
+      'createUxmlCl1WorkbenchSummary',
     ],
   },
 ]);

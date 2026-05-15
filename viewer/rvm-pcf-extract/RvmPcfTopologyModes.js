@@ -17,7 +17,14 @@ export const RVM_PCF_TOPOLOGY_MODES = Object.freeze({
   UXML_TOPOLOGY: 'UXML_TOPOLOGY',
 });
 
-export const DEFAULT_RVM_PCF_TOPOLOGY_MODE = RVM_PCF_TOPOLOGY_MODES.LEGACY;
+export const DEFAULT_RVM_PCF_TOPOLOGY_MODE = (() => {
+  try {
+    const stored = localStorage.getItem('rvm_pcf_topology_mode');
+    if (stored === RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY) return RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY;
+    if (stored === RVM_PCF_TOPOLOGY_MODES.LEGACY) return RVM_PCF_TOPOLOGY_MODES.LEGACY;
+  } catch {}
+  return RVM_PCF_TOPOLOGY_MODES.UXML_TOPOLOGY;
+})();
 
 export function normalizeRvmPcfTopologyMode(value) {
   const mode = String(value ?? '').trim().toUpperCase();

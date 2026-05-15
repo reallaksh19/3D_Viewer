@@ -92,11 +92,16 @@ export function renderViewer3D(container) {
       _rerenderIfActive();
     });
     // Fast-path: overlay visibility toggles that do NOT need a geometry re-render.
-    // Heatmap updates are intentionally excluded — they need a full re-render so
+    // Heatmap updates are intentionally excluded Ã¢â‚¬â€ they need a full re-render so
     // applyHeatmap() runs with fresh state.
     const OVERLAY_ONLY_REASONS = new Set([
-      'nodes-toggled', 'line-labels-toggled', 'length-labels-toggled',
-      'spare1-updated', 'spare2-updated',
+      'nodes-toggled',
+      'line-labels-toggled',
+      'length-labels-toggled',
+      'length-labels-gap',
+      'verification-mode',
+      'spare1-updated',
+      'spare2-updated',
     ]);
     on('viewer3d-config-changed', (payload) => {
       const reason = payload && payload.reason;
@@ -108,9 +113,16 @@ export function renderViewer3D(container) {
         const liveDataSource = _directPcfData || _buildParsedDataSource(state.parsed);
         if (reason === 'length-labels-toggled' || reason === 'length-labels-gap' || reason === 'verification-mode') {
           _viewer.viewerConfig = liveCfg;
-          _viewer.refreshLengthLabels?.(liveDataSource.components || []);
+          if (typeof _viewer.refreshLengthLabels === 'function') {
+            _viewer.refreshLengthLabels(liveDataSource.components || []);
+          } else {
+            _rerenderIfActive();
+          }
+          _updateSettingsPanelSection(container);
+          return;
         }
         _applyOverlayLayersToViewer(liveCfg, liveDataSource);
+        _updateSettingsPanelSection(container);
         return;
       }
       _rerenderIfActive();
@@ -351,13 +363,13 @@ export function renderViewer3D(container) {
     <div id="viewer3d-spare-modal" style="display:none; position:fixed; inset:0; background:rgba(3,9,18,0.62); z-index:1200; padding:32px; overflow:auto;">
       <div style="max-width:640px; margin:0 auto; background:#f5f8fc; border-radius:16px; box-shadow:0 24px 60px rgba(0,0,0,0.3); border:1px solid rgba(14,28,45,0.16);">
         <div style="display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid rgba(14,28,45,0.12);">
-          <strong id="viewer3d-spare-modal-title" style="font-size:1rem; color:#102033;">Spare 1 — Import CSV</strong>
+          <strong id="viewer3d-spare-modal-title" style="font-size:1rem; color:#102033;">Spare 1 Ã¢â‚¬â€ Import CSV</strong>
           <button class="btn-secondary" id="viewer3d-spare-modal-close" type="button">Close</button>
         </div>
         <div style="padding:18px 20px 24px;">
           <label class="btn-secondary file-label" style="margin-bottom:12px; display:inline-block;">
             <input type="file" id="viewer3d-spare-modal-file" accept=".csv,text/csv" style="display:none">
-            Choose CSV file…
+            Choose CSV fileÃ¢â‚¬Â¦
           </label>
           <div id="viewer3d-spare-modal-preview" style="overflow-x:auto; margin-bottom:12px; font-size:0.8rem;"></div>
           <p style="font-size:0.78rem; color:#555; margin-bottom:12px;">
@@ -429,7 +441,7 @@ export function renderViewer3D(container) {
       if (traceType === 'projection-toggle') {
         _updateProjectionActiveState(container, evt.payload?.mode || 'orthographic');
       }
-      // Measurement complete → copy to clipboard
+      // Measurement complete Ã¢â€ â€™ copy to clipboard
       if (traceType === 'nav-mode') {
         const mode = String(evt.payload?.mode || '');
         if (mode === 'measure') {
@@ -470,7 +482,7 @@ export function renderViewer3D(container) {
       nullColor: cfg.heatmap.nullColor,
     });
   }
-  // Double-click canvas → fit selection (if something selected) or fit all
+  // Double-click canvas Ã¢â€ â€™ fit selection (if something selected) or fit all
   wrap.addEventListener('dblclick', () => {
     if (_selectedComponent) {
       _viewer?.fitSelection?.();
@@ -479,7 +491,7 @@ export function renderViewer3D(container) {
     }
   });
 
-  // Ctrl+Wheel → nudge PLANE_UP section plane offset
+  // Ctrl+Wheel Ã¢â€ â€™ nudge PLANE_UP section plane offset
   wrap.addEventListener('wheel', (e) => {
     if (!e.ctrlKey) return;
     e.preventDefault();
@@ -619,7 +631,7 @@ function _wireViewerControls(container, cfg, actions) {
     try {
       const text = await file.text();
       _directPcfData = _buildDirectPcfData(text, file.name);
-      // PCF uses Z as elevation — default to Z-up so the model appears right-side-up.
+      // PCF uses Z as elevation Ã¢â‚¬â€ default to Z-up so the model appears right-side-up.
       // _verticalVector() always returns Three.js Y (0,1,0) because mapCoord() places
       // PCF elevation into Three.js Y regardless of mode, so this is safe.
       if (!state.viewer3DConfig.coordinateMap?.verticalAxis ||
@@ -709,7 +721,7 @@ function _wireViewerControls(container, cfg, actions) {
   const openSpareModal = (spareKey) => {
     _spareModalKey = spareKey;
     _spareModalParsed = null;
-    if (spareModalTitle) spareModalTitle.textContent = `${spareKey === 'spare1' ? 'Spare 1' : 'Spare 2'} — Import CSV`;
+    if (spareModalTitle) spareModalTitle.textContent = `${spareKey === 'spare1' ? 'Spare 1' : 'Spare 2'} Ã¢â‚¬â€ Import CSV`;
     if (spareModalPreview) spareModalPreview.innerHTML = '';
     if (spareModalFieldSel) spareModalFieldSel.innerHTML = '';
     if (spareModalApply) spareModalApply.disabled = true;
@@ -799,7 +811,7 @@ function _wireViewerControls(container, cfg, actions) {
         _rerenderIfActive();
       } else {
         console.warn('[ImportRaw] Import failed:', log);
-        notify({ level: 'error', title: 'Import failed', message: result.message || 'Import failed — check the browser console for details.', details: log });
+        notify({ level: 'error', title: 'Import failed', message: result.message || 'Import failed Ã¢â‚¬â€ check the browser console for details.', details: log });
       }
     } catch (err) {
       console.error('[ImportRaw]', err);
@@ -899,7 +911,25 @@ function _wireViewerControls(container, cfg, actions) {
     if (!state.viewer3DConfig.lengthLabels) state.viewer3DConfig.lengthLabels = {};
     state.viewer3DConfig.lengthLabels.enabled = !!e.target.checked;
     saveStickyState();
+    if (typeof _viewer?.refreshLengthLabels === 'function') {
+      _viewer.refreshLengthLabels(_directPcfData?.components || state.viewer3dComponents || []);
+    } else {
+      _rerenderIfActive();
+    }
+    _viewer?.setOverlayLayerVisibility?.('length', !!state.viewer3DConfig.lengthLabels.enabled);
     emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'viewer3d-tab', reason: 'length-labels-toggled' });
+  });
+  const verificationEnabled = container.querySelector('#viewer3d-top-verification-enabled');
+  verificationEnabled?.addEventListener('change', (e) => {
+    if (!state.viewer3DConfig.lengthLabels) state.viewer3DConfig.lengthLabels = {};
+    state.viewer3DConfig.lengthLabels.verificationMode = !!e.target.checked;
+    saveStickyState();
+    if (typeof _viewer?.refreshLengthLabels === 'function') {
+      _viewer.refreshLengthLabels(_directPcfData?.components || state.viewer3dComponents || []);
+    } else {
+      _rerenderIfActive();
+    }
+    emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'viewer3d-tab', reason: 'verification-mode' });
   });
   container.querySelector('#viewer3d-label-min-gap')?.addEventListener('change', (e) => {
     const v = Number(e.target.value);
@@ -907,7 +937,12 @@ function _wireViewerControls(container, cfg, actions) {
       if (!state.viewer3DConfig.lengthLabels) state.viewer3DConfig.lengthLabels = {};
       state.viewer3DConfig.lengthLabels.minWorldGap = v;
       saveStickyState();
-      emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'viewer3d-tab', reason: 'length-labels-toggled' });
+      if (typeof _viewer?.refreshLengthLabels === 'function') {
+        _viewer.refreshLengthLabels(_directPcfData?.components || state.viewer3dComponents || []);
+      } else {
+        _rerenderIfActive();
+      }
+      emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'viewer3d-tab', reason: 'length-labels-gap' });
     }
   });
   container.querySelector('#viewer3d-theme-select')?.addEventListener('change', (e) => {
@@ -1063,7 +1098,12 @@ function _applyOverlayLayersToViewer(cfg, dataSource) {
   _viewer.loadMessageSquareNodes?.(messageSquareNodes);
   _viewer.setOverlayLayerVisibility?.('message-circle', !!cfg.nodes?.enabled);
   _viewer.setOverlayLayerVisibility?.('message-square', cfg.overlay?.annotations?.messageSquareEnabled !== false);
-  _viewer.refreshLengthLabels?.(dataSource?.components || []);
+  if (typeof _viewer.refreshLengthLabels === 'function') {
+    _viewer.refreshLengthLabels(dataSource?.components || []);
+  } else {
+    _rerenderIfActive();
+    return;
+  }
   _viewer.setOverlayLayerVisibility?.('length', !!cfg.lengthLabels?.enabled);
 
   const spare1Rows = Array.isArray(_spareOverlayRuntime.spare1.rows) ? _spareOverlayRuntime.spare1.rows : [];
@@ -1190,7 +1230,7 @@ function _copyMeasurementToClipboard(distance) {
   if (distance == null || !Number.isFinite(Number(distance))) return;
   const text = `${Number(distance).toFixed(2)} mm`;
   navigator.clipboard?.writeText(text).catch(() => {});
-  // Brief visual toast — reuse any existing toast element or console
+  // Brief visual toast Ã¢â‚¬â€ reuse any existing toast element or console
   console.info(`[Measure] Copied to clipboard: ${text}`);
 }
 
@@ -1650,7 +1690,7 @@ function _mapDirectPcfComponent(comp) {
   const branch1Point = _parseDirectPcfPoint(raw['BRANCH1-POINT']);
   const supportPoint = point1 || _parseDirectPcfPoint(raw['CO-ORDS']);
   const id = String(raw['COMPONENT-IDENTIFIER'] || comp?.id || `${type}-pcf`);
-  // Map SUPPORT-DIRECTION keyword → SUPPORT_KIND for rendering classification
+  // Map SUPPORT-DIRECTION keyword Ã¢â€ â€™ SUPPORT_KIND for rendering classification
   const _DIRECTION_KIND = { DOWN: 'REST', UP: 'REST', NORTH: 'GUIDE', SOUTH: 'GUIDE', EAST: 'GUIDE', WEST: 'GUIDE' };
   const supportDir = String(raw['SUPPORT-DIRECTION'] || '').toUpperCase();
   const inferredKind = _DIRECTION_KIND[supportDir] || '';
@@ -1712,16 +1752,16 @@ function _resolveBendCentrePoint(seg, p1, p2, nodePos) {
   const controlPoint = _pt(nodePos.get(seg.CONTROL_NODE));
   if (controlPoint) return controlPoint;
 
-  // §10.5.4: CP is the corner intersection — NOT the midpoint.
-  // Midpoint gives a 180° angle → degenerate → renders as a cylinder.
+  // Ã‚Â§10.5.4: CP is the corner intersection Ã¢â‚¬â€ NOT the midpoint.
+  // Midpoint gives a 180Ã‚Â° angle Ã¢â€ â€™ degenerate Ã¢â€ â€™ renders as a cylinder.
   // Corner CP: try all 6 combinations of (EP1 or EP2) per coordinate axis;
   // the valid one has dist(CP,EP1) = dist(CP,EP2) and a non-zero radius.
   return _bendCornerCP(p1, p2) || null;
 }
 
 /**
- * Compute the 90° bend corner-intersection CP from two endpoints.
- * Per §10.5.4: CP shares one axis-coord with EP1 and the complementary
+ * Compute the 90Ã‚Â° bend corner-intersection CP from two endpoints.
+ * Per Ã‚Â§10.5.4: CP shares one axis-coord with EP1 and the complementary
  * axis-coord with EP2, so dist(CP,EP1) = dist(CP,EP2) = bend_radius.
  * @param {{x,y,z}} p1
  * @param {{x,y,z}} p2
@@ -1747,12 +1787,12 @@ function _bendCornerCP(p1, p2) {
   for (const cp of candidates) {
     const d1 = dist3(cp, p1);
     const d2 = dist3(cp, p2);
-    if (d1 < 0.1 || d2 < 0.1) continue;   // endpoint ON corner → degenerate
+    if (d1 < 0.1 || d2 < 0.1) continue;   // endpoint ON corner Ã¢â€ â€™ degenerate
     const err = Math.abs(d1 - d2);
     if (err < bestErr) { bestErr = err; best = cp; }
   }
 
-  if (!best || bestErr > 1.0) return null;  // no valid corner found (not a 90° bend)
+  if (!best || bestErr > 1.0) return null;  // no valid corner found (not a 90Ã‚Â° bend)
   return { x: best.x, y: best.y, z: best.z, bore };
 }
 

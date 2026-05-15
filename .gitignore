@@ -7,3 +7,6 @@ piping_iso_theme2.png
 .claude/
 viewer/converters/bin/
 reports/
+__pycache__/
+*.pyc
+*.pyo

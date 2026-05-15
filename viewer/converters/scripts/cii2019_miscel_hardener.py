@@ -466,21 +466,28 @@ def harden_cii_text(text: str, input_xml: Path | None = None) -> tuple[str, list
         _format_i(parsed[3][:1]),
     ]
 
-    # MISCEL_1: rebuild with RRMAT + complete hanger arrays + execution options.
-    miscel_payload = _build_miscel_payload_from_xml(
-        input_xml=input_xml,
-        element_count=element_count,
-        nozzle_count=nozzle_count,
-        hangers=hangers,
-    )
-
     miscel_idx = _section_index(sections, "MISCEL_1")
+
     if miscel_idx >= 0:
-        sections[miscel_idx].payload = miscel_payload
+        # MISCEL_1 already present — preserve its payload intact.
+        # inputxml_to_cii2019.py generates correct content; rebuilding from
+        # XML loses execution options, hanger ordering, and other fields that
+        # are not recoverable from InputXML alone.
+        rebuilt = False
     else:
+        # MISCEL_1 header was missing — inputxml_to_cii2019.py emitted the
+        # payload under EQUIPMNT without the section header.  Rebuild from XML
+        # and insert before UNITS.
+        miscel_payload = _build_miscel_payload_from_xml(
+            input_xml=input_xml,
+            element_count=element_count,
+            nozzle_count=nozzle_count,
+            hangers=hangers,
+        )
         units_idx = _section_index(sections, "UNITS")
         insert_idx = units_idx if units_idx >= 0 else len(sections)
         sections.insert(insert_idx, Section("MISCEL_1", _format_header("MISCEL_1"), miscel_payload))
+        rebuilt = True
 
     _assert_section_framing_after_hardening(
         sections,
@@ -491,7 +498,7 @@ def harden_cii_text(text: str, input_xml: Path | None = None) -> tuple[str, list
         f"xml_hangers={hanger_count}",
         f"control_nohgrs={hanger_count}",
         f"trimmed_equipmnt_surplus_rows={len(surplus_equipmnt_rows)}",
-        "rebuilt_miscel_1",
+        "rebuilt_miscel_1" if rebuilt else "preserved_miscel_1",
     ]
 
     return _serialize_sections(sections), notes

@@ -120,6 +120,24 @@ describe('PCF readiness diagnostic identity and skip policy', () => {
     expect(rowState.pcfWarnings).toContain('SKIPPED-TOPO-OLET-BRANCH-DISCONNECTED');
   });
 
+  it('skips all readiness errors when skip option is enabled without explicit codes', () => {
+    const result = runPcfReadinessGate(rowsWithDisconnectedOletBranch(), {
+      connectToleranceMm: 6,
+      fixToleranceMm: 25,
+      skipReadinessErrors: true,
+    });
+
+    const skipped = result.diagnostics.find(
+      d => d.code === 'TOPO-OLET-BRANCH-DISCONNECTED'
+    );
+
+    expect(skipped).toBeTruthy();
+    expect(skipped.severity).toBe('WARNING');
+    expect(skipped.skipApplied).toBe(true);
+    expect(result.summary.readinessSkipEnabled).toBe(true);
+    expect(result.summary.skippedReadinessErrorCount).toBe(1);
+  });
+
   it('does not skip non-selected readiness errors', () => {
     const result = runPcfReadinessGate(rowsWithDisconnectedOletBranch(), {
       connectToleranceMm: 6,

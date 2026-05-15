@@ -118,9 +118,12 @@ const DEFAULT_SKIPPABLE_READINESS_CODES = new Set([
   'TOPO-PORT-DISCONNECTED',
 ]);
 
-function normalizeSkipCodes(rawOptions = {}) {
+function normalizeSkipPolicy(rawOptions = {}) {
   if (rawOptions.skipReadinessErrors !== true) {
-    return new Set();
+    return {
+      skipAllErrors: false,
+      skipCodes: new Set(),
+    };
   }
 
   const rawCodes = Array.isArray(rawOptions.skipReadinessErrorCodes)
@@ -131,15 +134,21 @@ function normalizeSkipCodes(rawOptions = {}) {
         .filter(Boolean);
 
   if (!rawCodes.length) {
-    return new Set(DEFAULT_SKIPPABLE_READINESS_CODES);
+    return {
+      skipAllErrors: true,
+      skipCodes: new Set(DEFAULT_SKIPPABLE_READINESS_CODES),
+    };
   }
 
-  return new Set(rawCodes.map(code => String(code || '').trim()).filter(Boolean));
+  return {
+    skipAllErrors: false,
+    skipCodes: new Set(rawCodes.map(code => String(code || '').trim()).filter(Boolean)),
+  };
 }
 
-function applyReadinessSkipPolicy(diagnostic, skipCodes) {
+function applyReadinessSkipPolicy(diagnostic, skipPolicy) {
   if (!diagnostic || diagnostic.severity !== 'ERROR') return diagnostic;
-  if (!skipCodes.has(diagnostic.code)) return diagnostic;
+  if (!skipPolicy.skipAllErrors && !skipPolicy.skipCodes.has(diagnostic.code)) return diagnostic;
 
   return {
     ...diagnostic,
@@ -153,11 +162,11 @@ function applyReadinessSkipPolicy(diagnostic, skipCodes) {
 
 export function runPcfReadinessGate(rows = [], rawOptions = {}) {
   const config = normalizeTopoConfig(rawOptions);
-  const skipCodes = normalizeSkipCodes(rawOptions);
+  const skipPolicy = normalizeSkipPolicy(rawOptions);
 
   const graph = buildPcfTopoGraph(rows, config);
   const graphDiagnostics = (graph.diagnostics || []).map(d =>
-    applyReadinessSkipPolicy(d, skipCodes)
+    applyReadinessSkipPolicy(d, skipPolicy)
   );
 
   const skippedReadinessErrors = graphDiagnostics.filter(d => d.skipApplied === true);
@@ -174,8 +183,16 @@ export function runPcfReadinessGate(rows = [], rawOptions = {}) {
     const basics = checkRowEmissionBasics(row);
     const ca = checkCaUnits(row);
 
-    state.pcfBlockers.push(...basics.blockers, ...ca.blockers);
+    state.pcfBlockers.push(...basics.blockers);
     state.pcfWarnings.push(...basics.warnings, ...ca.warnings);
+
+    for (const code of ca.blockers) {
+      if (skipPolicy.skipAllErrors || skipPolicy.skipCodes.has(code)) {
+        state.pcfWarnings.push(`SKIPPED-${code}`);
+      } else {
+        state.pcfBlockers.push(code);
+      }
+    }
   }
 
   for (const diagnostic of graphDiagnostics) {
@@ -221,7 +238,7 @@ export function runPcfReadinessGate(rows = [], rawOptions = {}) {
 
     skippedReadinessErrorCount: skippedReadinessErrors.length,
     skippedReadinessErrorCodes: [...new Set(skippedReadinessErrors.map(d => d.code))],
-    readinessSkipEnabled: skipCodes.size > 0,
+    readinessSkipEnabled: skipPolicy.skipAllErrors || skipPolicy.skipCodes.size > 0,
 
     topoComponentCount: graph.stats.topoComponentCount,
     topoPortCount: graph.stats.topoPortCount,

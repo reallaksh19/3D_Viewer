@@ -45,6 +45,8 @@ import {
 export const UXML_INPUTXML_SCHEMA_MAPPER_SCHEMA =
   'uxml-inputxml-schema-mapper/v1';
 
+const CAESAR_SENTINEL_VALUE = -1.0101;
+
 const COMPONENT_TAGS = Object.freeze([
   'Element',
   'PipeElement',
@@ -97,8 +99,27 @@ function safeId(value, fallback) {
 }
 
 function numberOrNull(value) {
-  const n = Number(value);
+  const text = clean(value);
+  if (!text) return null;
+
+  const n = Number(text);
   return Number.isFinite(n) ? n : null;
+}
+
+function isCaesarUnsetNumber(value) {
+  const n = numberOrNull(value);
+  if (n == null) return true;
+  return Math.abs(n - CAESAR_SENTINEL_VALUE) < 0.001;
+}
+
+function caesarNumberOrNull(value) {
+  if (isCaesarUnsetNumber(value)) return null;
+  return numberOrNull(value);
+}
+
+function caesarDeltaOrZero(value) {
+  const n = caesarNumberOrNull(value);
+  return n == null ? 0 : n;
 }
 
 function attrValue(attrs, ...names) {
@@ -130,36 +151,48 @@ function parseAttrs(attrText = '') {
 function findElements(xmlText, tagName) {
   const tag = String(tagName || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const results = [];
-
-  const paired = new RegExp(
-    `<\\s*(?:[\\w.-]+:)?${tag}\\b([^>]*)>([\\s\\S]*?)<\\s*\\/\\s*(?:[\\w.-]+:)?${tag}\\s*>`,
+  const stack = [];
+  const token = new RegExp(
+    `<\\s*(\\/)?\\s*(?:[\\w.-]+:)?${tag}\\b([^>]*?)(\\/)?\\s*>`,
     'gi'
   );
 
   let match;
 
-  while ((match = paired.exec(xmlText))) {
-    results.push({
-      tagName,
-      attrs: parseAttrs(match[1] || ''),
-      inner: match[2] || '',
-      raw: match[0],
-      selfClosing: false,
-    });
-  }
+  while ((match = token.exec(xmlText))) {
+    const isClosing = !!match[1];
+    const rawAttrs = clean(match[2] || '');
+    const isSelfClosing = !!match[3] || rawAttrs.endsWith('/');
 
-  const self = new RegExp(
-    `<\\s*(?:[\\w.-]+:)?${tag}\\b([^>]*)\\/\\s*>`,
-    'gi'
-  );
+    if (isClosing) {
+      const open = stack.pop();
+      if (!open) continue;
 
-  while ((match = self.exec(xmlText))) {
-    results.push({
-      tagName,
-      attrs: parseAttrs(match[1] || ''),
-      inner: '',
-      raw: match[0],
-      selfClosing: true,
+      results.push({
+        tagName,
+        attrs: parseAttrs(open.attrs),
+        inner: xmlText.slice(open.end, match.index),
+        raw: xmlText.slice(open.start, token.lastIndex),
+        selfClosing: false,
+      });
+      continue;
+    }
+
+    if (isSelfClosing) {
+      results.push({
+        tagName,
+        attrs: parseAttrs(rawAttrs.replace(/\/$/, '')),
+        inner: '',
+        raw: match[0],
+        selfClosing: true,
+      });
+      continue;
+    }
+
+    stack.push({
+      start: match.index,
+      end: token.lastIndex,
+      attrs: rawAttrs,
     });
   }
 
@@ -180,6 +213,11 @@ function findAnyElements(xmlText, tagNames) {
   }
 
   return out;
+}
+
+function firstElementAttrs(xmlText, tagName) {
+  const [tag] = findElements(xmlText, tagName);
+  return tag?.attrs || {};
 }
 
 function parsePointText(value) {
@@ -286,11 +324,15 @@ function detectComponentType(rawType, tagName = '') {
   if (t.includes('SOCKOLET')) return COMPONENT_TYPES.SOCKOLET;
   if (t.includes('OLET')) return COMPONENT_TYPES.OLET;
   if (t.includes('BEND')) return COMPONENT_TYPES.BEND;
-  if (t.includes('ELBOW')) return COMPONENT_TYPES.ELBOW;
+  if (t.includes('ELBOW') || t.includes('ELBO')) return COMPONENT_TYPES.BEND;
   if (t.includes('VALVE')) return COMPONENT_TYPES.VALVE;
+  if (t.includes('VALV')) return COMPONENT_TYPES.VALVE;
   if (t.includes('FLANGE') && t.includes('BLIND')) return COMPONENT_TYPES.BLIND_FLANGE;
   if (t.includes('FLANGE')) return COMPONENT_TYPES.FLANGE;
+  if (t.includes('FLAN')) return COMPONENT_TYPES.FLANGE;
   if (t.includes('GASKET') || t.includes('GASK')) return COMPONENT_TYPES.GASKET;
+  if (t.includes('REDE')) return COMPONENT_TYPES.REDUCER_ECCENTRIC;
+  if (t.includes('REDU') || t.includes('REDC')) return COMPONENT_TYPES.REDUCER_CONCENTRIC;
   if (t.includes('REDUCER') && t.includes('ECC')) return COMPONENT_TYPES.REDUCER_ECCENTRIC;
   if (t.includes('REDUCER')) return COMPONENT_TYPES.REDUCER_CONCENTRIC;
   if (t.includes('PIPE')) return COMPONENT_TYPES.PIPE;
@@ -356,6 +398,8 @@ function segmentTypeFor(type) {
   if (t === COMPONENT_TYPES.VALVE) return SEGMENT_TYPES.VALVE_AXIS;
   if (t.includes('FLANGE')) return SEGMENT_TYPES.FLANGE_AXIS;
   if (t.includes('REDUCER')) return SEGMENT_TYPES.REDUCER_AXIS;
+  if (t === COMPONENT_TYPES.GASKET || t === COMPONENT_TYPES.BLIND_FLANGE) return SEGMENT_TYPES.FLANGE_AXIS;
+  if (t === 'INST') return SEGMENT_TYPES.VALVE_AXIS;
 
   return '';
 }
@@ -609,6 +653,312 @@ function addSupportIfNeeded(doc, component) {
   component.supportId = support.id;
 }
 
+function componentTypeFromPipingElement(tag) {
+  const attrs = tag.attrs || {};
+  const geomMatch = String(tag.inner || '').match(/<!--\s*UXML_GEOM\b([\s\S]*?)-->/i);
+  const geomAttrs = geomMatch ? parseAttrs(geomMatch[1] || '') : {};
+  const sourceType = attrValue(
+    geomAttrs,
+    'TYPE',
+    'SOURCE_TYPE',
+    'COMPONENT_TYPE',
+    'RAW_TYPE'
+  ) || attrValue(
+    attrs,
+    'TYPE',
+    'SOURCE_TYPE',
+    'COMPONENT_TYPE',
+    'RAW_TYPE'
+  );
+  const hintedType = detectComponentType(sourceType, '');
+
+  if (sourceType && hintedType !== COMPONENT_TYPES.UNKNOWN) {
+    return hintedType;
+  }
+
+  const rigid = findElements(tag.inner || '', 'RIGID')[0];
+  const rigidType = upper(attrValue(rigid?.attrs || {}, 'TYPE', 'RIGID_TYPE'));
+
+  if (rigidType.includes('VALVE')) return COMPONENT_TYPES.VALVE;
+  if (rigidType.includes('FLANGE') || rigidType.includes('FLAN')) return COMPONENT_TYPES.FLANGE;
+  if (rigidType.includes('GASK')) return COMPONENT_TYPES.GASKET;
+  if (rigidType.includes('BLIND')) return COMPONENT_TYPES.BLIND_FLANGE;
+  const sifDrivenType = componentTypeFromCaesarSifs(tag);
+  if (sifDrivenType) return sifDrivenType;
+  if (findElements(tag.inner || '', 'BEND').length > 0) return COMPONENT_TYPES.BEND;
+
+  return COMPONENT_TYPES.PIPE;
+}
+
+function componentTypeFromCaesarSifs(tag) {
+  for (const sif of findElements(tag.inner || '', 'SIF')) {
+    const typeCode = numberOrNull(attrValue(sif.attrs || {}, 'TYPE'));
+    const label = upper(attrValue(sif.attrs || {}, 'LABEL', 'NAME', 'DESCRIPTION'));
+
+    if (typeCode != null && Math.abs(typeCode - 3) < 0.001) return COMPONENT_TYPES.TEE;
+    if (typeCode != null && Math.abs(typeCode - 5) < 0.001) return COMPONENT_TYPES.OLET;
+    if (label.includes('WELDING TEE')) return COMPONENT_TYPES.TEE;
+    if (label.includes('WELDOLET') || label.includes('OLET')) return COMPONENT_TYPES.OLET;
+  }
+
+  return '';
+}
+
+function caesarPipingElementComponent(tag, index, sourceId, pipelineId, pipelineRef, bore) {
+  const attrs = tag.attrs || {};
+  const normalizedType = componentTypeFromPipingElement(tag);
+  const sifTypes = findElements(tag.inner || '', 'SIF')
+    .map(sif => attrValue(sif.attrs || {}, 'TYPE'))
+    .filter(Boolean)
+    .join(',');
+  const rawAttributes = {
+    ...attrs,
+    sourceTagName: 'PIPINGELEMENT',
+    sourceIndex: String(index + 1),
+    pipelineRef,
+    resolvedDiameter: bore == null ? '' : String(bore),
+    hasBend: String(findElements(tag.inner || '', 'BEND').length > 0),
+    hasRigid: String(findElements(tag.inner || '', 'RIGID').length > 0),
+    hasSif: String(findElements(tag.inner || '', 'SIF').length > 0),
+    sifTypes,
+  };
+
+  return createUxmlComponent({
+    id: `IX-PE-${pad(index + 1)}`,
+    sourceRefs: [sourceId],
+    type: normalizedType,
+    normalizedType,
+    pipelineRef,
+    lineKey: pipelineRef,
+    pipelineId,
+    refNo: attrValue(attrs, 'REF_NO', 'REFNO', 'refNo', 'ref'),
+    seqNo: attrValue(attrs, 'SEQ_NO', 'SEQNO', 'seqNo', 'number'),
+    name: `${attrValue(attrs, 'FROM_NODE', 'FROMNODE', 'FROM')}->${attrValue(attrs, 'TO_NODE', 'TONODE', 'TO')}`,
+    bore,
+    branchBore: null,
+    skey: '',
+    rawAttributes,
+    confidence: CONFIDENCE_LEVELS.ALIASED_SOURCE,
+  });
+}
+
+function parseUxmlGeometryComment(inner) {
+  const match = String(inner || '').match(/<!--\s*UXML_GEOM\b([\s\S]*?)-->/i);
+  if (!match) return null;
+
+  const attrs = parseAttrs(match[1] || '');
+  const from = {
+    x: numberOrNull(attrValue(attrs, 'FROM_X')),
+    y: numberOrNull(attrValue(attrs, 'FROM_Y')),
+    z: numberOrNull(attrValue(attrs, 'FROM_Z')),
+  };
+  const to = {
+    x: numberOrNull(attrValue(attrs, 'TO_X')),
+    y: numberOrNull(attrValue(attrs, 'TO_Y')),
+    z: numberOrNull(attrValue(attrs, 'TO_Z')),
+  };
+
+  return {
+    from: isFinitePoint(from) ? from : null,
+    to: isFinitePoint(to) ? to : null,
+    sourceType: attrValue(attrs, 'TYPE', 'SOURCE_TYPE', 'COMPONENT_TYPE', 'RAW_TYPE'),
+  };
+}
+
+function isFinitePoint(point) {
+  return (
+    point &&
+    Number.isFinite(Number(point.x)) &&
+    Number.isFinite(Number(point.y)) &&
+    Number.isFinite(Number(point.z))
+  );
+}
+
+function solveCaesarNodeCoordinates(edges) {
+  const nodeCoords = new Map();
+  let coordinateMismatchCount = 0;
+  let seededComponentCount = 0;
+  const mismatchKeys = new Set();
+
+  const getNode = value => nodeCoords.get(clean(value));
+  const setNode = (value, point) => {
+    const key = clean(value);
+    if (!key) return false;
+    if (nodeCoords.has(key)) return false;
+    nodeCoords.set(key, point);
+    return true;
+  };
+
+  for (const edge of edges) {
+    if (edge.explicitFrom) setNode(edge.fromNode, edge.explicitFrom);
+    if (edge.explicitTo) setNode(edge.toNode, edge.explicitTo);
+  }
+
+  const propagate = () => {
+    let changed = false;
+
+    for (const edge of edges) {
+      const from = getNode(edge.fromNode);
+      const to = getNode(edge.toNode);
+
+      if (from && !to) {
+        changed = setNode(edge.toNode, {
+          x: from.x + edge.dx,
+          y: from.y + edge.dy,
+          z: from.z + edge.dz,
+        }) || changed;
+        continue;
+      }
+
+      if (!from && to) {
+        changed = setNode(edge.fromNode, {
+          x: to.x - edge.dx,
+          y: to.y - edge.dy,
+          z: to.z - edge.dz,
+        }) || changed;
+        continue;
+      }
+
+      if (from && to) {
+        const mismatch = Math.sqrt(
+          (to.x - from.x - edge.dx) ** 2 +
+          (to.y - from.y - edge.dy) ** 2 +
+          (to.z - from.z - edge.dz) ** 2
+        );
+        if (mismatch > 1e-6) {
+          const key = `${edge.index}:${edge.fromNode}:${edge.toNode}`;
+          if (!mismatchKeys.has(key)) {
+            mismatchKeys.add(key);
+            coordinateMismatchCount += 1;
+          }
+        }
+      }
+    }
+
+    return changed;
+  };
+
+  if (edges.length && nodeCoords.size === 0) {
+    setNode(edges[0].fromNode, { x: 0, y: 0, z: 0 });
+    seededComponentCount = 1;
+  }
+
+  while (propagate()) {
+    // Continue until no known node can solve a neighbor.
+  }
+
+  while (edges.some(edge => !getNode(edge.fromNode) || !getNode(edge.toNode))) {
+    const seed = edges.find(edge => !getNode(edge.fromNode) || !getNode(edge.toNode));
+    if (!seed) break;
+
+    setNode(seed.fromNode, { x: 0, y: 0, z: 0 });
+    seededComponentCount += 1;
+
+    while (propagate()) {
+      // Continue until this connected component is solved.
+    }
+  }
+
+  return {
+    nodeCoords,
+    coordinateMismatchCount,
+    seededComponentCount,
+  };
+}
+
+function mapCaesarPipingElements(doc, text, sourceId) {
+  const pipingModelAttrs = firstElementAttrs(text, 'PIPINGMODEL');
+  const pipelineRef =
+    attrValue(pipingModelAttrs, 'LINE_NO', 'LINENO', 'JOBNAME', 'NAME', 'ID') ||
+    'CAESAR-INPUTXML';
+  const pipelineId = ensurePipeline(doc, pipelineRef, pipelineRef, pipingModelAttrs);
+  const tags = findElements(text, 'PIPINGELEMENT');
+  let inheritedDiameter = null;
+  let inheritedDiameterCount = 0;
+  let unresolvedDiameterCount = 0;
+  const edges = tags.map((tag, index) => {
+    const attrs = tag.attrs || {};
+    const geometryComment = parseUxmlGeometryComment(tag.inner);
+    return {
+      index,
+      tag,
+      attrs,
+      fromNode: attrValue(attrs, 'FROM_NODE', 'FROMNODE', 'FROM'),
+      toNode: attrValue(attrs, 'TO_NODE', 'TONODE', 'TO'),
+      dx: caesarDeltaOrZero(attrValue(attrs, 'DELTA_X', 'DX')),
+      dy: caesarDeltaOrZero(attrValue(attrs, 'DELTA_Y', 'DY')),
+      dz: caesarDeltaOrZero(attrValue(attrs, 'DELTA_Z', 'DZ')),
+      explicitFrom: geometryComment?.from || null,
+      explicitTo: geometryComment?.to || null,
+    };
+  });
+  const {
+    nodeCoords,
+    coordinateMismatchCount,
+    seededComponentCount,
+  } = solveCaesarNodeCoordinates(edges);
+
+  edges.forEach(edge => {
+    const { tag, attrs, fromNode, toNode, index } = edge;
+    const ownDiameter = caesarNumberOrNull(attrValue(attrs, 'DIAMETER', 'BORE', 'NOMINAL_DIAMETER'));
+    const bore = ownDiameter == null ? inheritedDiameter : ownDiameter;
+
+    if (ownDiameter != null) {
+      inheritedDiameter = ownDiameter;
+    } else if (bore != null) {
+      inheritedDiameterCount += 1;
+    } else {
+      unresolvedDiameterCount += 1;
+    }
+
+    const from = nodeCoords.get(clean(fromNode)) || { x: 0, y: 0, z: 0 };
+    const to = nodeCoords.get(clean(toNode)) || {
+      x: from.x + edge.dx,
+      y: from.y + edge.dy,
+      z: from.z + edge.dz,
+    };
+
+    const component = caesarPipingElementComponent(tag, index, sourceId, pipelineId, pipelineRef, bore);
+
+    if ([COMPONENT_TYPES.OLET, COMPONENT_TYPES.WELDOLET, COMPONENT_TYPES.SOCKOLET].includes(component.normalizedType)) {
+      addAnchorPort(doc, component, ANCHOR_ROLES.CP, from, 'PIPINGELEMENT:FROM_NODE');
+      addAnchorPort(doc, component, ANCHOR_ROLES.BP, to, 'PIPINGELEMENT:TO_NODE');
+      addSegmentIfPossible(doc, component, ANCHOR_ROLES.CP, ANCHOR_ROLES.BP);
+    } else {
+      addAnchorPort(doc, component, ANCHOR_ROLES.EP1, from, 'PIPINGELEMENT:FROM_NODE');
+      addAnchorPort(doc, component, ANCHOR_ROLES.EP2, to, 'PIPINGELEMENT:TO_NODE');
+      addSegmentIfPossible(doc, component);
+    }
+    doc.components.push(component);
+
+    if (bore == null) {
+      addLoss(doc, {
+        severity: 'WARNING',
+        code: 'UXML-INPUTXML-CAESAR-DIAMETER-MISSING',
+        componentId: component.id,
+        sourceId,
+        message: `CAESAR PIPINGELEMENT ${component.id} has no explicit or inherited diameter.`,
+        details: component.rawAttributes,
+      });
+    }
+  });
+
+  addDiagnostic(doc, {
+    severity: unresolvedDiameterCount ? 'WARNING' : 'INFO',
+    code: 'UXML-INPUTXML-CAESAR-PIPINGELEMENTS',
+    sourceId,
+    message: `Mapped ${tags.length} CAESAR PIPINGELEMENT rows; inherited diameter on ${inheritedDiameterCount} row(s).`,
+    details: {
+      pipingElementCount: tags.length,
+      inheritedDiameterCount,
+      unresolvedDiameterCount,
+      coordinateMismatchCount,
+      seededComponentCount,
+      absoluteGeometryCommentCount: edges.filter(edge => edge.explicitFrom && edge.explicitTo).length,
+    },
+  });
+}
+
 function componentIdFromTag(tag, index) {
   const attrs = tag.attrs;
 
@@ -803,24 +1153,31 @@ export function mapInputXmlToUxml(xmlText, doc, sourceId, options = {}) {
   addMapping(doc, 'InputXML endpoints/branch/center', 'ports[]/segments[]');
 
   const nodeMap = buildNodeMap(text);
-  const componentTags = findAnyElements(text, COMPONENT_TAGS);
+  const pipingElementTags = findElements(text, 'PIPINGELEMENT');
+  const componentTags = pipingElementTags.length ? [] : findAnyElements(text, COMPONENT_TAGS);
+  const candidateTagCount = pipingElementTags.length || componentTags.length;
 
   addDiagnostic(doc, {
     severity: 'INFO',
     code: 'UXML-INPUTXML-MAPPER-STARTED',
     sourceId,
-    message: `Started adaptive InputXML mapper. Nodes=${nodeMap.size}, candidate component tags=${componentTags.length}.`,
+    message: `Started adaptive InputXML mapper. Nodes=${nodeMap.size}, candidate component tags=${candidateTagCount}.`,
     details: {
       fileName: options.fileName || options.name || '',
       selectedSourceType: options.selectedSourceType || '',
+      caesarPipingElementCount: pipingElementTags.length,
     },
   });
 
-  componentTags.forEach((tag, index) => {
-    mapComponentTag(doc, tag, index, sourceId, nodeMap);
-  });
+  if (pipingElementTags.length) {
+    mapCaesarPipingElements(doc, text, sourceId);
+  } else {
+    componentTags.forEach((tag, index) => {
+      mapComponentTag(doc, tag, index, sourceId, nodeMap);
+    });
+  }
 
-  if (!componentTags.length) {
+  if (!candidateTagCount) {
     addLoss(doc, {
       severity: 'WARNING',
       code: 'UXML-INPUTXML-MAPPER-NO-COMPONENT-TAGS',
@@ -843,7 +1200,7 @@ export function mapInputXmlToUxml(xmlText, doc, sourceId, options = {}) {
       message: 'InputXML profile was accepted, but no components were mapped. Schema-specific mapping is still required.',
       details: {
         nodeCount: nodeMap.size,
-        candidateTagCount: componentTags.length,
+        candidateTagCount,
       },
     });
   } else {
@@ -860,7 +1217,7 @@ export function mapInputXmlToUxml(xmlText, doc, sourceId, options = {}) {
     schema: UXML_INPUTXML_SCHEMA_MAPPER_SCHEMA,
     ok: stats.componentCount > 0,
     nodeCount: nodeMap.size,
-    candidateTagCount: componentTags.length,
+    candidateTagCount,
     stats: mapperStats(doc, before),
     doc,
   };

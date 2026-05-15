@@ -10,5 +10,6 @@
   "support-mapping-config": 1,
   "adapter-mapping": 1,
   "universal-xml-converter": true,
+  "xml-compare": true,
   "rvm-json-pcf-extract": true
 }

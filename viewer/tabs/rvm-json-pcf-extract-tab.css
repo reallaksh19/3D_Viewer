@@ -35,15 +35,52 @@
 
 .rvm-pcf-extract-toolbar {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
+  align-items: stretch;
+  gap: 0;
+  padding: 0 4px;
   background: var(--geo-ribbon-bg, #20232a);
   border-bottom: 1px solid var(--geo-border, #333);
   flex-shrink: 0;
   flex-wrap: wrap;
+  min-height: 54px;
 }
 
+/* Group: a labeled column of controls */
+.rvm-pcf-tb-group {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 5px 8px 5px;
+  gap: 4px;
+}
+
+.rvm-pcf-tb-group-label {
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #4a6080;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.rvm-pcf-tb-group-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+/* Vertical separator between groups */
+.rvm-pcf-tb-sep {
+  width: 1px;
+  background: #2a3248;
+  margin: 7px 2px;
+  align-self: stretch;
+  flex-shrink: 0;
+}
+
+/* Default toolbar button */
 .rvm-pcf-extract-toolbar button {
   padding: 4px 10px;
   background: #1a3a5c;
@@ -62,6 +99,73 @@
 
 .rvm-pcf-extract-toolbar button:active {
   background: #0e2a4c;
+}
+
+/* Primary action button (Generate PCF) */
+.rvm-pcf-extract-toolbar button.rvm-pcf-tb-btn-primary {
+  background: #163524;
+  border-color: #3bba68;
+  color: #7ddc9a;
+  font-weight: 700;
+}
+
+.rvm-pcf-extract-toolbar button.rvm-pcf-tb-btn-primary:hover {
+  background: #1d4a30;
+}
+
+/* Secondary / low-emphasis buttons */
+.rvm-pcf-extract-toolbar button.rvm-pcf-tb-btn-secondary {
+  background: #182030;
+  border-color: #2d4060;
+  color: #7a9abd;
+  font-size: 11px;
+}
+
+.rvm-pcf-extract-toolbar button.rvm-pcf-tb-btn-secondary:hover {
+  background: #1e2c42;
+  color: #a8c8e8;
+}
+
+/* Checkbox label */
+.rvm-pcf-tb-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: #9aa9bd;
+  white-space: nowrap;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background 0.12s;
+}
+
+.rvm-pcf-tb-check:hover {
+  background: rgba(74, 158, 255, 0.08);
+  color: #c0d8f0;
+}
+
+/* Numeric input with stacked label */
+.rvm-pcf-tb-input-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #4a6080;
+  white-space: nowrap;
+}
+
+.rvm-pcf-tb-numbox {
+  width: 54px;
+  background: #0f172a;
+  color: #dbeafe;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 3px 5px;
+  font-size: 12px;
 }
 
 .rvm-pcf-extract-body {

@@ -33,6 +33,10 @@ const tests = [
   './unit/rvm/rvm-capabilities.test.js',
   './integration/rvm-tab-shell.test.js',
   './integration/rvm-load-pipeline.test.js',
+  './unit/xml-compare/xml-compare-x12-topology-issues-behavior.test.js',
+  './unit/xml-compare/xml-compare-x12-topology-issues-ui-markers.test.js',
+  './unit/xml-compare/xml-compare-x13-topology-filter-behavior.test.js',
+  './unit/xml-compare/xml-compare-x13-topology-filter-ui-markers.test.js',
   './unit/rvm/rvm-tag-xml.test.js',
   './unit/rvm/rvm-saved-views.test.js',
   './unit/rvm/rvm-assisted.test.js',
@@ -59,4 +63,3 @@ for (const rel of tests) {
 }
 
 console.log('âœ… interface test suite passed.');
-

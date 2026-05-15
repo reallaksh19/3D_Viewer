@@ -102,6 +102,16 @@ describe('Universal XML Converter Tab Agent 09', () => {
     expect(detectSourceType('1001-P - COPY_INPUT.XML', xml)).toBe('INPUT_XML');
   });
 
+  it('detects CAESARII PIPINGELEMENT XML as InputXML without filename hint', () => {
+    expect(detectSourceType('caesar.xml', `
+      <CAESARII VERSION="14.00" XML_TYPE="Input">
+        <PIPINGMODEL JOBNAME="RMSS">
+          <PIPINGELEMENT FROM_NODE="10" TO_NODE="20" DELTA_X="100" DELTA_Y="-1.0101" DELTA_Z="-1.0101"/>
+        </PIPINGMODEL>
+      </CAESARII>
+    `)).toBe('INPUT_XML');
+  });
+
   it('uses extension fallback for non-XML converter sources', () => {
     expect(detectSourceType('model.pcf', 'PIPELINE-REFERENCE X')).toBe('PCF');
     expect(detectSourceType('drawing.pdf', '%PDF')).toBe('PDF_TO_INPUTXML');
@@ -238,6 +248,14 @@ describe('Universal XML Converter Tab Agent 09', () => {
 
     expect(stageIds).toContain('decision-gate');
     expect(stageIds).toContain('route-handoff');
+    expect(stageIds).toContain('cl1-package');
+    expect(stageIds).toContain('cl1-snapshot');
+    expect(stageIds).toContain('cl1-replay');
+    expect(stageIds).toContain('cl1-summary');
+    expect(stageIds.indexOf('cl1-package')).toBeGreaterThan(stageIds.indexOf('route-handoff'));
+    expect(stageIds.indexOf('cl1-snapshot')).toBeGreaterThan(stageIds.indexOf('cl1-package'));
+    expect(stageIds.indexOf('cl1-replay')).toBeGreaterThan(stageIds.indexOf('cl1-snapshot'));
+    expect(stageIds.indexOf('cl1-summary')).toBeGreaterThan(stageIds.indexOf('cl1-replay'));
   });
 
   it('keeps route handoff wording separate from direct PCF export', () => {
@@ -248,6 +266,8 @@ describe('Universal XML Converter Tab Agent 09', () => {
 
     expect(html).toContain('Route Handoff');
     expect(html).toContain('Masters by Target Route');
+    expect(html).toContain('CL1 Route Package');
+    expect(html).toContain('does not emit PCF');
     expect(html).not.toContain('Masters deferred');
   });
 });
