@@ -94,6 +94,7 @@ class Element:
     bend_mid_node: int = -1
     sif_node: int = -1
     rest_node: int = -1
+    source_type: str = 'PIPE'
 
 # ---------------------------------------------------------------------------
 # Node allocator
@@ -249,7 +250,8 @@ def process_branch(branch: dict, na: NodeAllocator, defaults: InputXmlDefaults,
             splits.append((t, projected))
         return sorted(splits, key=lambda item: item[0])
 
-    def append_route_segment(start, end, od, bend_radius: float = SENTINEL) -> Element | None:
+    def append_route_segment(start, end, od, bend_radius: float = SENTINEL,
+                             source_type: str = 'PIPE') -> Element | None:
         nonlocal prev_od
         if start is None or end is None or vlen(vsub(end, start)) <= 1.0:
             return None
@@ -273,6 +275,7 @@ def process_branch(branch: dict, na: NodeAllocator, defaults: InputXmlDefaults,
             rigid=False,
             bend_radius=bend_radius,
             bend_mid_node=bend_mid,
+            source_type='BEND' if bend_radius != SENTINEL else source_type,
         )
         elements.append(e)
         if od is not None and od != SENTINEL:
@@ -339,6 +342,7 @@ def process_branch(branch: dict, na: NodeAllocator, defaults: InputXmlDefaults,
                         diameter=diam, wall=wall_val, temp1=temp1_val,
                         modulus=defaults.modulus, hot_mod1=hot1,
                         sif_node=tn,
+                        source_type='OLET',
                     ))
                     olet_ref = str(olet_attrs.get('REF') or olet_attrs.get('NAME') or '').strip() or None
                     if olet_ref:
@@ -382,7 +386,7 @@ def process_branch(branch: dict, na: NodeAllocator, defaults: InputXmlDefaults,
                 for _, split_point in route_splits_between(apos_raw, bend_end):
                     append_route_segment(segment_start, split_point, od)
                     segment_start = split_point
-                append_route_segment(segment_start, bend_end, od, bend_radius_val)
+                append_route_segment(segment_start, bend_end, od, bend_radius_val, 'BEND')
                 route_cursor = bend_end
                 pending_sif = False
                 pending_sif_ref = None
@@ -447,6 +451,7 @@ def process_branch(branch: dict, na: NodeAllocator, defaults: InputXmlDefaults,
                 bend_radius=bend_radius_val,
                 bend_mid_node=bend_mid,
                 sif_node=tn1 if pending_sif else -1,
+                source_type='BEND',
             )
             elements.append(e1)
             if pending_sif and pending_sif_ref:
@@ -470,6 +475,7 @@ def process_branch(branch: dict, na: NodeAllocator, defaults: InputXmlDefaults,
                         diameter=SENTINEL, wall=SENTINEL, temp1=SENTINEL,
                         modulus=defaults.modulus, hot_mod1=defaults.modulus,
                         rigid=False,
+                        source_type='BEND',
                     ))
                     na._map[tuple(round(c) for c in apos_raw)] = tn2
                 route_cursor = apos_raw
@@ -486,6 +492,7 @@ def process_branch(branch: dict, na: NodeAllocator, defaults: InputXmlDefaults,
                 diameter=SENTINEL, wall=SENTINEL, temp1=SENTINEL,
                 modulus=defaults.modulus, hot_mod1=defaults.modulus,
                 rigid=False,
+                source_type='PIPE',
             )
             elements.append(e2)
             route_cursor = lpos_raw
@@ -518,6 +525,7 @@ def process_branch(branch: dict, na: NodeAllocator, defaults: InputXmlDefaults,
                 diameter=diam1, wall=wall_val, temp1=temp1_val,
                 modulus=defaults.modulus, hot_mod1=hot1,
                 sif_node=tn1,
+                source_type='TEE',
             ))
 
             merged_lpos = lpos_raw
@@ -554,6 +562,7 @@ def process_branch(branch: dict, na: NodeAllocator, defaults: InputXmlDefaults,
                 diameter=SENTINEL, wall=SENTINEL, temp1=SENTINEL,
                 modulus=defaults.modulus, hot_mod1=defaults.modulus,
                 sif_node=tn2 if merged_sif_ref else -1,
+                source_type='OLET' if merged_sif_ref else 'TEE',
             )
             elements.append(e2)
             if merged_sif_ref:
@@ -640,6 +649,7 @@ def process_branch(branch: dict, na: NodeAllocator, defaults: InputXmlDefaults,
                 diameter=diam, wall=wall_val, temp1=temp1_val,
                 modulus=defaults.modulus, hot_mod1=hot1,
                 rigid=False,
+                source_type=typ,
             ))
 
             dx2, dy2, dz2 = encode_delta(*vsub(effective_lpos, split_point_tuple))
@@ -650,6 +660,7 @@ def process_branch(branch: dict, na: NodeAllocator, defaults: InputXmlDefaults,
                 diameter=SENTINEL, wall=SENTINEL, temp1=SENTINEL,
                 modulus=defaults.modulus, hot_mod1=defaults.modulus,
                 rigid=True,
+                source_type=typ,
             ))
             pending_sif = False
             pending_sif_ref = None
@@ -679,6 +690,7 @@ def process_branch(branch: dict, na: NodeAllocator, defaults: InputXmlDefaults,
             modulus=defaults.modulus, hot_mod1=hot1,
             rigid=make_rigid,
             sif_node=sif_node_val if (typ == 'TEE' or pending_sif) else -1,
+            source_type='OLET' if pending_sif else typ,
         )
         if pending_sif and sif_node_val == -1:
             e.sif_node = tn
@@ -761,6 +773,7 @@ def _emit_gask(elements, apos_raw, lpos_raw, od, prev_od, na, defaults, elem_idx
         modulus=defaults.modulus, hot_mod1=defaults.modulus,
         rigid=True,
         sif_node=tn if pending_sif else -1,
+        source_type='GASK',
     )
     elements.append(e)
 
@@ -792,6 +805,17 @@ FMT = '{:.6f}'
 
 def f(v: float) -> str:
     return FMT.format(v)
+
+
+def xml_attr(value: object) -> str:
+    """Escape text for safe XML attribute/comment metadata emission."""
+    return (
+        str(value or '')
+        .replace('&', '&amp;')
+        .replace('"', '&quot;')
+        .replace('<', '&lt;')
+        .replace('>', '&gt;')
+    )
 
 
 def emit_restraint_slots(el: Element) -> list[str]:
@@ -835,7 +859,22 @@ def emit_sif_slots(el: Element) -> list[str]:
     ]
 
 
-def element_to_xml(el: Element) -> str:
+def _uxml_geom_comment(el: Element, node_points: dict[int, tuple] | None) -> str | None:
+    """Return optional source-coordinate metadata for UXML preview consumers."""
+    if not node_points:
+        return None
+    start = node_points.get(el.from_node)
+    end = node_points.get(el.to_node)
+    if start is None or end is None:
+        return None
+    return (
+        f'<!-- UXML_GEOM TYPE="{xml_attr(el.source_type)}"'
+        f' FROM_X="{f(start[0])}" FROM_Y="{f(start[1])}" FROM_Z="{f(start[2])}"'
+        f' TO_X="{f(end[0])}" TO_Y="{f(end[1])}" TO_Z="{f(end[2])}" -->'
+    )
+
+
+def element_to_xml(el: Element, node_points: dict[int, tuple] | None = None) -> str:
     lines = []
     lines.append(
         f'<PIPINGELEMENT FROM_NODE="{f(el.from_node)}" TO_NODE="{f(el.to_node)}"'
@@ -867,6 +906,10 @@ def element_to_xml(el: Element) -> str:
         f' SEAM_WELD="{f(S)}" NAME="">'
     )
 
+    geom_comment = _uxml_geom_comment(el, node_points)
+    if geom_comment:
+        lines.append(geom_comment)
+
     if el.bend_radius != SENTINEL and el.bend_mid_node > 0:
         lines.append(
             f'<BEND RADIUS="{f(el.bend_radius)}" TYPE="{f(S)}"'
@@ -885,7 +928,11 @@ def element_to_xml(el: Element) -> str:
     return '\n'.join(lines)
 
 
-def build_xml(job_name: str, elements: list[Element], defaults: InputXmlDefaults) -> str:
+def build_xml(
+        job_name: str,
+        elements: list[Element],
+        defaults: InputXmlDefaults,
+        node_points: dict[int, tuple] | None = None) -> str:
     num_bend = sum(1 for e in elements if e.bend_radius != SENTINEL and e.bend_mid_node > 0)
     num_rigid = sum(1 for e in elements if e.rigid)
     num_rest = sum(1 for e in elements if e.rest_node > 0)
@@ -903,7 +950,7 @@ def build_xml(job_name: str, elements: list[Element], defaults: InputXmlDefaults
         f' NORTH_Z="{defaults.north_z}" NORTH_Y="{defaults.north_y}"'
         f' NORTH_X="{defaults.north_x}">'
     )
-    body = '\n'.join(element_to_xml(e) for e in elements)
+    body = '\n'.join(element_to_xml(e, node_points) for e in elements)
     return header + '\n' + body + '\n</PIPINGMODEL></CAESARII>'
 
 # ---------------------------------------------------------------------------
@@ -1009,7 +1056,7 @@ def convert(input_path: Path, output_path: Path, defaults: InputXmlDefaults,
     # Handled in element_to_xml via direct literal
 
     jn = job_name or input_path.stem
-    xml = build_xml(jn, all_elements, defaults)
+    xml = build_xml(jn, all_elements, defaults, na._point_by_node)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(xml, encoding='utf-8')
 

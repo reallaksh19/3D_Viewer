@@ -43,6 +43,8 @@ INCH_TO_MM: Final[float] = 25.4
 FEET_TO_MM: Final[float] = 304.8
 PSI_TO_BAR: Final[float] = 0.0689475729
 PSI_TO_MPA: Final[float] = 0.00689475729
+KPA_TO_BAR: Final[float] = 0.01
+KPA_TO_MPA: Final[float] = 0.001
 LBS_TO_KG: Final[float] = 0.45359237
 N_TO_KG: Final[float] = 1.0 / 9.80665
 LBCUIN_TO_KGCUCM: Final[float] = 0.027679904710203125
@@ -167,6 +169,13 @@ class ParsedPdfModel:
 
 
 @dataclass(frozen=True)
+class ReconstructedPoint:
+    x: float
+    y: float
+    z: float
+
+
+@dataclass(frozen=True)
 class InternalProfile:
     name: str
     template_xml: str
@@ -199,11 +208,22 @@ def _format_float(value: float) -> str:
     return f"{value:.6f}"
 
 
+def _is_input_echo_text(text: str) -> bool:
+    """Return true when extracted PDF text contains a CAESAR Input Listing."""
+    return (
+        re.search(r"\bInput\s+Echo\b", text, flags=re.IGNORECASE) is not None
+        or (
+            re.search(r"\bInput\s+Listing\b", text, flags=re.IGNORECASE) is not None
+            and re.search(r"\bPipe\s+Data\b", text, flags=re.IGNORECASE) is not None
+        )
+    )
+
+
 def _extract_pdf_text(path: Path) -> str:
     reader = PdfReader(str(path))
     pages = [page.extract_text() or "" for page in reader.pages]
     text = "\n".join(pages)
-    if "Input Echo" not in text:
+    if not _is_input_echo_text(text):
         raise ValueError(f"Input PDF does not appear to be a CAESAR Input Echo report: {path}")
     return text
 
@@ -291,9 +311,11 @@ def _parse_state_from_block(content: str, prior: PipeState) -> PipeState:
     material_num = prior.material_num
     material_name = prior.material_name
 
-    dia_match = re.search(rf"Dia=\s*{NUMBER_PATTERN}\s*in\.", content, flags=re.IGNORECASE)
+    dia_match = re.search(rf"Dia=\s*{NUMBER_PATTERN}\s*(in|mm)\.", content, flags=re.IGNORECASE)
     if dia_match is not None:
-        diameter_mm = _parse_number(dia_match.group(1)) * INCH_TO_MM
+        diameter_value = _parse_number(dia_match.group(1))
+        diameter_unit = dia_match.group(2).lower()
+        diameter_mm = diameter_value * INCH_TO_MM if diameter_unit == "in" else diameter_value
 
     wall_match = re.search(rf"Wall=\s*{NUMBER_PATTERN}\s*(in|mm)\.", content, flags=re.IGNORECASE)
     if wall_match is not None:
@@ -319,82 +341,105 @@ def _parse_state_from_block(content: str, prior: PipeState) -> PipeState:
         temp_unit = t1_match.group(2).upper()
         temp_c1 = (temp_value - 32.0) * (5.0 / 9.0) if temp_unit == "F" else temp_value
 
-    p1_match = re.search(rf"P1=\s*{NUMBER_PATTERN}\s*(lb\./sq\.in\.|bars?)", content, flags=re.IGNORECASE)
+    p1_match = re.search(rf"P1=\s*{NUMBER_PATTERN}\s*(lb\./sq\.in\.|bars?|KPa)", content, flags=re.IGNORECASE)
     if p1_match is not None:
         p1_value = _parse_number(p1_match.group(1))
         p1_unit = p1_match.group(2).lower()
-        pressure1_bar = p1_value * PSI_TO_BAR if "lb./sq.in." in p1_unit else p1_value
+        if "lb./sq.in." in p1_unit:
+            pressure1_bar = p1_value * PSI_TO_BAR
+        elif p1_unit == "kpa":
+            pressure1_bar = p1_value * KPA_TO_BAR
+        else:
+            pressure1_bar = p1_value
 
-    phyd_match = re.search(rf"PHyd=\s*{NUMBER_PATTERN}\s*(lb\./sq\.in\.|bars?)", content, flags=re.IGNORECASE)
+    phyd_match = re.search(rf"PHyd=\s*{NUMBER_PATTERN}\s*(lb\./sq\.in\.|bars?|KPa)", content, flags=re.IGNORECASE)
     if phyd_match is not None:
         phyd_value = _parse_number(phyd_match.group(1))
         phyd_unit = phyd_match.group(2).lower()
-        hydro_bar = phyd_value * PSI_TO_BAR if "lb./sq.in." in phyd_unit else phyd_value
+        if "lb./sq.in." in phyd_unit:
+            hydro_bar = phyd_value * PSI_TO_BAR
+        elif phyd_unit == "kpa":
+            hydro_bar = phyd_value * KPA_TO_BAR
+        else:
+            hydro_bar = phyd_value
 
     modulus_match = re.search(
-        rf"E=\s*{NUMBER_PATTERN}\s*(lb\./sq\.in\.|N\./sq\.mm\.)", content, flags=re.IGNORECASE
+        rf"E=\s*{NUMBER_PATTERN}\s*(lb\./sq\.in\.|N\./sq\.mm\.|KPa)", content, flags=re.IGNORECASE
     )
     if modulus_match is not None:
         modulus_value = _parse_number(modulus_match.group(1))
         modulus_unit = modulus_match.group(2).lower()
-        modulus_mpa = modulus_value * PSI_TO_MPA if "lb./sq.in." in modulus_unit else modulus_value
+        if "lb./sq.in." in modulus_unit:
+            modulus_mpa = modulus_value * PSI_TO_MPA
+        elif modulus_unit == "kpa":
+            modulus_mpa = modulus_value * KPA_TO_MPA
+        else:
+            modulus_mpa = modulus_value
 
     for eh_index in range(1, 10):
         eh_match = re.search(
-            rf"EH{eh_index}=\s*{NUMBER_PATTERN}\s*(lb\./sq\.in\.|N\./sq\.mm\.)",
+            rf"EH{eh_index}=\s*{NUMBER_PATTERN}\s*(lb\./sq\.in\.|N\./sq\.mm\.|KPa)",
             content,
             flags=re.IGNORECASE,
         )
         if eh_match is not None:
             eh_value = _parse_number(eh_match.group(1))
             eh_unit = eh_match.group(2).lower()
-            hot_mod_mpa[eh_index - 1] = eh_value * PSI_TO_MPA if "lb./sq.in." in eh_unit else eh_value
+            if "lb./sq.in." in eh_unit:
+                hot_mod_mpa[eh_index - 1] = eh_value * PSI_TO_MPA
+            elif eh_unit == "kpa":
+                hot_mod_mpa[eh_index - 1] = eh_value * KPA_TO_MPA
+            else:
+                hot_mod_mpa[eh_index - 1] = eh_value
 
     poisson_match = re.search(r"v\s*=\s*([+\-]?(?:\d+(?:\.\d+)?|\.\d+))", content)
     if poisson_match is not None:
         poisson = _parse_number(poisson_match.group(1))
 
     pipe_den_match = re.search(
-        rf"Pipe\s+Den=\s*{NUMBER_PATTERN}\s*(lb\./cu\.in\.|kg/cu\.m\.)",
+        rf"Pipe\s+Den=\s*{NUMBER_PATTERN}\s*(lb\./cu\.in\.|kg/cu\.m\.|kg\./cu\.cm\.)",
         content,
         flags=re.IGNORECASE,
     )
     if pipe_den_match is not None:
         pipe_density_value = _parse_number(pipe_den_match.group(1))
         pipe_density_unit = pipe_den_match.group(2).lower()
-        pipe_density_kg_cucm = (
-            pipe_density_value * LBCUIN_TO_KGCUCM
-            if "lb./cu.in." in pipe_density_unit
-            else pipe_density_value * KGCUM_TO_KGCUCM
-        )
+        if "lb./cu.in." in pipe_density_unit:
+            pipe_density_kg_cucm = pipe_density_value * LBCUIN_TO_KGCUCM
+        elif "kg./cu.cm." in pipe_density_unit:
+            pipe_density_kg_cucm = pipe_density_value
+        else:
+            pipe_density_kg_cucm = pipe_density_value * KGCUM_TO_KGCUCM
 
     fluid_den_match = re.search(
-        rf"Fluid\s+Den=\s*{NUMBER_PATTERN}\s*(lb\./cu\.in\.|kg/cu\.m\.)",
+        rf"Fluid\s+Den=\s*{NUMBER_PATTERN}\s*(lb\./cu\.in\.|kg/cu\.m\.|kg\./cu\.cm\.)",
         content,
         flags=re.IGNORECASE,
     )
     if fluid_den_match is not None:
         fluid_density_value = _parse_number(fluid_den_match.group(1))
         fluid_density_unit = fluid_den_match.group(2).lower()
-        fluid_density_kg_cucm = (
-            fluid_density_value * LBCUIN_TO_KGCUCM
-            if "lb./cu.in." in fluid_density_unit
-            else fluid_density_value * KGCUM_TO_KGCUCM
-        )
+        if "lb./cu.in." in fluid_density_unit:
+            fluid_density_kg_cucm = fluid_density_value * LBCUIN_TO_KGCUCM
+        elif "kg./cu.cm." in fluid_density_unit:
+            fluid_density_kg_cucm = fluid_density_value
+        else:
+            fluid_density_kg_cucm = fluid_density_value * KGCUM_TO_KGCUCM
 
     insul_den_match = re.search(
-        rf"Insul\s+Den=\s*{NUMBER_PATTERN}\s*(lb\./cu\.in\.|kg/cu\.m\.)",
+        rf"Insul\s+Den=\s*{NUMBER_PATTERN}\s*(lb\./cu\.in\.|kg/cu\.m\.|kg\./cu\.cm\.)",
         content,
         flags=re.IGNORECASE,
     )
     if insul_den_match is not None:
         insul_density_value = _parse_number(insul_den_match.group(1))
         insul_density_unit = insul_den_match.group(2).lower()
-        insul_density_kg_cucm = (
-            insul_density_value * LBCUIN_TO_KGCUCM
-            if "lb./cu.in." in insul_density_unit
-            else insul_density_value * KGCUM_TO_KGCUCM
-        )
+        if "lb./cu.in." in insul_density_unit:
+            insul_density_kg_cucm = insul_density_value * LBCUIN_TO_KGCUCM
+        elif "kg./cu.cm." in insul_density_unit:
+            insul_density_kg_cucm = insul_density_value
+        else:
+            insul_density_kg_cucm = insul_density_value * KGCUM_TO_KGCUCM
 
     material_match = re.search(r"Mat=\s*\((\d+)\)(.*?)(?:\s+E=|\n|$)", content)
     if material_match is not None:
@@ -499,9 +544,18 @@ def _parse_block_sifs(content_lines: list[str]) -> list[ParsedSif]:
             continue
         node = float(node_match.group(1))
         label = _safe_text(node_match.group(2))
-        code = SIF_LABEL_TO_CODE.get(label.upper(), 0.0)
+        code = _sif_type_code_from_label(label)
         sifs.append(ParsedSif(node=node, label=label, type_code=code))
     return sifs
+
+
+def _sif_type_code_from_label(label: str) -> float:
+    """Map CAESAR SIF label text to InputXML code, allowing suffix annotations."""
+    upper_label = label.upper()
+    for known_label, code in SIF_LABEL_TO_CODE.items():
+        if known_label in upper_label:
+            return code
+    return 0.0
 
 
 def _parse_bend(content: str) -> ParsedBend | None:
@@ -772,6 +826,122 @@ def _resolve_profile_template(script_dir: Path, profile: InternalProfile) -> Pat
     return template_path
 
 
+def _delta_or_zero(value: float) -> float:
+    if abs(value - SENTINEL_MISSING) < 0.001:
+        return 0.0
+    return value
+
+
+def _reconstruct_node_coordinates(elements: list[ParsedElement]) -> dict[str, ReconstructedPoint]:
+    """Reconstruct CAESAR node coordinates from From/To delta chains for UXML preview."""
+    points: dict[str, ReconstructedPoint] = {}
+
+    def key(node: float) -> str:
+        return str(int(round(node)))
+
+    def assign(node: float, point: ReconstructedPoint) -> bool:
+        node_key = key(node)
+        if not node_key or node_key in points:
+            return False
+        points[node_key] = point
+        return True
+
+    def solve_pass() -> bool:
+        changed = False
+        for element in elements:
+            from_key = key(element.from_node)
+            to_key = key(element.to_node)
+            from_point = points.get(from_key)
+            to_point = points.get(to_key)
+            dx = _delta_or_zero(element.delta_x_mm)
+            dy = _delta_or_zero(element.delta_y_mm)
+            dz = _delta_or_zero(element.delta_z_mm)
+            if from_point is not None and to_point is None:
+                changed = assign(
+                    element.to_node,
+                    ReconstructedPoint(
+                        x=from_point.x + dx,
+                        y=from_point.y + dy,
+                        z=from_point.z + dz,
+                    ),
+                ) or changed
+            elif from_point is None and to_point is not None:
+                changed = assign(
+                    element.from_node,
+                    ReconstructedPoint(
+                        x=to_point.x - dx,
+                        y=to_point.y - dy,
+                        z=to_point.z - dz,
+                    ),
+                ) or changed
+        return changed
+
+    if elements:
+        assign(elements[0].from_node, ReconstructedPoint(0.0, 0.0, 0.0))
+
+    while solve_pass():
+        pass
+
+    while any(key(element.from_node) not in points or key(element.to_node) not in points for element in elements):
+        seed = next(
+            element
+            for element in elements
+            if key(element.from_node) not in points or key(element.to_node) not in points
+        )
+        assign(seed.from_node, ReconstructedPoint(0.0, 0.0, 0.0))
+        while solve_pass():
+            pass
+
+    return points
+
+
+def _generated_source_type(element: ParsedElement) -> str:
+    """Classify generated rows for UXML; CII engineering values remain unchanged."""
+    if element.bend is not None:
+        return "BEND"
+    for sif in element.sifs:
+        if abs(sif.type_code - 3.0) < 0.001:
+            return "TEE"
+        if abs(sif.type_code - 5.0) < 0.001:
+            return "OLET"
+    if element.rigid_weight_kg is not None:
+        rigid_type = element.rigid_type.upper()
+        if "VALVE" in rigid_type:
+            return "VALVE"
+        if "FLANGE" in rigid_type or "FLAN" in rigid_type:
+            return "FLANGE"
+        if "GASK" in rigid_type:
+            return "GASKET"
+        if "BLIND" in rigid_type:
+            return "BLIND_FLANGE"
+    return "PIPE"
+
+
+def _append_uxml_geom_comment(
+    xml_element: ET.Element,
+    element: ParsedElement,
+    coordinates: dict[str, ReconstructedPoint],
+) -> None:
+    """Attach non-semantic geometry metadata consumed by the UXML workbench."""
+    from_point = coordinates.get(str(int(round(element.from_node))))
+    to_point = coordinates.get(str(int(round(element.to_node))))
+    if from_point is None or to_point is None:
+        return
+    xml_element.append(
+        ET.Comment(
+            " UXML_GEOM "
+            f'TYPE="{_generated_source_type(element)}" '
+            'SOURCE="PDF_DELTA_RECONSTRUCTED" '
+            f'FROM_X="{_format_float(from_point.x)}" '
+            f'FROM_Y="{_format_float(from_point.y)}" '
+            f'FROM_Z="{_format_float(from_point.z)}" '
+            f'TO_X="{_format_float(to_point.x)}" '
+            f'TO_Y="{_format_float(to_point.y)}" '
+            f'TO_Z="{_format_float(to_point.z)}" '
+        )
+    )
+
+
 def _build_generated_xml(parsed: ParsedPdfModel) -> str:
     root = ET.Element(
         "CAESARII",
@@ -807,6 +977,8 @@ def _build_generated_xml(parsed: ParsedPdfModel) -> str:
             "NORTH_X": "0",
         },
     )
+
+    reconstructed_coordinates = _reconstruct_node_coordinates(parsed.elements)
 
     for element in parsed.elements:
         state = element.state
@@ -866,6 +1038,7 @@ def _build_generated_xml(parsed: ParsedPdfModel) -> str:
             "NAME": element.name,
         }
         xml_element = ET.SubElement(piping_model, "PIPINGELEMENT", attribs)
+        _append_uxml_geom_comment(xml_element, element, reconstructed_coordinates)
 
         if element.rigid_weight_kg is not None:
             ET.SubElement(

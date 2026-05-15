@@ -27,6 +27,7 @@ function looksLikeInputXml(text, options = {}) {
   if (fileName.includes('input') && fileName.endsWith('.xml')) return true;
 
   if (low.includes('<inputxml')) return true;
+  if (low.includes('<caesarii') && low.includes('<pipingelement')) return true;
 
   const root = lower(extractRootName(t));
 

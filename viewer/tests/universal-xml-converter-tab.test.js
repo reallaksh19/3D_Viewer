@@ -102,6 +102,16 @@ describe('Universal XML Converter Tab Agent 09', () => {
     expect(detectSourceType('1001-P - COPY_INPUT.XML', xml)).toBe('INPUT_XML');
   });
 
+  it('detects CAESARII PIPINGELEMENT XML as InputXML without filename hint', () => {
+    expect(detectSourceType('caesar.xml', `
+      <CAESARII VERSION="14.00" XML_TYPE="Input">
+        <PIPINGMODEL JOBNAME="RMSS">
+          <PIPINGELEMENT FROM_NODE="10" TO_NODE="20" DELTA_X="100" DELTA_Y="-1.0101" DELTA_Z="-1.0101"/>
+        </PIPINGMODEL>
+      </CAESARII>
+    `)).toBe('INPUT_XML');
+  });
+
   it('uses extension fallback for non-XML converter sources', () => {
     expect(detectSourceType('model.pcf', 'PIPELINE-REFERENCE X')).toBe('PCF');
     expect(detectSourceType('drawing.pdf', '%PDF')).toBe('PDF_TO_INPUTXML');
