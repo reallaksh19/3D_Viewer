@@ -909,6 +909,48 @@ function parseRmssAttributes(content, rawRouteOptions) {
 
 export { parseRmssAttributes };
 
+// Structural element type codes in AVEVA PDMS/E3D (equipment/structure hierarchy).
+const STRUCT_TYPE_RE = /^(STRUCTURE|FRMWORK|FRAMEWORK|STRU|FRMW|SCTN|GENSEC|PANEL|PANE|SUBE)$/i;
+// Structural path tokens found in OWNER or block ID strings.
+const STRUCT_PATH_RE = /\b(STRUCTURE|FRMWORK|FRAMEWORK|FRMW|STRU|PIPESUPP)\b/i;
+
+/**
+ * Extract structural steel member positions from a raw RMSS ATTRIBUTE text.
+ * Looks for STRUCTURE / FRMWORK / SUBE blocks (and anything with a PS-... ref)
+ * that carry APOS and LPOS coordinates.
+ * Returns [{label, start:{x,y,z}, end:{x,y,z}}].
+ */
+export function parseRmssStructuralMembers(content) {
+  const blocks = parseTextBlocks(content);
+  const members = [];
+  for (const block of blocks) {
+    const rawType = normalizeToken(block?.attributes?.TYPE || '');
+    const name  = String(block?.attributes?.NAME  || '').trim();
+    const owner = String(block?.attributes?.OWNER || '').trim();
+    const blockId = String(block?.id || '').trim();
+    const dtxr = String(block?.attributes?.DTXR   || '').trim();
+    const ref  = String(block?.attributes?.REF    || block?.attributes?.DBREF || block?.attributes?.REFNO || '').trim();
+
+    const isStructType  = STRUCT_TYPE_RE.test(rawType);
+    const hasStructPath = STRUCT_PATH_RE.test(owner) || STRUCT_PATH_RE.test(blockId);
+    const hasPsRef      = [name, blockId, dtxr, ref].some((s) => SUPPORT_TAG_RE.test(s));
+
+    if (!isStructType && !hasStructPath && !hasPsRef) continue;
+
+    const start = parseCoord(block?.attributes?.APOS);
+    const end   = parseCoord(block?.attributes?.LPOS);
+    if (!start || !end) continue;
+
+    // Hierarchy-aware label: "<owner tail>/<member name>" mirrors rev_to_stp labelling.
+    const ownerTail  = owner.split(/[/\\>]/).filter(Boolean).slice(-1)[0] || '';
+    const memberName = name || SUPPORT_TAG_RE.exec(blockId)?.[0] || blockId;
+    const label = ownerTail ? `${ownerTail}/${memberName}` : memberName;
+
+    members.push({ label, start, end });
+  }
+  return members;
+}
+
 if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {
   const fs = require('fs');
   const args = process.argv.slice(2);

@@ -8,7 +8,7 @@ import {
   buildConverterWorkerRequest,
   validateConverterWorkerResponse,
 } from '../converters/worker-contract.js';
-import { parseRmssAttributes } from '../converters/rmss-attribute-parser.js';
+import { parseRmssAttributes, parseRmssStructuralMembers } from '../converters/rmss-attribute-parser.js';
 import { parseStpSupportMembers } from '../parser/stp-support-parser.js';
 
 const STORAGE_KEY = 'model-converters.defaults.v1';
@@ -1599,8 +1599,28 @@ function _collectBboxLeafCount(payload) {
   return count;
 }
 
-function _buildStpTextFromRmssHierarchy(hierarchy, outputName) {
-  const normalized = Array.isArray(hierarchy) ? hierarchy : [];
+// ── STP text builder ─────────────────────────────────────────────────────────
+
+const _STP_STUB_HALF_MM = 75; // vertical stub half-length for single-point members
+
+function _stpFmtCoord(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '0';
+  return n.toFixed(6).replace(/\.?0+$/, '') || '0';
+}
+
+function _stpPointDist(a, b) {
+  const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+/**
+ * Low-level: generate ISO-10303-21 STEP text from an array of
+ * {label, start:{x,y,z}, end:{x,y,z}} members.
+ * Zero-length members get a ±75 mm vertical stub so they are visible.
+ */
+function _buildStpTextFromMembers(rawMembers, outputName) {
+  if (!Array.isArray(rawMembers) || !rawMembers.length) return null;
   const timestamp = new Date().toISOString().slice(0, 19) + 'Z';
   const escapedName = _toText(outputName).replace(/'/g, "''");
   const header = [
@@ -1616,25 +1636,41 @@ function _buildStpTextFromRmssHierarchy(hierarchy, outputName) {
   let entityId = 1;
   const polylineIds = [];
 
-  const fmtCoord = (v) => {
-    const n = Number(v);
-    if (!Number.isFinite(n)) return '0';
-    return n.toFixed(6).replace(/\.?0+$/, '') || '0';
-  };
+  for (const member of rawMembers) {
+    let { start, end } = member;
+    if (!start || !end) continue;
+    if (_stpPointDist(start, end) < 1) {
+      // Zero/near-zero: make a vertical stub centred at start.
+      start = { x: start.x, y: start.y, z: start.z - _STP_STUB_HALF_MM };
+      end   = { x: end.x,   y: end.y,   z: end.z   + _STP_STUB_HALF_MM };
+    }
+    const label = _toText(member.label || '').replace(/'/g, "''");
+    const s = entityId++;
+    dataLines.push(`#${s}=CARTESIAN_POINT('',(${_stpFmtCoord(start.x)},${_stpFmtCoord(start.y)},${_stpFmtCoord(start.z)}));`);
+    const e = entityId++;
+    dataLines.push(`#${e}=CARTESIAN_POINT('',(${_stpFmtCoord(end.x)},${_stpFmtCoord(end.y)},${_stpFmtCoord(end.z)}));`);
+    const p = entityId++;
+    dataLines.push(`#${p}=POLYLINE('${label}',(#${s},#${e}));`);
+    polylineIds.push(p);
+  }
 
-  const pointDist = (a, b) => {
-    const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
-    return Math.sqrt(dx * dx + dy * dy + dz * dz);
-  };
+  if (!polylineIds.length) return null;
+  const refs = polylineIds.map((id) => `#${id}`).join(',');
+  dataLines.push(`#${entityId}=PRESENTATION_LAYER_ASSIGNMENT('SUPPORT_MEMBERS','',(${refs}));`);
+  return [...header, ...dataLines, 'ENDSEC;', 'END-ISO-10303-21;'].join('\n') + '\n';
+}
 
-  // Stub half-length (mm) used when support position is a single point.
-  const STUB_HALF_MM = 75;
-
-  let memberIndex = 0;
+/**
+ * Fallback: extract stub members from a staged hierarchy's SUPPORT nodes.
+ * Used when no raw ATT text is available (JSON-only path).
+ */
+function _buildStpTextFromRmssHierarchy(hierarchy, outputName) {
+  const normalized = Array.isArray(hierarchy) ? hierarchy : [];
+  const rawMembers = [];
+  let idx = 0;
   for (const branch of normalized) {
     if (!_looksLikeBranchNode(branch)) continue;
-    const children = Array.isArray(branch.children) ? branch.children : [];
-    for (const child of children) {
+    for (const child of Array.isArray(branch.children) ? branch.children : []) {
       const type = _toText(child?.type || child?.attributes?.TYPE || '').toUpperCase();
       if (type !== 'SUPPORT') continue;
       const attrs = child?.attributes || {};
@@ -1644,39 +1680,26 @@ function _buildStpTextFromRmssHierarchy(hierarchy, outputName) {
       const hpos = _normalizePoint(attrs.HPOS);
       const tpos = _normalizePoint(attrs.TPOS);
       const pos  = _normalizePoint(attrs.POS);
-
-      let start = null;
-      let end   = null;
-
-      // Prefer any pair of positions that are meaningfully apart (> 1 mm).
-      if (apos && lpos && pointDist(apos, lpos) > 1) { start = apos; end = lpos; }
-      else if (hpos && bpos && pointDist(hpos, bpos) > 1) { start = hpos; end = bpos; }
-      else if (apos && hpos && pointDist(apos, hpos) > 1) { start = apos; end = hpos; }
-      else if (apos && tpos && pointDist(apos, tpos) > 1) { start = apos; end = tpos; }
-      else {
-        // Single-point support: create a vertical stub so it is visible in 3D.
+      // Pick the best non-zero pair, or fall back to a single anchor.
+      const pairs = [[apos, lpos], [hpos, bpos], [apos, hpos], [apos, tpos]];
+      let start = null, end = null;
+      for (const [a, b] of pairs) {
+        if (a && b && _stpPointDist(a, b) > 1) { start = a; end = b; break; }
+      }
+      if (!start) {
         const anchor = pos || apos || lpos || hpos || bpos || tpos;
         if (!anchor) continue;
-        start = { x: anchor.x, y: anchor.y, z: anchor.z - STUB_HALF_MM };
-        end   = { x: anchor.x, y: anchor.y, z: anchor.z + STUB_HALF_MM };
+        start = { x: anchor.x, y: anchor.y, z: anchor.z };
+        end   = { x: anchor.x, y: anchor.y, z: anchor.z }; // stub applied in _buildStpTextFromMembers
       }
-
-      const label = _toText(attrs.NAME || child?.name || `SUPPORT:${memberIndex + 1}`).replace(/'/g, "''");
-      const startId = entityId++;
-      dataLines.push(`#${startId}=CARTESIAN_POINT('',(${fmtCoord(start.x)},${fmtCoord(start.y)},${fmtCoord(start.z)}));`);
-      const endId = entityId++;
-      dataLines.push(`#${endId}=CARTESIAN_POINT('',(${fmtCoord(end.x)},${fmtCoord(end.y)},${fmtCoord(end.z)}));`);
-      const polyId = entityId++;
-      dataLines.push(`#${polyId}=POLYLINE('${label}',(#${startId},#${endId}));`);
-      polylineIds.push(polyId);
-      memberIndex++;
+      rawMembers.push({
+        label: _toText(attrs.NAME || child?.name || `SUPPORT:${++idx}`),
+        start,
+        end,
+      });
     }
   }
-
-  if (!polylineIds.length) return null;
-  const refs = polylineIds.map((id) => `#${id}`).join(',');
-  dataLines.push(`#${entityId}=PRESENTATION_LAYER_ASSIGNMENT('SUPPORT_MEMBERS','',(${refs}));`);
-  return [...header, ...dataLines, 'ENDSEC;', 'END-ISO-10303-21;'].join('\n') + '\n';
+  return _buildStpTextFromMembers(rawMembers, outputName);
 }
 
 function _buildXmlFromStagedJsonText(stagedJsonText, inputName, options) {
@@ -2121,8 +2144,18 @@ async function _runManagedRvmAttributeToXml(
               },
             ];
             try {
-              const hier = JSON.parse(stagedResult.stageJsonText);
-              const stpText = _buildStpTextFromRmssHierarchy(hier, `${stem}_supports.stp`);
+              let stpText = null;
+              if (secondaryFile && secondaryBytes) {
+                const attText = _decodeTextUtf8(secondaryBytes);
+                const structMembers = parseRmssStructuralMembers(attText);
+                if (structMembers.length > 0) {
+                  stpText = _buildStpTextFromMembers(structMembers, `${stem}_supports.stp`);
+                }
+              }
+              if (!stpText) {
+                const hier = JSON.parse(stagedResult.stageJsonText);
+                stpText = _buildStpTextFromRmssHierarchy(hier, `${stem}_supports.stp`);
+              }
               if (stpText) pathAOutputs.push({ name: `${stem}_supports.stp`, text: stpText, mime: 'text/plain;charset=utf-8' });
             } catch {}
             return {
@@ -2700,7 +2733,13 @@ export function renderModelConvertersTab(container) {
           const hierarchy = parseRmssAttributes(attText, state.rvm?.routing);
           const xmlFromAtt = _buildPsiXmlFromRmssHierarchy(hierarchy, secondaryFile.name, runValues);
           const attStem = _baseNameWithoutExtension(secondaryFile.name);
-          const attStpText = _buildStpTextFromRmssHierarchy(hierarchy, `${attStem}_supports.stp`);
+          let attStpText = null;
+          const structMembers = parseRmssStructuralMembers(attText);
+          if (structMembers.length > 0) {
+            attStpText = _buildStpTextFromMembers(structMembers, `${attStem}_supports.stp`);
+          } else {
+            attStpText = _buildStpTextFromRmssHierarchy(hierarchy, `${attStem}_supports.stp`);
+          }
           const attOutputs = [
             {
               name: `${attStem}_rvmattr_to_xml.xml`,
@@ -2720,7 +2759,7 @@ export function renderModelConvertersTab(container) {
               stdout: [
                 `ATT/TXT parsed into ${xmlFromAtt.branchCount} branch(es).`,
                 `Generated ${xmlFromAtt.nodeCount} node(s) into PSI-style XML.`,
-                ...(attStpText ? [`Generated STP for ATT support members.`] : []),
+                ...(attStpText ? [`Generated STP for ${structMembers.length > 0 ? 'structural' : 'pipeline support'} members.`] : []),
               ],
               stderr: xmlFromAtt.skippedComponents > 0
                 ? [`Skipped ${xmlFromAtt.skippedComponents} component(s) with incomplete coordinates.`]
