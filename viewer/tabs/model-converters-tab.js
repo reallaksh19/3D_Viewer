@@ -1604,7 +1604,6 @@ function _buildStpFromHierarchy(hierarchy) {
     'END-ISO-10303-21;',
   ].join('\n') + '\n';
 }
-}
 
 function _looksLikeBranchNode(entry) {
   if (!_isObjectRecord(entry)) return false;
