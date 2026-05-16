@@ -1570,13 +1570,20 @@ function _buildStpFromHierarchy(hierarchy) {
   let entityId = 1;
   let memberCount = 0;
 
+  const _ptKey = (p) => `${p.x.toFixed(3)},${p.y.toFixed(3)},${p.z.toFixed(3)}`;
+
   for (const branch of branches) {
     const children = Array.isArray(branch.children) ? branch.children : [];
+    const branchLabel = _toText(branch.name || '').replace(/'/g, '');
+
+    // Pass 1: emit a segment for every child that has both APOS and LPOS.
+    let pass1Count = 0;
     for (const child of children) {
       const attrs = child?.attributes || {};
       const apos = _normalizePreviewPoint(attrs.APOS);
       const lpos = _normalizePreviewPoint(attrs.LPOS);
       if (!apos || !lpos) continue;
+      if (_ptKey(apos) === _ptKey(lpos)) continue;
       const label = _toText(child?.name || attrs.NAME || '').replace(/'/g, '');
       const pt1Id = entityId++;
       const pt2Id = entityId++;
@@ -1585,6 +1592,41 @@ function _buildStpFromHierarchy(hierarchy) {
       pointLines.push(`#${pt2Id}=CARTESIAN_POINT('',(${lpos.x},${lpos.y},${lpos.z}));`);
       polylineLines.push(`#${polyId}=POLYLINE('${label}',(#${pt1Id},#${pt2Id}));`);
       memberCount++;
+      pass1Count++;
+    }
+
+    // Pass 2 (fallback): if no two-port segments were found for this branch,
+    // collect all available positions in sequence and build a branch polyline.
+    if (pass1Count === 0) {
+      const waypoints = [];
+      for (const child of children) {
+        const attrs = child?.attributes || {};
+        const candidates = [
+          _normalizePreviewPoint(attrs.APOS),
+          _normalizePreviewPoint(attrs.LPOS),
+          _normalizePreviewPoint(attrs.POS),
+          _normalizePreviewPoint(attrs.HPOS),
+          _normalizePreviewPoint(attrs.TPOS),
+        ];
+        for (const pt of candidates) {
+          if (!pt) continue;
+          const k = _ptKey(pt);
+          if (waypoints.length === 0 || waypoints[waypoints.length - 1].k !== k) {
+            waypoints.push({ pt, k });
+          }
+        }
+      }
+      for (let i = 0; i + 1 < waypoints.length; i++) {
+        const { pt: p1 } = waypoints[i];
+        const { pt: p2 } = waypoints[i + 1];
+        const pt1Id = entityId++;
+        const pt2Id = entityId++;
+        const polyId = entityId++;
+        pointLines.push(`#${pt1Id}=CARTESIAN_POINT('',(${p1.x},${p1.y},${p1.z}));`);
+        pointLines.push(`#${pt2Id}=CARTESIAN_POINT('',(${p2.x},${p2.y},${p2.z}));`);
+        polylineLines.push(`#${polyId}=POLYLINE('${branchLabel}',(#${pt1Id},#${pt2Id}));`);
+        memberCount++;
+      }
     }
   }
 
