@@ -201,6 +201,23 @@ export class ModelConverters_3DModelConv_PreviewRenderer {
     this.controls.update();
   }
 
+  _3DModelConv_renderStpMembers(members) {
+    this._3DModelConv_clear();
+    if (!members || !members.length) return;
+    const positions = [];
+    for (const member of members) {
+      positions.push(
+        _3DModelConv_toNumber(member.start?.x), _3DModelConv_toNumber(member.start?.y), _3DModelConv_toNumber(member.start?.z),
+        _3DModelConv_toNumber(member.end?.x), _3DModelConv_toNumber(member.end?.y), _3DModelConv_toNumber(member.end?.z),
+      );
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    const material = new THREE.LineBasicMaterial({ color: 0xff8c00 });
+    this._3DModelConv_group.add(new THREE.LineSegments(geometry, material));
+    this._3DModelConv_fit();
+  }
+
   _3DModelConv_animate() {
     this._3DModelConv_raf = requestAnimationFrame(this._3DModelConv_animate);
     this.controls.update();

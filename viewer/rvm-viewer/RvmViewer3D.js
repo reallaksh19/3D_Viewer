@@ -882,4 +882,34 @@ export class RvmViewer3D {
         this.workerBridges = null;
         this.pendingLoadTasks = null;
     }
+
+    // ── STP Support Member Overlay ─────────────────────────────────────
+
+    appendStpMembers(members) {
+        if (!this.scene) return;
+        if (!this._stpGroup) {
+            this._stpGroup = new THREE.Group();
+            this._stpGroup.name = 'stpOverlay';
+            this.scene.add(this._stpGroup);
+        }
+        const positions = [];
+        for (const member of members) {
+            positions.push(member.start.x, member.start.y, member.start.z);
+            positions.push(member.end.x, member.end.y, member.end.z);
+        }
+        if (!positions.length) return;
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        const material = new THREE.LineBasicMaterial({ color: 0xff8c00 });
+        this._stpGroup.add(new THREE.LineSegments(geometry, material));
+    }
+
+    clearStpMembers() {
+        if (!this._stpGroup) return;
+        for (const child of [...this._stpGroup.children]) {
+            this._stpGroup.remove(child);
+            try { child.geometry?.dispose(); } catch {}
+            try { child.material?.dispose(); } catch {}
+        }
+    }
 }
