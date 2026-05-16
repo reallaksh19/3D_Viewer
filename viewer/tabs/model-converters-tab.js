@@ -1561,6 +1561,51 @@ function _isObjectRecord(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+function _buildStpFromHierarchy(hierarchy) {
+  const branches = Array.isArray(hierarchy) ? hierarchy.filter(_looksLikeBranchNode) : [];
+  if (!branches.length) return null;
+
+  const pointLines = [];
+  const polylineLines = [];
+  let entityId = 1;
+  let memberCount = 0;
+
+  for (const branch of branches) {
+    const children = Array.isArray(branch.children) ? branch.children : [];
+    for (const child of children) {
+      const attrs = child?.attributes || {};
+      const apos = _normalizePreviewPoint(attrs.APOS);
+      const lpos = _normalizePreviewPoint(attrs.LPOS);
+      if (!apos || !lpos) continue;
+      const label = _toText(child?.name || attrs.NAME || '').replace(/'/g, '');
+      const pt1Id = entityId++;
+      const pt2Id = entityId++;
+      const polyId = entityId++;
+      pointLines.push(`#${pt1Id}=CARTESIAN_POINT('',(${apos.x},${apos.y},${apos.z}));`);
+      pointLines.push(`#${pt2Id}=CARTESIAN_POINT('',(${lpos.x},${lpos.y},${lpos.z}));`);
+      polylineLines.push(`#${polyId}=POLYLINE('${label}',(#${pt1Id},#${pt2Id}));`);
+      memberCount++;
+    }
+  }
+
+  if (!memberCount) return null;
+
+  return [
+    'ISO-10303-21;',
+    'HEADER;',
+    "FILE_DESCRIPTION(('RMSS Attribute STP export'),'2;1');",
+    "FILE_NAME('','',(''),(''),'','','');",
+    "FILE_SCHEMA(('CIS2'));",
+    'ENDSEC;',
+    'DATA;',
+    ...pointLines,
+    ...polylineLines,
+    'ENDSEC;',
+    'END-ISO-10303-21;',
+  ].join('\n') + '\n';
+}
+}
+
 function _looksLikeBranchNode(entry) {
   if (!_isObjectRecord(entry)) return false;
   const typeToken = _toText(entry?.type || entry?.attributes?.TYPE || '').toUpperCase();
@@ -2028,6 +2073,13 @@ async function _runManagedRvmAttributeToXml(
                   : [],
               },
             });
+            const _stpPathA = (() => {
+              try {
+                const _h = JSON.parse(stagedResult.stageJsonText);
+                const _t = _buildStpFromHierarchy(_h);
+                return _t ? [{ name: `${stem}_supports.stp`, text: _t, mime: 'text/plain;charset=utf-8' }] : [];
+              } catch { return []; }
+            })();
             return {
               outputs: [
                 {
@@ -2040,6 +2092,7 @@ async function _runManagedRvmAttributeToXml(
                   text: stagedResult.stageJsonText,
                   mime: 'application/json;charset=utf-8',
                 },
+                ..._stpPathA,
               ],
               logs: _mergeStageLogs(stages),
               endpoint: nativeJson.endpoint,
@@ -2602,23 +2655,30 @@ export function renderModelConvertersTab(container) {
           const attText = _decodeTextUtf8(secondaryBytes);
           const hierarchy = parseRmssAttributes(attText, state.rvm?.routing);
           const xmlFromAtt = _buildPsiXmlFromRmssHierarchy(hierarchy, secondaryFile.name, runValues);
+          const attStem = _baseNameWithoutExtension(secondaryFile.name);
+          const attStpText = _buildStpFromHierarchy(hierarchy);
+          const attStpOutputs = attStpText
+            ? [{ name: `${attStem}_supports.stp`, text: attStpText, mime: 'text/plain;charset=utf-8' }]
+            : [];
           response = {
             outputs: [
               {
-                name: `${_baseNameWithoutExtension(secondaryFile.name)}_rvmattr_to_xml.xml`,
+                name: `${attStem}_rvmattr_to_xml.xml`,
                 text: xmlFromAtt.xmlText,
                 mime: 'text/xml;charset=utf-8',
               },
               {
-                name: `${_baseNameWithoutExtension(secondaryFile.name)}_managed_stage.json`,
+                name: `${attStem}_managed_stage.json`,
                 text: JSON.stringify(hierarchy, null, 2),
                 mime: 'application/json;charset=utf-8',
               },
+              ...attStpOutputs,
             ],
             logs: {
               stdout: [
                 `ATT/TXT parsed into ${xmlFromAtt.branchCount} branch(es).`,
                 `Generated ${xmlFromAtt.nodeCount} node(s) into PSI-style XML.`,
+                ...(attStpText ? [`STP: ${attStpOutputs[0]?.name} generated from hierarchy positions.`] : []),
               ],
               stderr: xmlFromAtt.skippedComponents > 0
                 ? [`Skipped ${xmlFromAtt.skippedComponents} component(s) with incomplete coordinates.`]
