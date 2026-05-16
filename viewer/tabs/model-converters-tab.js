@@ -9,6 +9,7 @@ import {
   validateConverterWorkerResponse,
 } from '../converters/worker-contract.js';
 import { parseRmssAttributes } from '../converters/rmss-attribute-parser.js';
+import { parseStpSupportMembers } from '../parser/stp-support-parser.js';
 
 const STORAGE_KEY = 'model-converters.defaults.v1';
 const INPUTXML_HEADER_DEFAULTS = Object.freeze({
@@ -129,7 +130,7 @@ const CONVERTER_DEFS = Object.freeze({
   },
   rvmattr_to_xml: {
     id: 'rvmattr_to_xml',
-    label: 'RVM+ATTRIBUTE -> XML',
+    label: 'RVM+ATTRIBUTE -> XML+STP',
     primaryAccept: '.rvm,.RVM',
     primaryLabel: 'RVM Input',
     secondaryLabel: 'ATT/TXT Attribute File (optional)',
@@ -1735,7 +1736,24 @@ async function _3DModelConv_tryBuildProjectFromOutput(output) {
     return { ok: false, reason: 'Output has no text payload for preview.' };
   }
 
-  if (name.toLowerCase().endsWith('.json')) {
+  const lowerName = name.toLowerCase();
+  if (lowerName.endsWith('.stp') || lowerName.endsWith('.step')) {
+    try {
+      const { members } = parseStpSupportMembers(text);
+      if (members.length > 0) {
+        return {
+          ok: true,
+          stpMembers: members,
+          adapterName: 'StpSupportParser',
+          outputName: name,
+        };
+      }
+    } catch (error) {
+      return { ok: false, reason: _toText(error?.message || error) };
+    }
+  }
+
+  if (lowerName.endsWith('.json')) {
     try {
       const parsed = JSON.parse(text);
       const stagedProject = _buildPreviewProjectFromStagedHierarchy(parsed);
@@ -1793,8 +1811,9 @@ async function _3DModelConv_buildPreviewFromOutputs(outputs) {
       if (name.endsWith('.json') && name.includes('managed_stage')) return 0;
       if (name.endsWith('.json')) return 1;
       if (name.endsWith('.rev')) return 2;
-      if (name.endsWith('.xml')) return 3;
-      return 4;
+      if (name.endsWith('.stp') || name.endsWith('.step')) return 3;
+      if (name.endsWith('.xml')) return 4;
+      return 5;
     };
     return score(nameA) - score(nameB);
   });
@@ -2115,19 +2134,46 @@ async function _runManagedRvmAttributeToXml(
   }
   stages.push({ title: `Native REV bridge ${nativeRev.endpoint || ''}`.trim(), logs: nativeRev.logs });
   stages.push({ title: 'REV -> XML', logs: revToXmlResponse.logs });
-  return {
-    outputs: [
-      {
-        name: `${stem}_rvmattr_to_xml.xml`,
-        text: xmlOutput.text,
-        mime: 'text/xml;charset=utf-8',
+
+  const finalOutputs = [
+    {
+      name: `${stem}_rvmattr_to_xml.xml`,
+      text: xmlOutput.text,
+      mime: 'text/xml;charset=utf-8',
+    },
+    {
+      name: `${stem}_managed_stage.rev`,
+      text: revOutput.text,
+      mime: 'text/plain;charset=utf-8',
+    },
+  ];
+
+  try {
+    const revToStpResponse = await runtime.runJob({
+      converterId: 'rev_to_stp',
+      inputFiles: [{ role: 'primary', name: revOutput.name, bytes: _encodeTextUtf8(revOutput.text) }],
+      options: {
+        coordFactor: _toFiniteNumber(options?.coordFactor, 1000),
+        supportPathContains: _toText(options?.supportPathContains) || 'RRIMS-PIPESUPP',
+        includeGenericSupportGroups: !!options?.includeGenericSupportGroups,
+        schemaName: _toText(options?.schemaName) || 'CIS2',
       },
-      {
-        name: `${stem}_managed_stage.rev`,
-        text: revOutput.text,
+    });
+    const stpOutput = revToStpResponse.outputs?.[0];
+    if (stpOutput && typeof stpOutput.text === 'string' && stpOutput.text.trim()) {
+      finalOutputs.push({
+        name: `${stem}_supports.stp`,
+        text: stpOutput.text,
         mime: 'text/plain;charset=utf-8',
-      },
-    ],
+      });
+      stages.push({ title: 'REV -> STP', logs: revToStpResponse.logs });
+    }
+  } catch {
+    // STP generation is best-effort; main outputs still delivered.
+  }
+
+  return {
+    outputs: finalOutputs,
     logs: _mergeStageLogs(stages),
     endpoint: nativeRev.endpoint,
   };
@@ -2274,6 +2320,13 @@ export function renderModelConvertersTab(container) {
     if (!previewResult.ok) {
       previewRenderer._3DModelConv_renderProject(null);
       _3DModelConv_setPreviewMeta(`Preview unavailable: ${previewResult.reason}`);
+      return;
+    }
+    if (previewResult.stpMembers) {
+      previewRenderer._3DModelConv_renderStpMembers(previewResult.stpMembers);
+      _3DModelConv_setPreviewMeta(
+        `Preview source: ${previewResult.outputName} | adapter: ${previewResult.adapterName} | members: ${previewResult.stpMembers.length}`,
+      );
       return;
     }
     previewRenderer._3DModelConv_renderProject(previewResult.project);

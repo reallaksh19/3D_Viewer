@@ -5,6 +5,7 @@ import { detectRvmCapabilities } from '../rvm/RvmCapabilities.js';
 import { notify } from '../diagnostics/notification-center.js';
 import { RvmViewer3D } from '../rvm-viewer/RvmViewer3D.js';
 import { parseRmssAttributes } from '../converters/rmss-attribute-parser.js';
+import { parseStpSupportMembers } from '../parser/stp-support-parser.js';
 import { RvmSearchIndex } from '../rvm/RvmSearchIndex.js';
 import { RvmTagXmlStore } from '../rvm/RvmTagXmlStore.js';
 import {
@@ -953,6 +954,32 @@ function _bindRvmUiStatusEvents(container) {
   };
 }
 
+// â”€â”€ STP file loader â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function _bindStpLoader(container) {
+  const input = container.querySelector('#rvm-stp-file-input');
+  if (!input) return;
+  input.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const { members, stats } = parseStpSupportMembers(text);
+      if (!_viewer) {
+        notify({ type: 'warning', message: 'No 3D viewer active. Load a model first, then append STP.' });
+        e.target.value = '';
+        return;
+      }
+      _viewer.clearStpMembers();
+      _viewer.appendStpMembers(members);
+      notify({ type: 'info', message: `STP: appended ${stats.memberCount} support member(s) from ${file.name}.` });
+    } catch (err) {
+      notify({ type: 'error', message: `STP import failed: ${err?.message || err}` });
+    }
+    e.target.value = '';
+  });
+}
+
 // â”€â”€ Bundle file loader â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function _bindBundleLoader(container) {
@@ -1181,6 +1208,11 @@ function _buildHTML(caps) {
       <label class="rvm-btn rvm-btn-file" title="Load dataset (RVM, REV, JSON Bundle, ATT TXT, GLB)">
         ${UPLOAD_ICON}<span>Import Dataset</span>
         <input type="file" id="rvm-universal-file-input" multiple accept=".json,.rvm,.rev,.txt,.att,.glb,.gltf" style="display:none">
+      </label>
+      <label class="rvm-btn rvm-btn-file" title="Append STP support members as overlay">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><polyline points="21 15 21 21 3 21 3 15"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span>Append STP</span>
+        <input type="file" id="rvm-stp-file-input" accept=".stp,.STP,.step,.STEP" style="display:none">
       </label>
       <button class="rvm-btn" id="rvm-settings-btn" title="Open Interchange Mapping Settings" style="padding:4px 8px; cursor:pointer;">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
@@ -1568,6 +1600,7 @@ export function renderViewer3DRvm(container) {
   _ensureRvmSupportSettings(container);
 
   _bindBundleLoader(container);
+  _bindStpLoader(container);
   _bindAttrSearch(container);
   _bindSearch(container);
   _bindToolbarClickedState(container);
