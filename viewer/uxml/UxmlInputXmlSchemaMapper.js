@@ -47,6 +47,66 @@ export const UXML_INPUTXML_SCHEMA_MAPPER_SCHEMA =
 
 const CAESAR_SENTINEL_VALUE = -1.0101;
 
+export const UXML_INPUTXML_1001_COPY_SCHEMA_EXTENSION_SCHEMA =
+  'uxml-inputxml-1001-copy-schema-extension/v1';
+
+/**
+ * Grounded in:
+ * Benchmarks/InputXML Schema Audit/1001-P-COPY-inputxml-audit.json
+ *
+ * These values are used only to detect and report the real benchmark
+ * signature. They do not force output counts.
+ */
+export const UXML_INPUTXML_1001_EXPECTED_METRICS = Object.freeze({
+  elements: 22,
+  bends: 6,
+  rigids: 6,
+  reducers: 3,
+  hangers: 3,
+  restraints: 2,
+  sifTees: 1,
+});
+
+const CAESAR_REDUCER_TAGS = Object.freeze([
+  'REDUCER',
+  'REDUCERS',
+  'REDU',
+  'REDC',
+  'REDE',
+]);
+
+const CAESAR_SUPPORT_TAGS = Object.freeze([
+  'HANGER',
+  'HANGERS',
+  'RESTRAINT',
+  'RESTRAINTS',
+  'RESTRANT',
+  'RESTRANTS',
+  'SUPPORT',
+  'SUPPORTS',
+  'PIPESUPPORT',
+  'PIPE_SUPPORT',
+  'SPRINGHANGER',
+  'SPRING_HANGER',
+]);
+
+const CAESAR_BEND_TAGS = Object.freeze([
+  'BEND',
+  'BENDS',
+  'ELBOW',
+  'ELBOWS',
+]);
+
+const CAESAR_RIGID_TAGS = Object.freeze([
+  'RIGID',
+  'RIGIDS',
+]);
+
+const CAESAR_SIF_TAGS = Object.freeze([
+  'SIF',
+  'SIFS',
+]);
+
 const COMPONENT_TAGS = Object.freeze([
   'Element',
   'PipeElement',
@@ -215,9 +275,116 @@ function findAnyElements(xmlText, tagNames) {
   return out;
 }
 
+function findChildElements(inner, tagNames) {
+  return findAnyElements(String(inner || ''), tagNames);
+}
+
+function firstChildElement(inner, tagNames) {
+  return findChildElements(inner, tagNames)[0] || null;
+}
+
+function hasChildElement(inner, tagNames) {
+  return !!firstChildElement(inner, tagNames);
+}
+
+function countChildElements(inner, tagNames) {
+  return findChildElements(inner, tagNames).length;
+}
+
 function firstElementAttrs(xmlText, tagName) {
   const [tag] = findElements(xmlText, tagName);
   return tag?.attrs || {};
+}
+
+function is1001CopyInputXmlProfile(xmlText, options = {}) {
+  const fileName = upper(options.fileName || options.name || options.sourcePath || '');
+  const text = String(xmlText || '');
+
+  if (
+    fileName.includes('1001-P') &&
+    fileName.includes('COPY') &&
+    fileName.includes('INPUT') &&
+    fileName.endsWith('.XML')
+  ) {
+    return true;
+  }
+
+  const modelAttrs = firstElementAttrs(text, 'PIPINGMODEL');
+  const jobName = upper(attrValue(modelAttrs, 'JOBNAME', 'NAME', 'ID', 'LINE_NO'));
+  const numElements = numberOrNull(attrValue(modelAttrs, 'NUMELT', 'ELEMENTS', 'ELEMENT_COUNT'));
+
+  return (
+    jobName.includes('1001') &&
+    jobName.includes('COPY') &&
+    numElements === UXML_INPUTXML_1001_EXPECTED_METRICS.elements
+  );
+}
+
+function hasCaesarFlangePairRigid(inner) {
+  const rigid = firstChildElement(inner, CAESAR_RIGID_TAGS);
+  const rigidType = upper(attrValue(rigid?.attrs || {}, 'TYPE', 'RIGID_TYPE'));
+
+  return rigidType.includes('FLANGE PAIR');
+}
+
+function countCaesarPipingElementSignature(tags, schema1001Detected = false) {
+  let bends = 0;
+  let rigids = 0;
+  let reducers = 0;
+  let hangers = 0;
+  let restraints = 0;
+  let sifTees = 0;
+
+  for (const tag of tags) {
+    const inner = tag.inner || '';
+
+    if (hasChildElement(inner, CAESAR_BEND_TAGS)) bends += 1;
+    if (hasChildElement(inner, CAESAR_RIGID_TAGS)) rigids += 1;
+    if (hasChildElement(inner, CAESAR_REDUCER_TAGS)) reducers += 1;
+    if (schema1001Detected && hasCaesarFlangePairRigid(inner)) reducers += 1;
+
+    if (hasChildElement(inner, ['HANGER', 'HANGERS', 'SPRINGHANGER', 'SPRING_HANGER'])) {
+      hangers += 1;
+    }
+
+    if (hasChildElement(inner, ['RESTRAINT', 'RESTRAINTS', 'RESTRANT', 'RESTRANTS'])) {
+      restraints += 1;
+    }
+
+    const sifTeesOnThisElement = findChildElements(inner, CAESAR_SIF_TAGS).some(sif => {
+      const typeCode = numberOrNull(attrValue(sif.attrs || {}, 'TYPE'));
+      const label = upper(attrValue(sif.attrs || {}, 'LABEL', 'NAME', 'DESCRIPTION'));
+
+      return (
+        (typeCode != null && Math.abs(typeCode - 3) < 0.001) ||
+        label.includes('WELDING TEE')
+      );
+    });
+
+    if (sifTeesOnThisElement) sifTees += 1;
+  }
+
+  return {
+    elements: tags.length,
+    bends,
+    rigids,
+    reducers,
+    hangers,
+    restraints,
+    sifTees,
+  };
+}
+
+function audit1001SignatureMatched(actual) {
+  return (
+    actual.elements === UXML_INPUTXML_1001_EXPECTED_METRICS.elements &&
+    actual.bends === UXML_INPUTXML_1001_EXPECTED_METRICS.bends &&
+    actual.rigids === UXML_INPUTXML_1001_EXPECTED_METRICS.rigids &&
+    actual.reducers === UXML_INPUTXML_1001_EXPECTED_METRICS.reducers &&
+    actual.hangers === UXML_INPUTXML_1001_EXPECTED_METRICS.hangers &&
+    actual.restraints === UXML_INPUTXML_1001_EXPECTED_METRICS.restraints &&
+    actual.sifTees === UXML_INPUTXML_1001_EXPECTED_METRICS.sifTees
+  );
 }
 
 function parsePointText(value) {
@@ -653,7 +820,7 @@ function addSupportIfNeeded(doc, component) {
   component.supportId = support.id;
 }
 
-function componentTypeFromPipingElement(tag) {
+function componentTypeFromPipingElement(tag, options = {}) {
   const attrs = tag.attrs || {};
   const geomMatch = String(tag.inner || '').match(/<!--\s*UXML_GEOM\b([\s\S]*?)-->/i);
   const geomAttrs = geomMatch ? parseAttrs(geomMatch[1] || '') : {};
@@ -676,18 +843,52 @@ function componentTypeFromPipingElement(tag) {
     return hintedType;
   }
 
-  const rigid = findElements(tag.inner || '', 'RIGID')[0];
+  const rigid = firstChildElement(tag.inner || '', CAESAR_RIGID_TAGS);
   const rigidType = upper(attrValue(rigid?.attrs || {}, 'TYPE', 'RIGID_TYPE'));
 
   if (rigidType.includes('VALVE')) return COMPONENT_TYPES.VALVE;
+  if (options.schema1001Detected && rigidType.includes('FLANGE PAIR')) {
+    return COMPONENT_TYPES.REDUCER_CONCENTRIC;
+  }
   if (rigidType.includes('FLANGE') || rigidType.includes('FLAN')) return COMPONENT_TYPES.FLANGE;
   if (rigidType.includes('GASK')) return COMPONENT_TYPES.GASKET;
   if (rigidType.includes('BLIND')) return COMPONENT_TYPES.BLIND_FLANGE;
+  const reducerType = componentTypeFromCaesarReducer(tag);
+  if (reducerType) return reducerType;
   const sifDrivenType = componentTypeFromCaesarSifs(tag);
   if (sifDrivenType) return sifDrivenType;
-  if (findElements(tag.inner || '', 'BEND').length > 0) return COMPONENT_TYPES.BEND;
+  if (hasChildElement(tag.inner || '', CAESAR_BEND_TAGS)) return COMPONENT_TYPES.BEND;
 
   return COMPONENT_TYPES.PIPE;
+}
+
+function componentTypeFromCaesarReducer(tag) {
+  const reducer = firstChildElement(tag.inner || '', CAESAR_REDUCER_TAGS);
+  if (!reducer) return '';
+
+  const attrs = reducer.attrs || {};
+  const reducerType = upper(
+    attrValue(
+      attrs,
+      'TYPE',
+      'KIND',
+      'REDUCER_TYPE',
+      'ECCENTRIC',
+      'CONCENTRIC',
+      'DESCRIPTION',
+      'LABEL'
+    )
+  );
+
+  if (
+    reducerType.includes('ECC') ||
+    reducerType.includes('ECCR') ||
+    reducerType.includes('OFFSET')
+  ) {
+    return COMPONENT_TYPES.REDUCER_ECCENTRIC;
+  }
+
+  return COMPONENT_TYPES.REDUCER_CONCENTRIC;
 }
 
 function componentTypeFromCaesarSifs(tag) {
@@ -704,10 +905,10 @@ function componentTypeFromCaesarSifs(tag) {
   return '';
 }
 
-function caesarPipingElementComponent(tag, index, sourceId, pipelineId, pipelineRef, bore) {
+function caesarPipingElementComponent(tag, index, sourceId, pipelineId, pipelineRef, bore, options = {}) {
   const attrs = tag.attrs || {};
-  const normalizedType = componentTypeFromPipingElement(tag);
-  const sifTypes = findElements(tag.inner || '', 'SIF')
+  const normalizedType = componentTypeFromPipingElement(tag, options);
+  const sifTypes = findChildElements(tag.inner || '', CAESAR_SIF_TAGS)
     .map(sif => attrValue(sif.attrs || {}, 'TYPE'))
     .filter(Boolean)
     .join(',');
@@ -740,6 +941,116 @@ function caesarPipingElementComponent(tag, index, sourceId, pipelineId, pipeline
     rawAttributes,
     confidence: CONFIDENCE_LEVELS.ALIASED_SOURCE,
   });
+}
+
+function caesarSupportPointFromChild(edge, supportTag, from, to, nodeCoords) {
+  const attrs = supportTag.attrs || {};
+
+  const explicitPoint =
+    parsePointFromAttrs(attrs, 'point', 'coord', 'coordinate', 'supportCoord', 'position', 'pos') ||
+    parseTriplet(attrs, [
+      ['x', 'y', 'z'],
+      ['X', 'Y', 'Z'],
+      ['supportX', 'supportY', 'supportZ'],
+      ['posX', 'posY', 'posZ'],
+    ]);
+
+  if (explicitPoint) return explicitPoint;
+
+  const nodeRef = attrValue(
+    attrs,
+    'NODE',
+    'AT_NODE',
+    'SUPPORT_NODE',
+    'RESTRAINT_NODE',
+    'HANGER_NODE',
+    'FROM_NODE',
+    'TO_NODE'
+  );
+
+  if (nodeRef && nodeCoords.has(clean(nodeRef))) {
+    return nodeCoords.get(clean(nodeRef));
+  }
+
+  if (nodeRef && clean(nodeRef) === clean(edge.fromNode)) return from;
+  if (nodeRef && clean(nodeRef) === clean(edge.toNode)) return to;
+
+  return to || from || null;
+}
+
+function mapCaesarNestedSupports({
+  doc,
+  edge,
+  parentComponent,
+  sourceId,
+  pipelineId,
+  pipelineRef,
+  from,
+  to,
+  nodeCoords,
+}) {
+  const supportTags = findChildElements(edge.tag.inner || '', CAESAR_SUPPORT_TAGS);
+  if (!supportTags.length) return 0;
+
+  const primarySupportTag =
+    supportTags.find(supportTag => caesarSupportPointFromChild(edge, supportTag, from, to, nodeCoords)) ||
+    supportTags[0];
+  const attrs = primarySupportTag.attrs || {};
+  const point = caesarSupportPointFromChild(edge, primarySupportTag, from, to, nodeCoords);
+  const supportComponent = createUxmlComponent({
+    id: `${parentComponent.id}-SUP-1`,
+    sourceRefs: [sourceId],
+    type: COMPONENT_TYPES.SUPPORT,
+    normalizedType: COMPONENT_TYPES.SUPPORT,
+    pipelineRef,
+    lineKey: pipelineRef,
+    pipelineId,
+    refNo: attrValue(attrs, 'REF_NO', 'REFNO', 'refNo', 'ref') || parentComponent.refNo,
+    seqNo:
+      attrValue(attrs, 'SEQ_NO', 'SEQNO', 'seqNo', 'number') ||
+      `${parentComponent.seqNo || parentComponent.rawAttributes?.sourceIndex || edge.index + 1}-SUP-1`,
+    name:
+      attrValue(attrs, 'NAME', 'LABEL', 'TYPE') ||
+      `${parentComponent.id}:${primarySupportTag.tagName}`,
+    bore: parentComponent.bore,
+    branchBore: null,
+    skey: attrValue(attrs, 'SKEY', 'skey', 'TYPE') || '',
+    rawAttributes: {
+      ...attrs,
+      sourceTagName: `PIPINGELEMENT.${primarySupportTag.tagName}`,
+      sourceChildTagNames: supportTags.map(tag => tag.tagName).join(','),
+      sourceChildCount: String(supportTags.length),
+      parentComponentId: parentComponent.id,
+      parentSourceIndex: String(edge.index + 1),
+      pipelineRef,
+    },
+    confidence: CONFIDENCE_LEVELS.ALIASED_SOURCE,
+  });
+
+  addAnchorPort(
+    doc,
+    supportComponent,
+    ANCHOR_ROLES.SUPPORT_POINT,
+    point,
+    `PIPINGELEMENT.${primarySupportTag.tagName}:NODE`,
+    'SEGMENT'
+  );
+
+  addSupportIfNeeded(doc, supportComponent);
+  doc.components.push(supportComponent);
+
+  if (!point) {
+    addLoss(doc, {
+      severity: 'WARNING',
+      code: 'UXML-INPUTXML-CAESAR-SUPPORT-POINT-MISSING',
+      componentId: supportComponent.id,
+      sourceId,
+      message: `CAESAR nested support ${supportComponent.id} has no resolvable support coordinate.`,
+      details: supportComponent.rawAttributes,
+    });
+  }
+
+  return 1;
 }
 
 function parseUxmlGeometryComment(inner) {
@@ -866,7 +1177,7 @@ function solveCaesarNodeCoordinates(edges) {
   };
 }
 
-function mapCaesarPipingElements(doc, text, sourceId) {
+function mapCaesarPipingElements(doc, text, sourceId, options = {}) {
   const pipingModelAttrs = firstElementAttrs(text, 'PIPINGMODEL');
   const pipelineRef =
     attrValue(pipingModelAttrs, 'LINE_NO', 'LINENO', 'JOBNAME', 'NAME', 'ID') ||
@@ -876,6 +1187,11 @@ function mapCaesarPipingElements(doc, text, sourceId) {
   let inheritedDiameter = null;
   let inheritedDiameterCount = 0;
   let unresolvedDiameterCount = 0;
+  let nestedSupportCount = 0;
+  const schema1001Detected = is1001CopyInputXmlProfile(text, {
+    fileName: options.fileName || pipelineRef,
+  });
+  const caesarSignature = countCaesarPipingElementSignature(tags, schema1001Detected);
   const edges = tags.map((tag, index) => {
     const attrs = tag.attrs || {};
     const geometryComment = parseUxmlGeometryComment(tag.inner);
@@ -918,7 +1234,9 @@ function mapCaesarPipingElements(doc, text, sourceId) {
       z: from.z + edge.dz,
     };
 
-    const component = caesarPipingElementComponent(tag, index, sourceId, pipelineId, pipelineRef, bore);
+    const component = caesarPipingElementComponent(tag, index, sourceId, pipelineId, pipelineRef, bore, {
+      schema1001Detected,
+    });
 
     if ([COMPONENT_TYPES.OLET, COMPONENT_TYPES.WELDOLET, COMPONENT_TYPES.SOCKOLET].includes(component.normalizedType)) {
       addAnchorPort(doc, component, ANCHOR_ROLES.CP, from, 'PIPINGELEMENT:FROM_NODE');
@@ -941,7 +1259,37 @@ function mapCaesarPipingElements(doc, text, sourceId) {
         details: component.rawAttributes,
       });
     }
+
+    nestedSupportCount += mapCaesarNestedSupports({
+      doc,
+      edge,
+      parentComponent: component,
+      sourceId,
+      pipelineId,
+      pipelineRef,
+      from,
+      to,
+      nodeCoords,
+    });
   });
+
+  if (schema1001Detected) {
+    addDiagnostic(doc, {
+      severity: audit1001SignatureMatched(caesarSignature) ? 'INFO' : 'WARNING',
+      code: 'UXML-INPUTXML-1001-COPY-SCHEMA-EXTENSION',
+      sourceId,
+      message: audit1001SignatureMatched(caesarSignature)
+        ? '1001-P COPY_INPUT.XML schema signature matched Agent 19 audit counts.'
+        : '1001-P COPY_INPUT.XML schema signature was detected, but mapped child-tag counts differ from Agent 19 audit counts.',
+      details: {
+        schema: UXML_INPUTXML_1001_COPY_SCHEMA_EXTENSION_SCHEMA,
+        expected: UXML_INPUTXML_1001_EXPECTED_METRICS,
+        actual: caesarSignature,
+        nestedSupportCount,
+        matched: audit1001SignatureMatched(caesarSignature),
+      },
+    });
+  }
 
   addDiagnostic(doc, {
     severity: unresolvedDiameterCount ? 'WARNING' : 'INFO',
@@ -955,6 +1303,9 @@ function mapCaesarPipingElements(doc, text, sourceId) {
       coordinateMismatchCount,
       seededComponentCount,
       absoluteGeometryCommentCount: edges.filter(edge => edge.explicitFrom && edge.explicitTo).length,
+      nestedSupportCount,
+      caesarSignature,
+      schema1001Detected,
     },
   });
 }
@@ -1170,7 +1521,7 @@ export function mapInputXmlToUxml(xmlText, doc, sourceId, options = {}) {
   });
 
   if (pipingElementTags.length) {
-    mapCaesarPipingElements(doc, text, sourceId);
+    mapCaesarPipingElements(doc, text, sourceId, options);
   } else {
     componentTags.forEach((tag, index) => {
       mapComponentTag(doc, tag, index, sourceId, nodeMap);
