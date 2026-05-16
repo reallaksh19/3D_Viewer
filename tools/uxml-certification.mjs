@@ -58,6 +58,8 @@ const REQUIRED_TESTS = Object.freeze([
   'viewer/tests/uxml-ray-topo-graph-builder.test.js',
     'viewer/tests/uxml-topo-graph-comparator.test.js',
   'viewer/tests/uxml-inputxml-1001-schema-extension.test.js',
+  'viewer/tests/uxml-inputxml-1001-real-file-smoke.test.js',
+  'viewer/tests/uxml-inputxml-1001-real-topology-workbench-smoke.test.js',
   'viewer/tests/universal-xml-converter-tab.test.js',
   'viewer/tests/rvm-pcf-uxml-topology-bridge.test.js',
   'viewer/tests/uxml-topology-decision-gate.test.js',
