@@ -26,6 +26,8 @@ const REQUIRED_MODULES = Object.freeze([
   'viewer/uxml/UxmlProfileDetector.js',
   'viewer/uxml/UxmlInputXmlSchemaMapper.js',
   'viewer/uxml/UxmlStandardXmlSchemaMapper.js',
+  'viewer/uxml/UxmlPcfStandardXmlBridge.js',
+  'viewer/uxml/UxmlSourceIntakeBridge.js',
   'viewer/uxml/UxmlNormalizer.js',
   'viewer/uxml/UxmlValidationGate.js',
   'viewer/uxml/UxmlFaceModelBuilder.js',
@@ -60,6 +62,9 @@ const REQUIRED_TESTS = Object.freeze([
   'viewer/tests/uxml-inputxml-1001-schema-extension.test.js',
   'viewer/tests/uxml-inputxml-1001-real-file-smoke.test.js',
   'viewer/tests/uxml-inputxml-1001-real-topology-workbench-smoke.test.js',
+  'viewer/tests/uxml-pcf-standardxml-bridge.test.js',
+  'viewer/tests/uxml-source-intake-bridge-pcf-pdf.test.js',
+  'viewer/tests/universal-xml-converter-tab-source-intake.test.js',
   'viewer/tests/universal-xml-converter-tab.test.js',
   'viewer/tests/rvm-pcf-uxml-topology-bridge.test.js',
   'viewer/tests/uxml-topology-decision-gate.test.js',
@@ -101,6 +106,30 @@ const REQUIRED_EXPORT_MARKERS = Object.freeze([
       'mapStandardXmlToUxml',
       'mapGenericXmlToUxml',
       'UXML_STANDARD_XML_SCHEMA_MAPPER_SCHEMA',
+    ],
+  },
+  {
+    file: 'viewer/uxml/UxmlPcfStandardXmlBridge.js',
+    markers: [
+      'convertPcfTextToStandardXml',
+      'UXML_PCF_STANDARD_XML_BRIDGE_SCHEMA',
+    ],
+  },
+  {
+    file: 'viewer/uxml/UxmlSourceIntakeBridge.js',
+    markers: [
+      'runUxmlSourceIntakeBridge',
+      'resolveUxmlSourceIntakeRoute',
+      'UXML_SOURCE_INTAKE_ROUTES',
+    ],
+  },
+  {
+    file: 'viewer/tabs/universal-xml-converter-tab.js',
+    markers: [
+      'runPipelineActionAsync',
+      'runUniversalXmlPipelineFromTextAsync',
+      'setUniversalXmlConverterExecutor',
+      'run-source-intake-bridge',
     ],
   },
   {

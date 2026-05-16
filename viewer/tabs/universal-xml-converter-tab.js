@@ -42,22 +42,27 @@ import {
   buildUxmlCl1WorkbenchSummary,
   summarizeUxmlCl1WorkbenchSummary,
 } from '../uxml/UxmlCl1WorkbenchSummary.js';
+import {
+  resolveUxmlSourceIntakeRoute,
+  runUxmlSourceIntakeBridge,
+} from '../uxml/UxmlSourceIntakeBridge.js';
 
 const SOURCE_TYPES = Object.freeze([
   { value: 'AUTO', label: 'Auto detect' },
-  { value: 'EXISTING_XML', label: 'Existing XML / Standard XML' },
+  { value: 'STANDARD_XML', label: 'Standard XML' },
   { value: 'INPUT_XML', label: 'InputXML' },
   { value: 'UXML', label: 'UXML' },
-  { value: 'PCF', label: 'PCF' },
-  { value: 'PDF_TO_INPUTXML', label: 'PDF -> InputXML' },
+  { value: 'PCF', label: 'PCF -> Standard XML -> UXML' },
+  { value: 'PDF', label: 'PDF -> InputXML -> UXML' },
+  { value: 'STAGED_JSON', label: 'Staged JSON -> InputXML -> UXML' },
   { value: 'REV_TO_XML', label: 'REV -> XML' },
-  { value: 'JSON_TO_XML', label: 'JSON / staged JSON -> XML/InputXML' },
+  { value: 'JSON_TO_XML', label: 'JSON / staged JSON (legacy alias)' },
   { value: 'TXT_TO_XML', label: 'Attribute TXT -> XML' },
 ]);
 
 const PIPELINE_STAGES = Object.freeze([
   { id: 'source', title: '1. Source Intake', description: 'Load PDF, REV, JSON, TXT, PCF, or XML source.' },
-  { id: 'existing-converter', title: '2. Existing Converter Output', description: 'Use existing converter routes to produce InputXML or Standard XML.' },
+  { id: 'existing-converter', title: '2. Source Intake Bridge', description: 'Route PCF/PDF/Staged JSON through bridge conversion before UXML normalization.' },
   { id: 'uxml', title: '3. UXML Normalization', description: 'Normalize InputXML, Standard XML, or UXML into the Universal XML contract.' },
   { id: 'geometry-preview', title: '4. Geometry Preview', description: 'Render a lightweight UXML segment preview before topology decisions.' },
   { id: 'validation', title: '5. UXML Validation', description: 'Validate UXML structure, anchors, bore, branches, supports, and loss contract.' },
@@ -92,11 +97,17 @@ const FULL_PIPELINE_ACTIONS = Object.freeze([
   'run-cl1-summary',
 ]);
 
+let defaultUniversalXmlConverterExecutor = null;
+
+export function setUniversalXmlConverterExecutor(executor) {
+  defaultUniversalXmlConverterExecutor = typeof executor === 'function' ? executor : null;
+}
+
 // ── UI grouping constants ──────────────────────────────────────────────────
 
 const STAGE_SHORT_TITLES = Object.freeze({
   'source':             'Source Intake',
-  'existing-converter': 'Existing Conv.',
+  'existing-converter': 'Intake Bridge',
   'uxml':               'UXML Normalize',
   'geometry-preview':   'Geometry Preview',
   'validation':         'UXML Validation',
@@ -125,7 +136,7 @@ const STAGE_GROUPS = Object.freeze([
 
 const STAGE_TO_ACTION = Object.freeze({
   'source':             null,
-  'existing-converter': null,
+  'existing-converter': 'run-source-intake-bridge',
   'uxml':               'convert-uxml',
   'geometry-preview':   'build-geometry-preview',
   'validation':         'validate-uxml',
@@ -233,13 +244,20 @@ function summarizeReport(report) {
 function createInitialState() {
   return {
     sourceFile: null,
+    sourceFileObject: null,
+    sourceBlob: null,
+    sourceArrayBuffer: null,
     sourceText: '',
     selectedSourceType: 'AUTO',
     detectedSourceType: 'AUTO',
+    converterExecutor: null,
+    bridgeOutputText: '',
+    bridgeOutputProfile: '',
     activePanel: 'source',
     status: { kind: 'info', message: 'Universal XML Converter tab is ready.' },
     pipeline: {
       profileReport: null,
+      sourceIntakeBridge: null,
       normalizerResult: null,
       uxml: null,
       geometryPreview: null,
@@ -280,7 +298,7 @@ function createInitialState() {
 function sourceTypeFromProfile(profile) {
   if (profile === XML_PROFILES.UXML) return 'UXML';
   if (profile === XML_PROFILES.INPUT_XML) return 'INPUT_XML';
-  if (profile === XML_PROFILES.STANDARD_XML || profile === XML_PROFILES.BENCHMARK_XML) return 'EXISTING_XML';
+  if (profile === XML_PROFILES.STANDARD_XML || profile === XML_PROFILES.BENCHMARK_XML) return 'STANDARD_XML';
   return 'AUTO';
 }
 
@@ -289,9 +307,9 @@ function extensionFallbackSourceType(fileName, text) {
   const trimmed = String(text || '').trimStart();
 
   if (name.endsWith('.pcf')) return 'PCF';
-  if (name.endsWith('.pdf')) return 'PDF_TO_INPUTXML';
+  if (name.endsWith('.pdf')) return 'PDF';
   if (name.endsWith('.rev') || name.endsWith('.rvm')) return 'REV_TO_XML';
-  if (name.endsWith('.json') || trimmed.startsWith('{') || trimmed.startsWith('[')) return 'JSON_TO_XML';
+  if (name.endsWith('.json') || trimmed.startsWith('{') || trimmed.startsWith('[')) return 'STAGED_JSON';
   if (name.endsWith('.txt')) return 'TXT_TO_XML';
   return 'AUTO';
 }
@@ -311,6 +329,43 @@ export function detectSourceType(fileName, text) {
   return extensionFallbackSourceType(safeFileName, text);
 }
 
+function normalizeSelectedSourceType(value) {
+  const selected = String(value || 'AUTO').toUpperCase();
+
+  if (selected === 'EXISTING_XML') return 'STANDARD_XML';
+  if (selected === 'PDF_TO_INPUTXML') return 'PDF';
+  if (selected === 'JSON_TO_XML') return 'STAGED_JSON';
+  if (selected === 'STAGEDJSON_TO_INPUTXML') return 'STAGED_JSON';
+
+  return selected || 'AUTO';
+}
+
+function effectiveSourceType(state) {
+  const selected = normalizeSelectedSourceType(state.selectedSourceType);
+
+  return selected === 'AUTO'
+    ? normalizeSelectedSourceType(state.detectedSourceType)
+    : selected;
+}
+
+function isDirectXmlSourceType(sourceType) {
+  return ['AUTO', 'UXML', 'INPUT_XML', 'STANDARD_XML', 'EXISTING_XML'].includes(
+    normalizeSelectedSourceType(sourceType)
+  );
+}
+
+function isBridgeSourceType(sourceType) {
+  return ['PCF', 'PDF', 'STAGED_JSON'].includes(normalizeSelectedSourceType(sourceType));
+}
+
+function sourceIntakeRouteSummary(state) {
+  return resolveUxmlSourceIntakeRoute({
+    fileName: state.sourceFile?.name || '',
+    text: state.sourceText || '',
+    selectedSourceType: effectiveSourceType(state),
+  });
+}
+
 function stageReport(stageId, report) {
   return {
     stageId,
@@ -322,13 +377,25 @@ function stageReport(stageId, report) {
 }
 
 function ensureXmlSource(state) {
-  const selected = state.selectedSourceType === 'AUTO' ? state.detectedSourceType : state.selectedSourceType;
+  const selected = effectiveSourceType(state);
 
   if (!String(state.sourceText || '').trim()) {
     throw new Error('Load XML/InputXML/UXML source text before running the UXML pipeline.');
   }
 
-  if (!['AUTO', 'UXML', 'INPUT_XML', 'EXISTING_XML'].includes(selected)) {
+  if (isDirectXmlSourceType(selected)) {
+    return;
+  }
+
+  if (isBridgeSourceType(selected) && state.pipeline.sourceIntakeBridge?.normalized?.uxml) {
+    return;
+  }
+
+  if (isBridgeSourceType(selected)) {
+    throw new Error(`${selected} must go through the existing converter bridge before UXML normalization. Source Intake Bridge covers PCF/PDF/Staged JSON.`);
+  }
+
+  if (!['AUTO', 'UXML', 'INPUT_XML', 'STANDARD_XML', 'EXISTING_XML'].includes(selected)) {
     throw new Error(`${selected} must go through the existing converter bridge before UXML normalization.`);
   }
 }
@@ -493,6 +560,27 @@ export function runPipelineAction(state, action) {
   }
 
   if (action === 'convert-uxml') {
+    const selected = effectiveSourceType(state);
+
+    if (isBridgeSourceType(selected) && state.pipeline.sourceIntakeBridge?.normalized?.uxml) {
+      const normalized = state.pipeline.sourceIntakeBridge.normalized;
+
+      state.pipeline.normalizerResult = normalized;
+      state.pipeline.uxml = normalized.uxml;
+      state.reports.uxml = stageReport('uxml', normalized);
+      state.status = normalized.ok
+        ? {
+            kind: 'ok',
+            message: `UXML normalization complete from ${selected} bridge. Components=${count(normalized.stats?.componentCount)}, Anchors=${count(normalized.stats?.anchorCount)}.`,
+          }
+        : {
+            kind: 'error',
+            message: 'UXML normalization from bridge output blocked.',
+          };
+
+      return normalized;
+    }
+
     ensureXmlSource(state);
     const profileReport = state.pipeline.profileReport || runPipelineAction(state, 'detect-profile');
     const result = normalizeXmlToUxml(state.sourceText, {
@@ -723,8 +811,178 @@ export function runPipelineAction(state, action) {
 }
 
 function canRunXmlActions(state) {
-  const selected = state.selectedSourceType === 'AUTO' ? state.detectedSourceType : state.selectedSourceType;
-  return Boolean(String(state.sourceText || '').trim()) && ['AUTO', 'UXML', 'INPUT_XML', 'EXISTING_XML'].includes(selected);
+  const selected = effectiveSourceType(state);
+  return ['AUTO', 'UXML', 'INPUT_XML', 'STANDARD_XML', 'EXISTING_XML', 'PCF', 'PDF', 'STAGED_JSON'].includes(selected);
+}
+
+export async function runPipelineActionAsync(state, action) {
+  if (!state || typeof state !== 'object') {
+    throw new Error('runPipelineActionAsync requires a state object.');
+  }
+
+  if (action === 'run-existing-converter') {
+    const route = sourceIntakeRouteSummary(state);
+
+    if (!route.ok) {
+      throw new Error(route.reason || 'No UXML source intake route is available.');
+    }
+
+    if (route.strategy !== 'EXISTING_CONVERTER_BRIDGE') {
+      throw new Error(`Run existing converter applies only to converter-backed routes. Current strategy: ${route.strategy}.`);
+    }
+
+    return runPipelineActionAsync(state, 'run-source-intake-bridge');
+  }
+
+  if (action === 'run-source-intake-bridge') {
+    if (!String(state.sourceText || '').trim()) {
+      throw new Error('Load a source file before running Source Intake Bridge.');
+    }
+
+    const selected = effectiveSourceType(state);
+    const route = sourceIntakeRouteSummary(state);
+
+    if (!route.ok) {
+      const blocked = {
+        schema: 'uxml-source-intake-bridge/ui-blocked',
+        ok: false,
+        blocked: true,
+        route,
+        summary: {
+          sourceType: selected,
+          reason: route.reason || 'No intake route.',
+        },
+      };
+
+      state.pipeline.sourceIntakeBridge = blocked;
+      state.reports['existing-converter'] = stageReport('existing-converter', blocked);
+      state.status = {
+        kind: 'error',
+        message: route.reason || 'No UXML source intake route is available.',
+      };
+
+      return blocked;
+    }
+
+    if (isDirectXmlSourceType(selected)) {
+      const direct = {
+        schema: 'uxml-source-intake-bridge/direct-ui-route',
+        ok: true,
+        blocked: false,
+        route,
+        bridgeOutputProfile: route.directProfile || selected,
+        bridgeOutputText: state.sourceText,
+        normalized: null,
+        summary: {
+          sourceType: selected,
+          strategy: 'DIRECT_XML_NORMALIZATION',
+        },
+        generatedPcf: false,
+        pcfTextByPipelineRef: undefined,
+        masterResolution: undefined,
+        masterResolutionRequests: undefined,
+      };
+
+      state.pipeline.sourceIntakeBridge = direct;
+      state.bridgeOutputText = state.sourceText;
+      state.bridgeOutputProfile = direct.bridgeOutputProfile;
+      state.reports['existing-converter'] = stageReport('existing-converter', direct);
+      state.status = {
+        kind: 'ok',
+        message: `${selected} uses direct UXML normalization; no converter bridge required.`,
+      };
+
+      return direct;
+    }
+
+    const intake = await runUxmlSourceIntakeBridge({
+      text: state.sourceText,
+      fileName: state.sourceFile?.name || '',
+      selectedSourceType: selected,
+      sourceFile: state.sourceFileObject || state.sourceBlob || null,
+      sourceBlob: state.sourceBlob || null,
+      sourceArrayBuffer: state.sourceArrayBuffer || null,
+      converterExecutor: state.converterExecutor || defaultUniversalXmlConverterExecutor || null,
+      converterOptions: {
+        defaultPipelineRef: '/PCF-IMPORT',
+      },
+    });
+
+    state.pipeline.sourceIntakeBridge = intake;
+    state.bridgeOutputText = intake.bridgeOutputText || '';
+    state.bridgeOutputProfile = intake.bridgeOutputProfile || '';
+    state.reports['existing-converter'] = stageReport('existing-converter', intake);
+
+    if (intake.normalized?.uxml) {
+      state.pipeline.normalizerResult = intake.normalized;
+      state.pipeline.uxml = intake.normalized.uxml;
+      state.reports.uxml = stageReport('uxml', intake.normalized);
+    }
+
+    state.status = intake.ok
+      ? {
+          kind: 'ok',
+          message: `${selected} intake bridge complete. Output=${intake.bridgeOutputProfile}; Components=${count(intake.normalized?.stats?.componentCount)}.`,
+        }
+      : {
+          kind: 'error',
+          message: intake.diagnostics?.[0]?.message || `${selected} intake bridge blocked.`,
+        };
+
+    return intake;
+  }
+
+  if (action === 'convert-uxml') {
+    const selected = effectiveSourceType(state);
+
+    if (isBridgeSourceType(selected)) {
+      if (!state.pipeline.sourceIntakeBridge) {
+        await runPipelineActionAsync(state, 'run-source-intake-bridge');
+      }
+
+      const intake = state.pipeline.sourceIntakeBridge;
+
+      if (!intake?.normalized?.uxml) {
+        throw new Error(`${selected} intake bridge did not produce UXML normalization output.`);
+      }
+
+      state.pipeline.normalizerResult = intake.normalized;
+      state.pipeline.uxml = intake.normalized.uxml;
+      state.reports.uxml = stageReport('uxml', intake.normalized);
+      state.status = intake.normalized.ok
+        ? {
+            kind: 'ok',
+            message: `UXML normalization complete from ${selected} bridge. Components=${count(intake.normalized.stats?.componentCount)}, Anchors=${count(intake.normalized.stats?.anchorCount)}.`,
+          }
+        : {
+            kind: 'error',
+            message: 'UXML normalization from bridge output blocked.',
+          };
+
+      return intake.normalized;
+    }
+
+    return runPipelineAction(state, action);
+  }
+
+  if (action === 'run-full-pipeline') {
+    const selected = effectiveSourceType(state);
+
+    if (isBridgeSourceType(selected)) {
+      await runPipelineActionAsync(state, 'run-source-intake-bridge');
+      await runPipelineActionAsync(state, 'convert-uxml');
+
+      for (const step of FULL_PIPELINE_ACTIONS.filter(step => step !== 'detect-profile' && step !== 'convert-uxml')) {
+        runPipelineAction(state, step);
+      }
+
+      return state.pipeline.cl1WorkbenchSummary || state.pipeline.routeHandoff;
+    }
+
+    return runPipelineAction(state, action);
+  }
+
+  return runPipelineAction(state, action);
 }
 
 // ── Stage rail (compact timeline) ─────────────────────────────────────────
@@ -921,7 +1179,7 @@ function renderGeometryPreviewHtml(preview) {
 }
 
 function renderRouteAndCl1Guide() {
-  return `<div class="uxml-placeholder"><b>Route Handoff</b><br>Topology decisions are routed through the handoff policy before any downstream package is created.</div><div class="uxml-placeholder"><b>Route Package</b><br>This route package is deterministic metadata only. It does not emit PCF, does not resolve masters, and does not mutate topology.</div><div class="uxml-placeholder"><b>Masters by Target Route</b><br>Masters are handled by the downstream route. This tab only prepares topology and CL1 route evidence.</div><div class="uxml-placeholder"><b>Route contract</b><br>UXML mutates coordinates: NO<br>UXML applies fixes: NO<br>UXML emits PCF directly: NO</div>`;
+  return `<div class="uxml-placeholder"><b>Route Handoff</b><br>Topology decisions are routed through the handoff policy before any downstream package is created.</div><div class="uxml-placeholder"><b>CL1 Route Package</b><br>This route package is deterministic metadata only. It does not emit PCF, does not resolve masters, and does not mutate topology.</div><div class="uxml-placeholder"><b>Masters by Target Route</b><br>Masters are handled by the downstream route. This tab only prepares topology and CL1 route evidence.</div><div class="uxml-placeholder"><b>Route contract</b><br>UXML mutates coordinates: NO<br>UXML applies fixes: NO<br>UXML emits PCF directly: NO</div>`;
 }
 
 function panelHtml(state) {
@@ -930,11 +1188,74 @@ function panelHtml(state) {
 
   if (panel === 'source') {
     const sourcePreviewHtml = `<pre>${esc((state.sourceText || '').slice(0, 12000))}</pre>`;
-    return `<section class="uxml-panel-section"><h3>Source Intake</h3><p>Load XML, InputXML, or UXML directly. For JSON/RVM -> PCF, use the RVM / JSON -> PCF Extract tab and select UXML topology mode.</p>${sourceSummaryHtml(state)}${reportSummaryHtml(pipeline.profileReport, 'Profile Detection')}${collapsibleSection('Source preview (first 12 000 chars)', sourcePreviewHtml, false)}${collapsibleSection('Route guide', renderRouteAndCl1Guide(), false)}</section>`;
+    const route = sourceIntakeRouteSummary(state);
+
+    const routeHtml = route.ok
+      ? `<div class="uxml-kv-grid uxml-kv-compact">
+          <div>Source type</div><div>${esc(route.sourceType)}</div>
+          <div>Strategy</div><div>${esc(route.strategy || route.directProfile || '')}</div>
+          <div>Bridge converter</div><div>${esc(route.bridgeConverterId || 'DIRECT')}</div>
+          <div>Bridge output profile</div><div>${esc(route.bridgeOutputProfile || route.directProfile || '')}</div>
+        </div>`
+      : `<div class="uxml-placeholder">No route: ${esc(route.reason || '')}</div>`;
+
+    return `<section class="uxml-panel-section">
+      <h3>Source Intake</h3>
+      <p>
+        Load PCF, PDF, staged JSON, InputXML, Standard XML, or UXML.
+        PCF is bridged to Standard XML. PDF and staged JSON are routed through existing converters before UXML normalization.
+      </p>
+      ${sourceSummaryHtml(state)}
+      <h4>Resolved intake route</h4>
+      ${routeHtml}
+      ${reportSummaryHtml(pipeline.profileReport, 'Profile Detection')}
+      ${collapsibleSection('Source preview (first 12 000 chars)', sourcePreviewHtml, false)}
+      ${collapsibleSection('Route guide', renderRouteAndCl1Guide(), false)}
+    </section>`;
   }
 
   if (panel === 'existing-converter') {
-    return `<section class="uxml-panel-section"><h3>Existing Converter Output</h3><div class="uxml-placeholder">This tab is a standalone XML/InputXML/UXML topology workbench. It does not own the JSON/RVM -> PCF production export workflow.</div><div class="uxml-placeholder" style="margin-top:12px;"><b>Standalone XML path</b><pre style="white-space:pre-wrap;margin:8px 0 0;">XML / InputXML / UXML\n  -> UXML normalization\n  -> Validation\n  -> Face model\n  -> UniversalTopoGraph\n  -> RayTopoGraph\n  -> Comparator\n  -> Decision gate\n  -> Route handoff\n  -> CL1 package\n  -> CL1 snapshot\n  -> CL1 replay\n  -> CL1 summary</pre></div></section>`;
+    const intake = pipeline.sourceIntakeBridge;
+    const bridgePreview = state.bridgeOutputText
+      ? `<pre>${esc(state.bridgeOutputText.slice(0, 16000))}</pre>`
+      : '<div class="uxml-empty">No bridge output yet.</div>';
+
+    return `<section class="uxml-panel-section">
+      <h3>Source Intake Bridge</h3>
+      <p>
+        PCF, PDF, and staged JSON are converted into XML profiles before UXML normalization.
+        PCF uses an internal Standard XML bridge. PDF and staged JSON use existing converter routes.
+      </p>
+
+      ${reportSummaryHtml(intake, 'Source Intake Bridge')}
+
+      ${intake ? `
+        <div class="uxml-kv-grid uxml-kv-compact">
+          <div>Source type</div><div>${esc(intake.route?.sourceType || '')}</div>
+          <div>Strategy</div><div>${esc(intake.route?.strategy || '')}</div>
+          <div>Converter</div><div>${esc(intake.route?.bridgeConverterId || 'DIRECT')}</div>
+          <div>Output profile</div><div>${esc(intake.bridgeOutputProfile || '')}</div>
+          <div>Normalized components</div><div>${count(intake.normalized?.stats?.componentCount)}</div>
+          <div>Normalized anchors</div><div>${count(intake.normalized?.stats?.anchorCount)}</div>
+          <div>Normalized ports</div><div>${count(intake.normalized?.stats?.portCount)}</div>
+          <div>Normalized segments</div><div>${count(intake.normalized?.stats?.segmentCount)}</div>
+        </div>
+
+        <div class="uxml-placeholder" style="margin-top:12px;">
+          <b>Boundary:</b><br>
+          PCF generated here: ${intake.generatedPcf ? 'YES' : 'NO'}<br>
+          PCF text emitted here: ${intake.pcfTextByPipelineRef ? 'YES' : 'NO'}<br>
+          Masters resolved here: ${intake.masterResolution ? 'YES' : 'NO'}<br>
+          Topology built here: NO
+        </div>
+      ` : `
+        <div class="uxml-placeholder">
+          Select PCF, PDF, or staged JSON, then run Source Intake Bridge. Direct XML/InputXML/UXML does not need bridge conversion.
+        </div>
+      `}
+
+      ${collapsibleSection('Bridge XML output preview', bridgePreview, false)}
+    </section>`;
   }
 
   if (panel === 'uxml') {
@@ -996,7 +1317,8 @@ function renderToolbar(state, xmlReady, canConvert) {
     <div class="uxml-tb-group-row">
       <select class="uxml-tb-select" data-uxml-source-type>${sourceTypeOptions}</select>
       <label class="uxml-file-btn">Load<input data-uxml-file-input type="file" /></label>
-      <button data-uxml-action="run-existing-converter" type="button" class="uxml-tb-btn-ghost" disabled>Existing Conv.</button>
+      <button data-uxml-action="run-source-intake-bridge" type="button" class="uxml-tb-btn-ghost"${d(xmlReady)}>Source Intake Bridge</button>
+      <button data-uxml-action="run-existing-converter" type="button" class="uxml-tb-btn-ghost"${d(xmlReady)}>Run existing converter</button>
     </div>
   </div>`;
 
@@ -1051,12 +1373,12 @@ function renderToolbar(state, xmlReady, canConvert) {
 
 function render(container, state) {
   const xmlReady = canRunXmlActions(state);
-  const selected = state.selectedSourceType === 'AUTO' ? state.detectedSourceType : state.selectedSourceType;
-  const canConvert = xmlReady && ['AUTO', 'UXML', 'INPUT_XML', 'EXISTING_XML'].includes(selected);
+  const selected = effectiveSourceType(state);
+  const canConvert = xmlReady && ['AUTO', 'UXML', 'INPUT_XML', 'STANDARD_XML', 'EXISTING_XML', 'PCF', 'PDF', 'STAGED_JSON'].includes(selected);
 
   container.innerHTML = `<div class="uxml-tab">
     <header class="uxml-header">
-      <div><h2>Universal XML Converter</h2><p>XML/InputXML/UXML topology workbench → UXML → validation → topology → route handoff → package chain.</p></div>
+      <div><h2>Universal XML Converter</h2><p>XML/InputXML/UXML topology workbench -> UXML -> validation -> topology -> route handoff -> package chain.</p></div>
       <div class="uxml-header-badges"></div>
     </header>
     ${renderToolbar(state, xmlReady, canConvert)}
@@ -1090,10 +1412,19 @@ function buildSummary(state) {
     ),
     comparator: state.pipeline.comparison ? state.pipeline.comparison.summary || state.pipeline.comparison : null,
     deferred: {
-      existingConverterBridge: true,
+      existingConverterBridge: false,
       outputBridges: true,
       masters: true,
     },
+    intakeBridge: state.pipeline.sourceIntakeBridge
+      ? {
+          ok: state.pipeline.sourceIntakeBridge.ok,
+          sourceType: state.pipeline.sourceIntakeBridge.route?.sourceType || '',
+          strategy: state.pipeline.sourceIntakeBridge.route?.strategy || '',
+          bridgeConverterId: state.pipeline.sourceIntakeBridge.route?.bridgeConverterId || '',
+          bridgeOutputProfile: state.pipeline.sourceIntakeBridge.bridgeOutputProfile || '',
+        }
+      : null,
   };
 }
 
@@ -1139,12 +1470,16 @@ function bindEvents(container, state) {
 
     try {
       const text = await file.text();
+      const arrayBuffer = await file.arrayBuffer();
       state.sourceFile = {
         name: file.name,
         size: file.size,
         type: file.type || '',
         lastModified: file.lastModified || null,
       };
+      state.sourceFileObject = file;
+      state.sourceBlob = file;
+      state.sourceArrayBuffer = arrayBuffer;
       state.sourceText = text;
       state.detectedSourceType = detectSourceType(file.name, text);
       state.reports.source = {
@@ -1164,7 +1499,7 @@ function bindEvents(container, state) {
     render(container, state);
   };
 
-  const onClick = (event) => {
+  const onClick = async (event) => {
     const panelButton = event.target.closest('[data-uxml-panel]');
     if (panelButton) {
       state.activePanel = panelButton.dataset.uxmlPanel || 'source';
@@ -1177,12 +1512,6 @@ function bindEvents(container, state) {
 
     const action = actionButton.dataset.uxmlAction;
 
-    if (action === 'run-existing-converter') {
-      state.status = { kind: 'warn', message: 'Use the existing converter bridge before UXML normalization.' };
-      render(container, state);
-      return;
-    }
-
     if (action === 'detect-profile' && !String(state.sourceText || '').trim()) {
       state.status = { kind: 'warn', message: 'Load a source file before detecting profile.' };
       render(container, state);
@@ -1194,7 +1523,7 @@ function bindEvents(container, state) {
         exportSummary(state);
         state.status = { kind: 'ok', message: 'Universal XML Converter summary exported.' };
       } else {
-        runPipelineAction(state, action);
+        await runPipelineActionAsync(state, action);
       }
     } catch (error) {
       state.status = { kind: 'error', message: error.message };
@@ -1212,12 +1541,15 @@ function bindEvents(container, state) {
   };
 }
 
-export function renderUniversalXmlConverterTab(container) {
+export function renderUniversalXmlConverterTab(container, options = {}) {
   if (!container) {
     throw new Error('renderUniversalXmlConverterTab requires a container element.');
   }
 
   const state = createInitialState();
+  state.converterExecutor = typeof options.converterExecutor === 'function'
+    ? options.converterExecutor
+    : defaultUniversalXmlConverterExecutor;
   render(container, state);
   return bindEvents(container, state);
 }
@@ -1245,10 +1577,42 @@ export function runUniversalXmlPipelineFromText(text, options) {
   return state;
 }
 
+export async function runUniversalXmlPipelineFromTextAsync(text, options) {
+  const opts = options && typeof options === 'object' ? options : {};
+  const sourceName = opts.sourceName || 'inline.xml';
+  const state = createInitialState();
+
+  state.sourceFile = {
+    name: sourceName,
+    size: String(text ?? '').length,
+    type: opts.mimeType || 'text/plain',
+    lastModified: null,
+  };
+  state.sourceText = String(text ?? '');
+  state.selectedSourceType = opts.selectedSourceType || 'AUTO';
+  state.detectedSourceType = detectSourceType(sourceName, state.sourceText);
+  state.converterExecutor = typeof opts.converterExecutor === 'function'
+    ? opts.converterExecutor
+    : defaultUniversalXmlConverterExecutor;
+  state.reports.source = {
+    pass: true,
+    fileName: sourceName,
+    detectedSourceType: state.detectedSourceType,
+  };
+
+  await runPipelineActionAsync(state, 'run-full-pipeline');
+
+  return state;
+}
+
 export const _test = Object.freeze({
   createInitialState,
   summarizeReport,
   buildSummary,
   canRunXmlActions,
+  effectiveSourceType,
+  isBridgeSourceType,
+  isDirectXmlSourceType,
+  sourceIntakeRouteSummary,
   PIPELINE_STAGES,
 });

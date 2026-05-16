@@ -50,3 +50,16 @@
 - Added PDF reconstructed `UXML_GEOM` comments so PDF-generated InputXML carries UXML preview coordinates.
 - Preserved CAESAR SIF branch fitting identity by mapping suffix-bearing `Welding Tee` labels and UXML SIF type codes.
 - Updated REV staged hierarchy loading so two-point REV `BRAN/OLET` components populate `CPOS` and `BPOS` instead of losing the branch point.
+
+## UXML Source Intake and Viewer3D Toggle
+- Added a dedicated browser converter executor module for UXML intake bridge calls (`pdf_to_inputxml`, `stagedjson_to_inputxml`) without touching topology builders.
+- Extended 3D Viewer imports with a `Use UXML topobuilder` toggle (default `false`) and routed PCF/raw imports through UXML intake only when enabled.
+- Added AVEVA XML guard on the UXML intake route in 3D Viewer so Standard XML AVEVA files stay on the existing direct import path.
+- Extended raw import picker to accept staged JSON (`.json`) for toggle-enabled UXML intake routing.
+- Added regression coverage for the new toggle wiring and intake route contract in `viewer/tests/unit/viewer3d-uxml-topobuilder-toggle.test.js`.
+
+## UXML Import Audit Coverage
+- Added a focused import-audit test suite for source intake completeness and ownership boundaries across PCF, PDF, staged JSON, InputXML, and Standard XML routes.
+- Verified existing-converter bridge selection for PDF (`pdf_to_inputxml`) and staged JSON (`stagedjson_to_inputxml`) with converter-injected runs.
+- Verified direct normalization routes remain import-only and do not emit PCF/master side effects.
+- Verified `AUTO` source mode correctly detects staged JSON and triggers `Run existing converter` through `stagedjson_to_inputxml`.

@@ -69,6 +69,9 @@ jobs:
               viewer/tests/uxml-normalizer.test.js \
               viewer/tests/uxml-inputxml-schema-mapper.test.js \
               viewer/tests/uxml-standard-xml-schema-mapper.test.js \
+              viewer/tests/uxml-pcf-standardxml-bridge.test.js \
+              viewer/tests/uxml-source-intake-bridge-pcf-pdf.test.js \
+              viewer/tests/universal-xml-converter-tab-source-intake.test.js \
               viewer/tests/uxml-validation-gate.test.js \
               viewer/tests/uxml-face-model-builder.test.js \
               viewer/tests/uxml-universal-topo-graph-builder.test.js \
@@ -102,6 +105,9 @@ jobs:
               viewer/tests/uxml-normalizer.test.js \
               viewer/tests/uxml-inputxml-schema-mapper.test.js \
               viewer/tests/uxml-standard-xml-schema-mapper.test.js \
+              viewer/tests/uxml-pcf-standardxml-bridge.test.js \
+              viewer/tests/uxml-source-intake-bridge-pcf-pdf.test.js \
+              viewer/tests/universal-xml-converter-tab-source-intake.test.js \
               viewer/tests/uxml-validation-gate.test.js \
               viewer/tests/uxml-face-model-builder.test.js \
               viewer/tests/uxml-universal-topo-graph-builder.test.js \
@@ -146,14 +152,13 @@ jobs:
             echo ""
             echo '```text'
             echo "Summary"
-            echo "Certification: ✅ PASS"
-            echo "Required modules: ✅ 18 / 18"
-            echo "Required tests: ✅ 22 / 22"
-            echo "Vitest: ✅ PASS"
+            echo "Certification: PASS"
+            echo "Required modules: 25 / 25"
+            echo "Required tests: 34 / 34"
+            echo "Vitest: PASS"
             echo "Other: 0 skip expected"
             echo "Annotations: 0 errors and 0 warnings"
             echo "certify"
             echo "Process completed with exit code 0"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-

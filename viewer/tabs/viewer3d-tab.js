@@ -1,4 +1,4 @@
-import { RuntimeEvents } from '../contracts/runtime-events.js';
+﻿import { RuntimeEvents } from '../contracts/runtime-events.js';
 /**
  * viewer3d-tab.js - 3D Viewer tab with dedicated viewer3DConfig wiring.
  */
@@ -19,6 +19,10 @@ import { renderConfig } from './config-tab.js';
 import { importFromRawFile } from '../js/pcf2glb/import/ImportFromRawParser.js';
 import { notify } from '../diagnostics/notification-center.js';
 import { mountXmlComparePanel } from './viewer3d-xml-compare-panel.js';
+import { runUxmlSourceIntakeBridge, detectUxmlSourceType } from '../uxml/UxmlSourceIntakeBridge.js';
+import { buildUxmlUniversalTopoGraph } from '../uxml/UxmlUniversalTopoGraphBuilder.js';
+import { uxmlToViewerComponents } from '../xml-compare/InputXmlUxmlToViewerComponents.js';
+import { createBrowserConverterExecutor } from '../converters/BrowserConverterExecutor.js';
 
 let _viewer = null;
 let _listenersRegistered = false;
@@ -29,11 +33,87 @@ let _directPcfData = null;
 let _ribbonCollapsed = false;
 let _leftSettingsCollapsed = false;
 let _mockSeedPayload = null;
+let _uxmlConverterExecutor = null;
 let xmlDiffPanel = null;
 const _spareOverlayRuntime = {
   spare1: { rows: [], fields: [], fileName: '' },
   spare2: { rows: [], fields: [], fileName: '' },
 };
+
+function _isUxmlTopoBuilderEnabled() {
+  return !!state.viewer3DConfig?.intakeRouting?.useUxmlTopoBuilder;
+}
+
+function _isAvevaXmlText(text, fileName) {
+  const upperText = String(text || '').slice(0, 5000).toUpperCase();
+  const upperName = String(fileName || '').toUpperCase();
+  if (upperName.includes('AVEVA')) return true;
+  if (upperText.includes('AVEVA') && !upperText.includes('CAESAR')) return true;
+  return upperText.includes('<P3D') || upperText.includes('<PDMS');
+}
+
+function _ensureUxmlConverterExecutor() {
+  if (_uxmlConverterExecutor && typeof _uxmlConverterExecutor.execute === 'function') {
+    return _uxmlConverterExecutor;
+  }
+
+  _uxmlConverterExecutor = createBrowserConverterExecutor();
+  return _uxmlConverterExecutor;
+}
+
+async function _buildUxmlIntakeDirectData(file, explicitSourceType = 'AUTO') {
+  const fileName = String(file?.name || '');
+  const text = await file.text();
+  const sourceArrayBuffer = await file.arrayBuffer();
+  const detectedSourceType = detectUxmlSourceType({
+    fileName,
+    text,
+    selectedSourceType: explicitSourceType,
+  });
+
+  if (detectedSourceType === 'STANDARD_XML' && _isAvevaXmlText(text, fileName)) {
+    throw new Error('AVEVA XML is excluded from UXML topobuilder route. Use direct import path.');
+  }
+
+  const needsConverter = detectedSourceType === 'PDF' || detectedSourceType === 'STAGED_JSON';
+  const converterRuntime = needsConverter ? _ensureUxmlConverterExecutor() : null;
+  const intake = await runUxmlSourceIntakeBridge({
+    text,
+    fileName,
+    selectedSourceType: detectedSourceType,
+    sourceFile: file,
+    sourceBlob: file,
+    sourceArrayBuffer,
+    converterExecutor: converterRuntime ? converterRuntime.execute : null,
+    converterOptions: {
+      defaultPipelineRef: '/UXML-VIEWER-IMPORT',
+    },
+  });
+
+  if (!intake.ok || !intake.normalized?.uxml) {
+    const msg = intake?.diagnostics?.[0]?.message || 'UXML intake route failed.';
+    throw new Error(msg);
+  }
+
+  const uxml = intake.normalized.uxml;
+  const diagnostics = [];
+  const components = uxmlToViewerComponents(uxml, { diagnostics });
+  const graph = buildUxmlUniversalTopoGraph(uxml, { connectToleranceMm: 6 });
+
+  return {
+    kind: 'uxml-intake',
+    fileName,
+    parsed: null,
+    components,
+    messageCircleNodes: [],
+    messageSquareNodes: [],
+    uxmlRoute: {
+      sourceType: detectedSourceType,
+      diagnostics,
+      universalGraphSummary: graph?.summary || null,
+    },
+  };
+}
 
 const ACTION_LABELS = {
   NAV_SELECT: 'Select',
@@ -94,7 +174,7 @@ export function renderViewer3D(container) {
       _rerenderIfActive();
     });
     // Fast-path: overlay visibility toggles that do NOT need a geometry re-render.
-    // Heatmap updates are intentionally excluded Ã¢â‚¬â€ they need a full re-render so
+    // Heatmap updates are intentionally excluded ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â they need a full re-render so
     // applyHeatmap() runs with fresh state.
     const OVERLAY_ONLY_REASONS = new Set([
       'nodes-toggled',
@@ -198,8 +278,8 @@ export function renderViewer3D(container) {
                   <input type="file" id="viewer3d-step-input" accept=".stp,.step,.STP,.STEP" style="display:none">
                   STP
                 </label>
-                <label class="btn-secondary file-label" id="viewer3d-import-raw-label" style="padding: 6px 12px; cursor:pointer;" title="Import piping model directly from ACCDB/MDB, XML, or PDF">
-                  <input type="file" id="viewer3d-import-raw-input" accept=".accdb,.mdb,.xml,.pdf" style="display:none">
+                <label class="btn-secondary file-label" id="viewer3d-import-raw-label" style="padding: 6px 12px; cursor:pointer;" title="Import piping model directly from ACCDB/MDB, XML, PDF, or staged JSON">
+                  <input type="file" id="viewer3d-import-raw-input" accept=".accdb,.mdb,.xml,.pdf,.json" style="display:none">
                   DB/XML
                 </label>
               </div>
@@ -283,6 +363,10 @@ export function renderViewer3D(container) {
                 <label class="left-panel-checkbox">
                   <input type="checkbox" id="viewer3d-top-length-enabled" ${cfg.lengthLabels?.enabled ? 'checked' : ''} ${addOnDisabledAttr}>
                   Length
+                </label>
+                <label class="left-panel-checkbox">
+                  <input type="checkbox" id="viewer3d-top-use-uxml-topobuilder" ${cfg.intakeRouting?.useUxmlTopoBuilder ? 'checked' : ''} ${addOnDisabledAttr}>
+                  Use UXML topobuilder
                 </label>
                 <label class="left-panel-checkbox">
                   <input type="checkbox" id="viewer3d-top-verification-enabled" ${cfg.lengthLabels?.verificationMode ? 'checked' : ''} ${addOnDisabledAttr}>
@@ -370,13 +454,13 @@ export function renderViewer3D(container) {
     <div id="viewer3d-spare-modal" style="display:none; position:fixed; inset:0; background:rgba(3,9,18,0.62); z-index:1200; padding:32px; overflow:auto;">
       <div style="max-width:640px; margin:0 auto; background:#f5f8fc; border-radius:16px; box-shadow:0 24px 60px rgba(0,0,0,0.3); border:1px solid rgba(14,28,45,0.16);">
         <div style="display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid rgba(14,28,45,0.12);">
-          <strong id="viewer3d-spare-modal-title" style="font-size:1rem; color:#102033;">Spare 1 Ã¢â‚¬â€ Import CSV</strong>
+          <strong id="viewer3d-spare-modal-title" style="font-size:1rem; color:#102033;">Spare 1 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Import CSV</strong>
           <button class="btn-secondary" id="viewer3d-spare-modal-close" type="button">Close</button>
         </div>
         <div style="padding:18px 20px 24px;">
           <label class="btn-secondary file-label" style="margin-bottom:12px; display:inline-block;">
             <input type="file" id="viewer3d-spare-modal-file" accept=".csv,text/csv" style="display:none">
-            Choose CSV fileÃ¢â‚¬Â¦
+            Choose CSV fileÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦
           </label>
           <div id="viewer3d-spare-modal-preview" style="overflow-x:auto; margin-bottom:12px; font-size:0.8rem;"></div>
           <p style="font-size:0.78rem; color:#555; margin-bottom:12px;">
@@ -474,7 +558,7 @@ export function renderViewer3D(container) {
       if (traceType === 'projection-toggle') {
         _updateProjectionActiveState(container, evt.payload?.mode || 'orthographic');
       }
-      // Measurement complete Ã¢â€ â€™ copy to clipboard
+      // Measurement complete ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ copy to clipboard
       if (traceType === 'nav-mode') {
         const mode = String(evt.payload?.mode || '');
         if (mode === 'measure') {
@@ -515,7 +599,7 @@ export function renderViewer3D(container) {
       nullColor: cfg.heatmap.nullColor,
     });
   }
-  // Double-click canvas Ã¢â€ â€™ fit selection (if something selected) or fit all
+  // Double-click canvas ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ fit selection (if something selected) or fit all
   wrap.addEventListener('dblclick', () => {
     if (_selectedComponent) {
       _viewer?.fitSelection?.();
@@ -524,7 +608,7 @@ export function renderViewer3D(container) {
     }
   });
 
-  // Ctrl+Wheel Ã¢â€ â€™ nudge PLANE_UP section plane offset
+  // Ctrl+Wheel ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ nudge PLANE_UP section plane offset
   wrap.addEventListener('wheel', (e) => {
     if (!e.ctrlKey) return;
     e.preventDefault();
@@ -662,11 +746,13 @@ function _wireViewerControls(container, cfg, actions) {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const text = await file.text();
-      _directPcfData = _buildDirectPcfData(text, file.name);
-      // PCF uses Z as elevation Ã¢â‚¬â€ default to Z-up so the model appears right-side-up.
-      // _verticalVector() always returns Three.js Y (0,1,0) because mapCoord() places
-      // PCF elevation into Three.js Y regardless of mode, so this is safe.
+      if (_isUxmlTopoBuilderEnabled()) {
+        _directPcfData = await _buildUxmlIntakeDirectData(file, 'PCF');
+      } else {
+        const text = await file.text();
+        _directPcfData = _buildDirectPcfData(text, file.name);
+      }
+      // PCF uses Z as elevation. Keep default Z-up for correct orientation.
       if (!state.viewer3DConfig.coordinateMap?.verticalAxis ||
            state.viewer3DConfig.coordinateMap.verticalAxis === 'Y') {
         state.viewer3DConfig.coordinateMap = {
@@ -675,8 +761,8 @@ function _wireViewerControls(container, cfg, actions) {
           axisConvention: 'Z-up',
           gridPlane: 'auto',
         };
-        saveStickyState();
       }
+      saveStickyState();
       _rerenderIfActive();
     } catch (error) {
       console.error(error);
@@ -754,7 +840,7 @@ function _wireViewerControls(container, cfg, actions) {
   const openSpareModal = (spareKey) => {
     _spareModalKey = spareKey;
     _spareModalParsed = null;
-    if (spareModalTitle) spareModalTitle.textContent = `${spareKey === 'spare1' ? 'Spare 1' : 'Spare 2'} Ã¢â‚¬â€ Import CSV`;
+    if (spareModalTitle) spareModalTitle.textContent = `${spareKey === 'spare1' ? 'Spare 1' : 'Spare 2'} ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Import CSV`;
     if (spareModalPreview) spareModalPreview.innerHTML = '';
     if (spareModalFieldSel) spareModalFieldSel.innerHTML = '';
     if (spareModalApply) spareModalApply.disabled = true;
@@ -829,11 +915,10 @@ function _wireViewerControls(container, cfg, actions) {
     if (label) label.style.opacity = '0.5';
     const log = [];
     try {
-      const result = await importFromRawFile(file, state, log);
-      if (result.ok && result.directPcfData) {
-        _directPcfData = result.directPcfData;
+      if (_isUxmlTopoBuilderEnabled()) {
+        _directPcfData = await _buildUxmlIntakeDirectData(file, 'AUTO');
         state.fileName = file.name;
-        // ACCDB/XML/PDF use Y as the vertical axis (2nd coordinate = elevation)
+        // XML/PDF/JSON import route uses Y as elevation in current viewer convention.
         state.viewer3DConfig.coordinateMap = {
           ...(state.viewer3DConfig.coordinateMap || {}),
           verticalAxis: 'Y',
@@ -843,8 +928,23 @@ function _wireViewerControls(container, cfg, actions) {
         saveStickyState();
         _rerenderIfActive();
       } else {
-        console.warn('[ImportRaw] Import failed:', log);
-        notify({ level: 'error', title: 'Import failed', message: result.message || 'Import failed Ã¢â‚¬â€ check the browser console for details.', details: log });
+        const result = await importFromRawFile(file, state, log);
+        if (result.ok && result.directPcfData) {
+          _directPcfData = result.directPcfData;
+          state.fileName = file.name;
+          // ACCDB/XML/PDF use Y as the vertical axis (2nd coordinate = elevation)
+          state.viewer3DConfig.coordinateMap = {
+            ...(state.viewer3DConfig.coordinateMap || {}),
+            verticalAxis: 'Y',
+            axisConvention: 'Y-up',
+            gridPlane: 'auto',
+          };
+          saveStickyState();
+          _rerenderIfActive();
+        } else {
+          console.warn('[ImportRaw] Import failed:', log);
+          notify({ level: 'error', title: 'Import failed', message: result.message || 'Import failed - check the browser console for details.', details: log });
+        }
       }
     } catch (err) {
       console.error('[ImportRaw]', err);
@@ -951,6 +1051,16 @@ function _wireViewerControls(container, cfg, actions) {
     }
     _viewer?.setOverlayLayerVisibility?.('length', !!state.viewer3DConfig.lengthLabels.enabled);
     emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'viewer3d-tab', reason: 'length-labels-toggled' });
+  });
+  const useUxmlTopoBuilder = container.querySelector('#viewer3d-top-use-uxml-topobuilder');
+  useUxmlTopoBuilder?.addEventListener('change', (e) => {
+    if (!state.viewer3DConfig.intakeRouting) state.viewer3DConfig.intakeRouting = {};
+    state.viewer3DConfig.intakeRouting.useUxmlTopoBuilder = !!e.target.checked;
+    saveStickyState();
+    emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, {
+      source: 'viewer3d-tab',
+      reason: 'use-uxml-topobuilder-toggled',
+    });
   });
   const verificationEnabled = container.querySelector('#viewer3d-top-verification-enabled');
   verificationEnabled?.addEventListener('change', (e) => {
@@ -1109,6 +1219,7 @@ function _updateSettingsPanelSection(container) {
   syncCheck('viewer3d-top-line-enabled', cfg.overlay?.annotations?.messageSquareEnabled !== false);
   syncCheck('viewer3d-top-verification-enabled', !!cfg.lengthLabels?.verificationMode);
   syncCheck('viewer3d-top-length-enabled', cfg.lengthLabels?.enabled);
+  syncCheck('viewer3d-top-use-uxml-topobuilder', !!cfg.intakeRouting?.useUxmlTopoBuilder);
   syncCheck('viewer3d-top-spare1-enabled', cfg.spareOverlays?.spare1?.enabled);
   syncCheck('viewer3d-top-spare2-enabled', cfg.spareOverlays?.spare2?.enabled);
   syncSelect('viewer3d-top-spare1-field', spare1SelectedField);
@@ -1263,7 +1374,7 @@ function _copyMeasurementToClipboard(distance) {
   if (distance == null || !Number.isFinite(Number(distance))) return;
   const text = `${Number(distance).toFixed(2)} mm`;
   navigator.clipboard?.writeText(text).catch(() => {});
-  // Brief visual toast Ã¢â‚¬â€ reuse any existing toast element or console
+  // Brief visual toast ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â reuse any existing toast element or console
   console.info(`[Measure] Copied to clipboard: ${text}`);
 }
 
@@ -1723,7 +1834,7 @@ function _mapDirectPcfComponent(comp) {
   const branch1Point = _parseDirectPcfPoint(raw['BRANCH1-POINT']);
   const supportPoint = point1 || _parseDirectPcfPoint(raw['CO-ORDS']);
   const id = String(raw['COMPONENT-IDENTIFIER'] || comp?.id || `${type}-pcf`);
-  // Map SUPPORT-DIRECTION keyword Ã¢â€ â€™ SUPPORT_KIND for rendering classification
+  // Map SUPPORT-DIRECTION keyword ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ SUPPORT_KIND for rendering classification
   const _DIRECTION_KIND = { DOWN: 'REST', UP: 'REST', NORTH: 'GUIDE', SOUTH: 'GUIDE', EAST: 'GUIDE', WEST: 'GUIDE' };
   const supportDir = String(raw['SUPPORT-DIRECTION'] || '').toUpperCase();
   const inferredKind = _DIRECTION_KIND[supportDir] || '';
@@ -1785,16 +1896,16 @@ function _resolveBendCentrePoint(seg, p1, p2, nodePos) {
   const controlPoint = _pt(nodePos.get(seg.CONTROL_NODE));
   if (controlPoint) return controlPoint;
 
-  // Ã‚Â§10.5.4: CP is the corner intersection Ã¢â‚¬â€ NOT the midpoint.
-  // Midpoint gives a 180Ã‚Â° angle Ã¢â€ â€™ degenerate Ã¢â€ â€™ renders as a cylinder.
+  // Ãƒâ€šÃ‚Â§10.5.4: CP is the corner intersection ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â NOT the midpoint.
+  // Midpoint gives a 180Ãƒâ€šÃ‚Â° angle ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ degenerate ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ renders as a cylinder.
   // Corner CP: try all 6 combinations of (EP1 or EP2) per coordinate axis;
   // the valid one has dist(CP,EP1) = dist(CP,EP2) and a non-zero radius.
   return _bendCornerCP(p1, p2) || null;
 }
 
 /**
- * Compute the 90Ã‚Â° bend corner-intersection CP from two endpoints.
- * Per Ã‚Â§10.5.4: CP shares one axis-coord with EP1 and the complementary
+ * Compute the 90Ãƒâ€šÃ‚Â° bend corner-intersection CP from two endpoints.
+ * Per Ãƒâ€šÃ‚Â§10.5.4: CP shares one axis-coord with EP1 and the complementary
  * axis-coord with EP2, so dist(CP,EP1) = dist(CP,EP2) = bend_radius.
  * @param {{x,y,z}} p1
  * @param {{x,y,z}} p2
@@ -1820,12 +1931,12 @@ function _bendCornerCP(p1, p2) {
   for (const cp of candidates) {
     const d1 = dist3(cp, p1);
     const d2 = dist3(cp, p2);
-    if (d1 < 0.1 || d2 < 0.1) continue;   // endpoint ON corner Ã¢â€ â€™ degenerate
+    if (d1 < 0.1 || d2 < 0.1) continue;   // endpoint ON corner ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ degenerate
     const err = Math.abs(d1 - d2);
     if (err < bestErr) { bestErr = err; best = cp; }
   }
 
-  if (!best || bestErr > 1.0) return null;  // no valid corner found (not a 90Ã‚Â° bend)
+  if (!best || bestErr > 1.0) return null;  // no valid corner found (not a 90Ãƒâ€šÃ‚Â° bend)
   return { x: best.x, y: best.y, z: best.z, bore };
 }
 

@@ -241,6 +241,9 @@ export const DEFAULT_VIEWER3D_CONFIG = {
     offsetScale: 1,
     verificationMode: false,
   },
+  intakeRouting: {
+    useUxmlTopoBuilder: false,
+  },
   heatmap: {
     enabled: false,
     metric: 'T1',

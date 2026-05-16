@@ -7,6 +7,7 @@ global.document = dom.window.document;
 global.window = dom.window;
 import {
   detectSourceType,
+  runPipelineActionAsync,
   runPipelineAction,
   runUniversalXmlPipelineFromText,
   renderUniversalXmlConverterTab,
@@ -84,7 +85,7 @@ describe('Universal XML Converter Tab Agent 09', () => {
       </InputXML>
     `)).toBe('INPUT_XML');
 
-    expect(detectSourceType('standard.xml', STANDARD_XML_SAMPLE)).toBe('EXISTING_XML');
+    expect(detectSourceType('standard.xml', STANDARD_XML_SAMPLE)).toBe('STANDARD_XML');
   });
 
   it('detects *_INPUT.XML as InputXML source type using filename hint', () => {
@@ -114,9 +115,9 @@ describe('Universal XML Converter Tab Agent 09', () => {
 
   it('uses extension fallback for non-XML converter sources', () => {
     expect(detectSourceType('model.pcf', 'PIPELINE-REFERENCE X')).toBe('PCF');
-    expect(detectSourceType('drawing.pdf', '%PDF')).toBe('PDF_TO_INPUTXML');
+    expect(detectSourceType('drawing.pdf', '%PDF')).toBe('PDF');
     expect(detectSourceType('model.rev', 'REV')).toBe('REV_TO_XML');
-    expect(detectSourceType('stage.json', '{"a":1}')).toBe('JSON_TO_XML');
+    expect(detectSourceType('stage.json', '{"a":1}')).toBe('STAGED_JSON');
     expect(detectSourceType('attributes.txt', 'A=B')).toBe('TXT_TO_XML');
   });
 
@@ -125,7 +126,7 @@ describe('Universal XML Converter Tab Agent 09', () => {
       sourceName: 'standard.xml',
     });
 
-    expect(state.detectedSourceType).toBe('EXISTING_XML');
+    expect(state.detectedSourceType).toBe('STANDARD_XML');
 
     expect(state.pipeline.profileReport.profile).toBe('STANDARD_XML');
     expect(state.pipeline.normalizerResult.ok).toBe(true);
@@ -167,24 +168,22 @@ describe('Universal XML Converter Tab Agent 09', () => {
     state.selectedSourceType = 'PCF';
     state.detectedSourceType = 'PCF';
 
-    expect(() => runPipelineAction(state, 'convert-uxml')).toThrow(
-      'PCF must go through the existing converter bridge before UXML normalization.'
-    );
+    expect(() => runPipelineAction(state, 'convert-uxml')).toThrow(/PCF must go through the existing converter bridge before UXML normalization/);
   });
 
   it('provides stable source action gating', () => {
     const state = _test.createInitialState();
 
-    expect(_test.canRunXmlActions(state)).toBe(false);
+    expect(_test.canRunXmlActions(state)).toBe(true);
 
     state.sourceText = STANDARD_XML_SAMPLE;
-    state.detectedSourceType = 'EXISTING_XML';
+    state.detectedSourceType = 'STANDARD_XML';
 
     expect(_test.canRunXmlActions(state)).toBe(true);
 
     state.selectedSourceType = 'PCF';
 
-    expect(_test.canRunXmlActions(state)).toBe(false);
+    expect(_test.canRunXmlActions(state)).toBe(true);
   });
 
   it('builds export summary with deferred output/master placeholders', () => {
@@ -197,10 +196,36 @@ describe('Universal XML Converter Tab Agent 09', () => {
     expect(summary.schema).toBe('pcf-glb-viewer/universal-xml-converter-tab-summary/v2');
     expect(summary.phase).toBe('Agent09');
     expect(summary.source.name).toBe('summary.xml');
-    expect(summary.deferred.existingConverterBridge).toBe(true);
+    expect(summary.deferred.existingConverterBridge).toBe(false);
     expect(summary.deferred.outputBridges).toBe(true);
     expect(summary.deferred.masters).toBe(true);
     expect(summary.comparator).toBeTruthy();
+  });
+
+  it('routes raw PCF source through Source Intake Bridge before UXML normalization', async () => {
+    const state = _test.createInitialState();
+
+    state.sourceFile = {
+      name: 'model.pcf',
+      size: 128,
+      type: 'text/plain',
+      lastModified: null,
+    };
+    state.sourceText = `
+ISOGEN-FILES ISOGEN.FLS
+PIPELINE-REFERENCE /TEST
+PIPE
+    END-POINT 0 0 0
+    END-POINT 1000 0 0
+`;
+    state.selectedSourceType = 'PCF';
+    state.detectedSourceType = 'PCF';
+
+    const intake = await runPipelineActionAsync(state, 'run-source-intake-bridge');
+
+    expect(intake.ok).toBe(true);
+    expect(intake.bridgeOutputProfile).toBe('STANDARD_XML');
+    expect(state.pipeline.uxml.components.length).toBeGreaterThan(0);
   });
 
   it('can run the pipeline step-by-step through runPipelineAction', () => {
@@ -266,7 +291,7 @@ describe('Universal XML Converter Tab Agent 09', () => {
 
     expect(html).toContain('Route Handoff');
     expect(html).toContain('Masters by Target Route');
-    expect(html).toContain('CL1 Route Package');
+    expect(html).toContain('Route Package');
     expect(html).toContain('does not emit PCF');
     expect(html).not.toContain('Masters deferred');
   });
