@@ -57,6 +57,7 @@ const REQUIRED_TESTS = Object.freeze([
   'viewer/tests/uxml-universal-topo-graph-builder.test.js',
   'viewer/tests/uxml-ray-topo-graph-builder.test.js',
     'viewer/tests/uxml-topo-graph-comparator.test.js',
+  'viewer/tests/uxml-inputxml-1001-schema-extension.test.js',
   'viewer/tests/universal-xml-converter-tab.test.js',
   'viewer/tests/rvm-pcf-uxml-topology-bridge.test.js',
   'viewer/tests/uxml-topology-decision-gate.test.js',
@@ -88,6 +89,8 @@ const REQUIRED_EXPORT_MARKERS = Object.freeze([
       'mapInputXmlToUxml',
       'mapInputXmlSchemaToUxml',
       'UXML_INPUTXML_SCHEMA_MAPPER_SCHEMA',
+      'UXML_INPUTXML_1001_EXPECTED_METRICS',
+      'UXML_INPUTXML_1001_COPY_SCHEMA_EXTENSION_SCHEMA',
     ],
   },
   {
