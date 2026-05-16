@@ -1622,6 +1622,14 @@ function _buildStpTextFromRmssHierarchy(hierarchy, outputName) {
     return n.toFixed(6).replace(/\.?0+$/, '') || '0';
   };
 
+  const pointDist = (a, b) => {
+    const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  };
+
+  // Stub half-length (mm) used when support position is a single point.
+  const STUB_HALF_MM = 75;
+
   let memberIndex = 0;
   for (const branch of normalized) {
     if (!_looksLikeBranchNode(branch)) continue;
@@ -1632,12 +1640,32 @@ function _buildStpTextFromRmssHierarchy(hierarchy, outputName) {
       const attrs = child?.attributes || {};
       const apos = _normalizePoint(attrs.APOS);
       const lpos = _normalizePoint(attrs.LPOS);
-      if (!apos || !lpos) continue;
+      const bpos = _normalizePoint(attrs.BPOS);
+      const hpos = _normalizePoint(attrs.HPOS);
+      const tpos = _normalizePoint(attrs.TPOS);
+      const pos  = _normalizePoint(attrs.POS);
+
+      let start = null;
+      let end   = null;
+
+      // Prefer any pair of positions that are meaningfully apart (> 1 mm).
+      if (apos && lpos && pointDist(apos, lpos) > 1) { start = apos; end = lpos; }
+      else if (hpos && bpos && pointDist(hpos, bpos) > 1) { start = hpos; end = bpos; }
+      else if (apos && hpos && pointDist(apos, hpos) > 1) { start = apos; end = hpos; }
+      else if (apos && tpos && pointDist(apos, tpos) > 1) { start = apos; end = tpos; }
+      else {
+        // Single-point support: create a vertical stub so it is visible in 3D.
+        const anchor = pos || apos || lpos || hpos || bpos || tpos;
+        if (!anchor) continue;
+        start = { x: anchor.x, y: anchor.y, z: anchor.z - STUB_HALF_MM };
+        end   = { x: anchor.x, y: anchor.y, z: anchor.z + STUB_HALF_MM };
+      }
+
       const label = _toText(attrs.NAME || child?.name || `SUPPORT:${memberIndex + 1}`).replace(/'/g, "''");
       const startId = entityId++;
-      dataLines.push(`#${startId}=CARTESIAN_POINT('',(${fmtCoord(apos.x)},${fmtCoord(apos.y)},${fmtCoord(apos.z)}));`);
+      dataLines.push(`#${startId}=CARTESIAN_POINT('',(${fmtCoord(start.x)},${fmtCoord(start.y)},${fmtCoord(start.z)}));`);
       const endId = entityId++;
-      dataLines.push(`#${endId}=CARTESIAN_POINT('',(${fmtCoord(lpos.x)},${fmtCoord(lpos.y)},${fmtCoord(lpos.z)}));`);
+      dataLines.push(`#${endId}=CARTESIAN_POINT('',(${fmtCoord(end.x)},${fmtCoord(end.y)},${fmtCoord(end.z)}));`);
       const polyId = entityId++;
       dataLines.push(`#${polyId}=POLYLINE('${label}',(#${startId},#${endId}));`);
       polylineIds.push(polyId);

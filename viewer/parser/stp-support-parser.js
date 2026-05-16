@@ -115,6 +115,8 @@ function _buildMembersFromPolyline(polyline, pointsById) {
     const start = pointsById.get(polyline.pointIds[index]);
     const end = pointsById.get(polyline.pointIds[index + 1]);
     if (!start || !end) continue;
+    const dx = end.x - start.x, dy = end.y - start.y, dz = end.z - start.z;
+    if (Math.sqrt(dx * dx + dy * dy + dz * dz) < 1e-6) continue;
     members.push({
       sourceEntityType: 'POLYLINE',
       sourceEntityId: polyline.id,
