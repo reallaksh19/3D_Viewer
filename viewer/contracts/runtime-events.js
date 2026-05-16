@@ -36,6 +36,7 @@
   MODEL_CONVERTER_START: 'model-converter-start',
   MODEL_CONVERTER_SUCCESS: 'model-converter-success',
   MODEL_CONVERTER_ERROR: 'model-converter-error',
+  MODEL_CONVERTER_STP_READY: 'model-converter-stp-ready',
   RVM_MODEL_LOADED: 'rvm-model-loaded',
   RVM_NODE_SELECTED: 'rvm-node-selected',
   RVM_TAG_CREATED: 'rvm-tag-created',

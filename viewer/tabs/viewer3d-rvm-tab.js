@@ -1858,3 +1858,11 @@ function _bindTags(container) {
     });
   }
 }
+
+// Auto-append STP members from the Model Converters tab when viewer is active.
+on(RuntimeEvents.MODEL_CONVERTER_STP_READY, ({ members }) => {
+  if (!_viewer || !Array.isArray(members) || !members.length) return;
+  _viewer.clearStpMembers();
+  _viewer.appendStpMembers(members);
+  notify({ type: 'info', message: `STP: auto-appended ${members.length} support member(s) from converter.` });
+});

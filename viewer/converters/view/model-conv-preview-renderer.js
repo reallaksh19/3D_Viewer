@@ -94,6 +94,8 @@ export class ModelConverters_3DModelConv_PreviewRenderer {
 
     this._3DModelConv_group = new THREE.Group();
     this.scene.add(this._3DModelConv_group);
+    this._3DModelConv_stpGroup = new THREE.Group();
+    this.scene.add(this._3DModelConv_stpGroup);
 
     const ambient = new THREE.AmbientLight(0xffffff, 0.55);
     const directional = new THREE.DirectionalLight(0xffffff, 0.85);
@@ -135,8 +137,34 @@ export class ModelConverters_3DModelConv_PreviewRenderer {
     }
   }
 
+  _3DModelConv_clearStp() {
+    const children = [...this._3DModelConv_stpGroup.children];
+    for (const child of children) {
+      this._3DModelConv_stpGroup.remove(child);
+      try { child.geometry?.dispose?.(); } catch {}
+      _3DModelConv_disposeMaterial(child.material);
+    }
+  }
+
+  _3DModelConv_overlayStp(members) {
+    this._3DModelConv_clearStp();
+    if (!members || !members.length) return;
+    const positions = [];
+    for (const member of members) {
+      positions.push(
+        _3DModelConv_toNumber(member.start?.x), _3DModelConv_toNumber(member.start?.y), _3DModelConv_toNumber(member.start?.z),
+        _3DModelConv_toNumber(member.end?.x), _3DModelConv_toNumber(member.end?.y), _3DModelConv_toNumber(member.end?.z),
+      );
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    const material = new THREE.LineBasicMaterial({ color: 0xff8c00 });
+    this._3DModelConv_stpGroup.add(new THREE.LineSegments(geometry, material));
+  }
+
   _3DModelConv_renderProject(project) {
     this._3DModelConv_clear();
+    this._3DModelConv_clearStp();
     if (!project) return;
 
     const endpoints = _3DModelConv_collectSegmentEndpoints(project);
@@ -187,6 +215,8 @@ export class ModelConverters_3DModelConv_PreviewRenderer {
 
   _3DModelConv_fit() {
     const box = new THREE.Box3().setFromObject(this._3DModelConv_group);
+    const stpBox = new THREE.Box3().setFromObject(this._3DModelConv_stpGroup);
+    if (!stpBox.isEmpty()) box.union(stpBox);
     if (box.isEmpty()) return;
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
@@ -203,6 +233,7 @@ export class ModelConverters_3DModelConv_PreviewRenderer {
 
   _3DModelConv_renderStpMembers(members) {
     this._3DModelConv_clear();
+    this._3DModelConv_clearStp();
     if (!members || !members.length) return;
     const positions = [];
     for (const member of members) {
@@ -229,6 +260,7 @@ export class ModelConverters_3DModelConv_PreviewRenderer {
     this._3DModelConv_raf = 0;
     try { this._3DModelConv_resizeObserver?.disconnect(); } catch {}
     this._3DModelConv_clear();
+    this._3DModelConv_clearStp();
     try { this.renderer?.dispose?.(); } catch {}
     if (this.renderer?.domElement?.parentElement === this.container) {
       this.container.removeChild(this.renderer.domElement);

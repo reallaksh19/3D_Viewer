@@ -130,7 +130,7 @@ const CONVERTER_DEFS = Object.freeze({
   },
   rvmattr_to_xml: {
     id: 'rvmattr_to_xml',
-    label: 'RVM+ATTRIBUTE -> XML+STP',
+    label: 'ATT/RVM -> XML+JSON+STP',
     primaryAccept: '.rvm,.RVM',
     primaryLabel: 'RVM Input',
     secondaryLabel: 'ATT/TXT Attribute File (optional)',
@@ -1599,6 +1599,58 @@ function _collectBboxLeafCount(payload) {
   return count;
 }
 
+function _buildStpTextFromRmssHierarchy(hierarchy, outputName) {
+  const normalized = Array.isArray(hierarchy) ? hierarchy : [];
+  const timestamp = new Date().toISOString().slice(0, 19) + 'Z';
+  const escapedName = _toText(outputName).replace(/'/g, "''");
+  const header = [
+    'ISO-10303-21;',
+    'HEADER;',
+    "FILE_DESCRIPTION(('ATT support members exported as STEP polylines'),'2;1');",
+    `FILE_NAME('${escapedName}','${timestamp}',('browser-runtime'),('browser-runtime'),'browser-runtime','browser-runtime','');`,
+    "FILE_SCHEMA(('CIS2'));",
+    'ENDSEC;',
+    'DATA;',
+  ];
+  const dataLines = [];
+  let entityId = 1;
+  const polylineIds = [];
+
+  const fmtCoord = (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '0';
+    return n.toFixed(6).replace(/\.?0+$/, '') || '0';
+  };
+
+  let memberIndex = 0;
+  for (const branch of normalized) {
+    if (!_looksLikeBranchNode(branch)) continue;
+    const children = Array.isArray(branch.children) ? branch.children : [];
+    for (const child of children) {
+      const type = _toText(child?.type || child?.attributes?.TYPE || '').toUpperCase();
+      if (type !== 'SUPPORT') continue;
+      const attrs = child?.attributes || {};
+      const apos = _normalizePoint(attrs.APOS);
+      const lpos = _normalizePoint(attrs.LPOS);
+      if (!apos || !lpos) continue;
+      const label = _toText(attrs.NAME || child?.name || `SUPPORT:${memberIndex + 1}`).replace(/'/g, "''");
+      const startId = entityId++;
+      dataLines.push(`#${startId}=CARTESIAN_POINT('',(${fmtCoord(apos.x)},${fmtCoord(apos.y)},${fmtCoord(apos.z)}));`);
+      const endId = entityId++;
+      dataLines.push(`#${endId}=CARTESIAN_POINT('',(${fmtCoord(lpos.x)},${fmtCoord(lpos.y)},${fmtCoord(lpos.z)}));`);
+      const polyId = entityId++;
+      dataLines.push(`#${polyId}=POLYLINE('${label}',(#${startId},#${endId}));`);
+      polylineIds.push(polyId);
+      memberIndex++;
+    }
+  }
+
+  if (!polylineIds.length) return null;
+  const refs = polylineIds.map((id) => `#${id}`).join(',');
+  dataLines.push(`#${entityId}=PRESENTATION_LAYER_ASSIGNMENT('SUPPORT_MEMBERS','',(${refs}));`);
+  return [...header, ...dataLines, 'ENDSEC;', 'END-ISO-10303-21;'].join('\n') + '\n';
+}
+
 function _buildXmlFromStagedJsonText(stagedJsonText, inputName, options) {
   let parsed;
   try {
@@ -2028,19 +2080,25 @@ async function _runManagedRvmAttributeToXml(
                   : [],
               },
             });
+            const pathAOutputs = [
+              {
+                name: `${stem}_rvmattr_to_xml.xml`,
+                text: stagedResult.xmlText,
+                mime: 'text/xml;charset=utf-8',
+              },
+              {
+                name: `${stem}_managed_stage.json`,
+                text: stagedResult.stageJsonText,
+                mime: 'application/json;charset=utf-8',
+              },
+            ];
+            try {
+              const hier = JSON.parse(stagedResult.stageJsonText);
+              const stpText = _buildStpTextFromRmssHierarchy(hier, `${stem}_supports.stp`);
+              if (stpText) pathAOutputs.push({ name: `${stem}_supports.stp`, text: stpText, mime: 'text/plain;charset=utf-8' });
+            } catch {}
             return {
-              outputs: [
-                {
-                  name: `${stem}_rvmattr_to_xml.xml`,
-                  text: stagedResult.xmlText,
-                  mime: 'text/xml;charset=utf-8',
-                },
-                {
-                  name: `${stem}_managed_stage.json`,
-                  text: stagedResult.stageJsonText,
-                  mime: 'application/json;charset=utf-8',
-                },
-              ],
+              outputs: pathAOutputs,
               logs: _mergeStageLogs(stages),
               endpoint: nativeJson.endpoint,
             };
@@ -2330,6 +2388,17 @@ export function renderModelConvertersTab(container) {
       return;
     }
     previewRenderer._3DModelConv_renderProject(previewResult.project);
+    // Overlay STP members on top of the project if an STP output is present.
+    const stpOutput = (Array.isArray(outputs) ? outputs : []).find((o) => {
+      const n = _toText(o?.name).toLowerCase();
+      return n.endsWith('.stp') || n.endsWith('.step');
+    });
+    if (stpOutput) {
+      try {
+        const { members } = parseStpSupportMembers(_toText(stpOutput.text));
+        if (members.length > 0) previewRenderer._3DModelConv_overlayStp(members);
+      } catch {}
+    }
     _3DModelConv_setPreviewMeta(
       _3DModelConv_buildPreviewMetaText(
         previewResult.project,
@@ -2602,23 +2671,28 @@ export function renderModelConvertersTab(container) {
           const attText = _decodeTextUtf8(secondaryBytes);
           const hierarchy = parseRmssAttributes(attText, state.rvm?.routing);
           const xmlFromAtt = _buildPsiXmlFromRmssHierarchy(hierarchy, secondaryFile.name, runValues);
+          const attStem = _baseNameWithoutExtension(secondaryFile.name);
+          const attStpText = _buildStpTextFromRmssHierarchy(hierarchy, `${attStem}_supports.stp`);
+          const attOutputs = [
+            {
+              name: `${attStem}_rvmattr_to_xml.xml`,
+              text: xmlFromAtt.xmlText,
+              mime: 'text/xml;charset=utf-8',
+            },
+            {
+              name: `${attStem}_managed_stage.json`,
+              text: JSON.stringify(hierarchy, null, 2),
+              mime: 'application/json;charset=utf-8',
+            },
+          ];
+          if (attStpText) attOutputs.push({ name: `${attStem}_supports.stp`, text: attStpText, mime: 'text/plain;charset=utf-8' });
           response = {
-            outputs: [
-              {
-                name: `${_baseNameWithoutExtension(secondaryFile.name)}_rvmattr_to_xml.xml`,
-                text: xmlFromAtt.xmlText,
-                mime: 'text/xml;charset=utf-8',
-              },
-              {
-                name: `${_baseNameWithoutExtension(secondaryFile.name)}_managed_stage.json`,
-                text: JSON.stringify(hierarchy, null, 2),
-                mime: 'application/json;charset=utf-8',
-              },
-            ],
+            outputs: attOutputs,
             logs: {
               stdout: [
                 `ATT/TXT parsed into ${xmlFromAtt.branchCount} branch(es).`,
                 `Generated ${xmlFromAtt.nodeCount} node(s) into PSI-style XML.`,
+                ...(attStpText ? [`Generated STP for ATT support members.`] : []),
               ],
               stderr: xmlFromAtt.skippedComponents > 0
                 ? [`Skipped ${xmlFromAtt.skippedComponents} component(s) with incomplete coordinates.`]
@@ -2686,6 +2760,14 @@ export function renderModelConvertersTab(container) {
       setStatus(`Completed: ${output.name}`, 'ok');
       notify({ level: 'success', title: 'Converter', message: `${def.label} completed.` });
       emit(RuntimeEvents.MODEL_CONVERTER_SUCCESS, { converterId: selectedConverter, output: output.name });
+      // Push STP members to the 3D RVM viewer if an STP output was produced.
+      const stpOut = outputs.find((o) => { const n = _toText(o?.name).toLowerCase(); return n.endsWith('.stp') || n.endsWith('.step'); });
+      if (stpOut) {
+        try {
+          const { members } = parseStpSupportMembers(_toText(stpOut.text));
+          if (members.length > 0) emit(RuntimeEvents.MODEL_CONVERTER_STP_READY, { members, converterId: selectedConverter });
+        } catch {}
+      }
     } catch (error) {
       const message = _toText(error?.message || error);
       setStatus(`Failed: ${message}`, 'bad');
