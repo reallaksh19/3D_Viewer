@@ -972,6 +972,7 @@ function _bindStpLoader(container) {
       }
       _viewer.clearStpMembers();
       _viewer.appendStpMembers(members);
+      _viewer.fitAll?.();
       notify({ type: 'info', message: `STP: appended ${stats.memberCount} support member(s) from ${file.name}.` });
     } catch (err) {
       notify({ type: 'error', message: `STP import failed: ${err?.message || err}` });
@@ -1864,5 +1865,6 @@ on(RuntimeEvents.MODEL_CONVERTER_STP_READY, ({ members }) => {
   if (!_viewer || !Array.isArray(members) || !members.length) return;
   _viewer.clearStpMembers();
   _viewer.appendStpMembers(members);
+  _viewer.fitAll?.();
   notify({ type: 'info', message: `STP: auto-appended ${members.length} support member(s) from converter.` });
 });

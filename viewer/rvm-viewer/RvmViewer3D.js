@@ -901,18 +901,39 @@ export class RvmViewer3D {
             positions.push(member.end.x, member.end.y, member.end.z);
         }
         if (!positions.length) return;
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-        const material = new THREE.LineBasicMaterial({ color: 0xff8c00, depthTest: false });
-        this._stpGroup.add(new THREE.LineSegments(geometry, material));
+
+        // Lines — always on top so they don't disappear inside geometry.
+        const lineGeom = new THREE.BufferGeometry();
+        lineGeom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        const lineMat = new THREE.LineBasicMaterial({ color: 0xff8c00, depthTest: false });
+        this._stpGroup.add(new THREE.LineSegments(lineGeom, lineMat));
+
+        // Sphere markers at each member midpoint — visible at full scene scale.
+        const modelBox = new THREE.Box3().setFromObject(this.modelGroup);
+        const diag = modelBox.isEmpty() ? 5000 : Math.max(modelBox.getSize(new THREE.Vector3()).length(), 1);
+        const radius = Math.max(50, diag * 0.004);
+        const sphereGeom = new THREE.SphereGeometry(radius, 8, 6);
+        const sphereMat = new THREE.MeshBasicMaterial({ color: 0xff8c00, depthTest: false });
+        for (const member of members) {
+            const mx = (member.start.x + member.end.x) / 2;
+            const my = (member.start.y + member.end.y) / 2;
+            const mz = (member.start.z + member.end.z) / 2;
+            const sphere = new THREE.Mesh(sphereGeom, sphereMat);
+            sphere.position.set(mx, my, mz);
+            this._stpGroup.add(sphere);
+        }
     }
 
     clearStpMembers() {
         if (!this._stpGroup) return;
+        const sharedGeoms = new Set();
+        const sharedMats = new Set();
         for (const child of [...this._stpGroup.children]) {
             this._stpGroup.remove(child);
-            try { child.geometry?.dispose(); } catch {}
-            try { child.material?.dispose(); } catch {}
+            if (child.geometry) sharedGeoms.add(child.geometry);
+            if (child.material) sharedMats.add(child.material);
         }
+        for (const g of sharedGeoms) { try { g.dispose(); } catch {} }
+        for (const m of sharedMats) { try { m.dispose(); } catch {} }
     }
 }

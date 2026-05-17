@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { RuntimeEvents } from '../contracts/runtime-events.js';
 import { on } from '../core/event-bus.js';
 import { RvmViewer3D } from './RvmViewer3D.js';
+import { getRvmSupportSymbolSettings } from './RvmSupportSymbols.js';
 
 const PATCHED = Symbol.for('pcf-glb-rvm-support-source-overlay-patched');
 const ROOT = '__RVM_SUPPORT_SYMBOLS__';
@@ -128,7 +129,7 @@ function overlay(viewer) {
   if (!supports.length || !viewer?.scene || !viewer?.modelGroup) return { created: 0, sourceSupports: 0 };
   const old = viewer.scene.getObjectByName(ROOT); if (old) { viewer.scene.remove(old); dispose(old); }
   viewer.modelGroup.updateMatrixWorld(true); const box = new THREE.Box3().setFromObject(viewer.modelGroup);
-  const diag = box.isEmpty() ? 1000 : Math.max(box.getSize(new THREE.Vector3()).length(), 1); const scale = Math.max(8, Math.min(120, diag * 0.0035));
+  const diag = box.isEmpty() ? 1000 : Math.max(box.getSize(new THREE.Vector3()).length(), 1); const { scaleMultiplier } = getRvmSupportSymbolSettings(); const scale = Math.max(8, Math.min(120, diag * 0.0035)) * (Number.isFinite(scaleMultiplier) ? scaleMultiplier : 1);
   const root = new THREE.Group(); root.name = ROOT; const seen = new Set();
   for (const item of supports) { const key = `${item.tag}:${item.kind}:${item.local.x.toFixed(1)}:${item.local.y.toFixed(1)}:${item.local.z.toFixed(1)}`.toUpperCase(); if (seen.has(key)) continue; seen.add(key); root.add(supportObject(item, viewer, scale)); }
   if (root.children.length) viewer.scene.add(root);
@@ -146,6 +147,17 @@ export function installRvmSupportSourceOverlayPatch() {
     if (result.sourceSupports) this.supportSymbolDiagnostics = result;
   };
   RvmViewer3D.prototype.refreshSupportSymbolsFromSource = function refreshSupportSymbolsFromSource() { this.supportSymbolDiagnostics = overlay(this); };
+  RvmViewer3D.prototype.setSupportSymbolOptions = function setSupportSymbolOptions(options = {}) {
+    this.supportSymbolOptions = { ...(this.supportSymbolOptions || {}), ...options };
+    // Try source-overlay rebuild (uses stored scaleMultiplier via getRvmSupportSymbolSettings).
+    const fromSource = overlay(this);
+    if (fromSource.created > 0) { this.supportSymbolDiagnostics = fromSource; return fromSource; }
+    // Fall back to bore-anchor rebuild if source has no data.
+    if (typeof this.refreshSupportSymbols === 'function') {
+      this.supportSymbolDiagnostics = this.refreshSupportSymbols() || this.supportSymbolDiagnostics;
+    }
+    return this.supportSymbolDiagnostics || { created: 0 };
+  };
   RvmViewer3D.prototype[PATCHED] = true;
 }
 

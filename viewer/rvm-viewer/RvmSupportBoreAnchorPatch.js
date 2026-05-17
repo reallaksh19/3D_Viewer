@@ -170,8 +170,6 @@ function dispose(root) {
 
 function addBoreAnchoredSupportSymbols(viewer) {
   if (!viewer?.scene || !viewer?.modelGroup) return { created: 0 };
-  const old = viewer.scene.getObjectByName(ROOT_NAME);
-  if (old) { viewer.scene.remove(old); dispose(old); }
   viewer.modelGroup.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(viewer.modelGroup);
   const diag = box.isEmpty() ? 1000 : Math.max(box.getSize(new THREE.Vector3()).length(), 1);
@@ -191,8 +189,18 @@ function addBoreAnchoredSupportSymbols(viewer) {
     if (seen.has(key)) return;
     seen.add(key); root.add(s);
   });
-  if (root.children.length) viewer.scene.add(root);
-  return { created: root.children.length, placement: 'support-coordinate+bore-offset', labelsVisible: false };
+  if (root.children.length) {
+    // Replace existing only when new ones are found.
+    const old = viewer.scene.getObjectByName(ROOT_NAME);
+    if (old) { viewer.scene.remove(old); dispose(old); }
+    viewer.scene.add(root);
+    return { created: root.children.length, placement: 'support-coordinate+bore-offset', labelsVisible: false };
+  }
+  // Safety rule: keep existing if traversal found 0 to avoid wiping source-overlay symbols.
+  dispose(root);
+  const existing = viewer.scene.getObjectByName(ROOT_NAME);
+  if (existing) { existing.visible = true; return { created: existing.children?.length || 0, preservedExisting: true }; }
+  return { created: 0, placement: 'support-coordinate+bore-offset', labelsVisible: false };
 }
 
 export function installRvmSupportBoreAnchorPatch() {
@@ -204,11 +212,6 @@ export function installRvmSupportBoreAnchorPatch() {
   };
   RvmViewer3D.prototype.refreshSupportSymbols = function refreshSupportSymbols() {
     this.supportSymbolDiagnostics = addBoreAnchoredSupportSymbols(this);
-  };
-  RvmViewer3D.prototype.setSupportSymbolOptions = function setSupportSymbolOptions(options = {}) {
-    this.supportSymbolOptions = { ...(this.supportSymbolOptions || {}), ...options };
-    this.supportSymbolDiagnostics = addBoreAnchoredSupportSymbols(this);
-    return this.supportSymbolDiagnostics;
   };
   RvmViewer3D.prototype.setSupportSymbolLabelsVisible = function setSupportSymbolLabelsVisible() {
     // Labels are intentionally disabled for support symbols; use selection/attributes for details.
