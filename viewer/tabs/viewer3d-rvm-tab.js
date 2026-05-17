@@ -5,6 +5,7 @@ import { detectRvmCapabilities } from '../rvm/RvmCapabilities.js';
 import { notify } from '../diagnostics/notification-center.js';
 import { RvmViewer3D } from '../rvm-viewer/RvmViewer3D.js';
 import { parseRmssAttributes } from '../converters/rmss-attribute-parser.js';
+import { resolveKindFromAttrs as _resolveKindFromAttrs } from '../rvm-viewer/RvmSupportMapper.js';
 import { parseStpSupportMembers } from '../parser/stp-support-parser.js';
 import { RvmSearchIndex } from '../rvm/RvmSearchIndex.js';
 import { RvmTagXmlStore } from '../rvm/RvmTagXmlStore.js';
@@ -16,6 +17,23 @@ import {
 } from '../rvm-viewer/RvmSupportSymbols.js';
 import { renderSupportMapperPanel } from '../rvm-viewer/RvmSupportMapper.js';
 
+function _enrichJsonWithMapperKinds(nodes) {
+  if (!Array.isArray(nodes)) return;
+  for (const node of nodes) {
+    if (!node) continue;
+    const typeStr = String(node.type || node.attributes?.TYPE || '').toUpperCase();
+    if (typeStr === 'SUPPORT' || typeStr === 'ATTA' || typeStr === 'ANCI') {
+      const attrs = node.attributes || (node.attributes = {});
+      if (!attrs.SUPPORT_TYPE) {
+        const kind = _resolveKindFromAttrs(attrs);
+        if (kind) attrs.SUPPORT_TYPE = kind;
+      }
+    }
+    if (Array.isArray(node.children)) _enrichJsonWithMapperKinds(node.children);
+    if (Array.isArray(node.items)) _enrichJsonWithMapperKinds(node.items);
+    if (Array.isArray(node.branches)) _enrichJsonWithMapperKinds(node.branches);
+  }
+}
 
 let _viewer = null;
 let _shortcutHandler = null;
@@ -933,12 +951,46 @@ function _ensureRvmSupportSettings(container) {
   _syncRvmSupportScaleControls(container, getRvmSupportSymbolSettings().scaleMultiplier);
 }
 
+const _RVM_RIGHT_PANEL_WIDTH_KEY = 'pcf-rvm-right-panel-width';
+
+function _installRightPanelResizer(container) {
+  const panel = container.querySelector('.rvm-right-panel');
+  const handle = panel?.querySelector('.rvm-right-panel-resize-handle');
+  if (!panel || !handle || handle._resizerInstalled) return;
+  handle._resizerInstalled = true;
+
+  const saved = parseInt(localStorage.getItem(_RVM_RIGHT_PANEL_WIDTH_KEY), 10);
+  if (saved && saved >= 160 && saved <= 600) panel.style.width = `${saved}px`;
+
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = panel.offsetWidth;
+    handle.classList.add('is-dragging');
+
+    const onMove = (me) => {
+      const delta = startX - me.clientX; // dragging left edge → moving left = wider
+      const newW = Math.max(160, Math.min(600, startW + delta));
+      panel.style.width = `${newW}px`;
+    };
+    const onUp = () => {
+      handle.classList.remove('is-dragging');
+      try { localStorage.setItem(_RVM_RIGHT_PANEL_WIDTH_KEY, String(panel.offsetWidth)); } catch {}
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
 function _ensureRvmUiEnhancements(container) {
   _ensureRvmStatusStrip(container);
   _ensureRvmEmptyStates(container);
   _ensureRvmTagPanelActions(container);
   _bindRvmTagPanelActions(container);
   _refreshRvmUiStatus(container);
+  _installRightPanelResizer(container);
 }
 
 function _bindRvmUiStatusEvents(container) {
@@ -1028,6 +1080,7 @@ function _bindBundleLoader(container) {
             try {
                 const text = await sidecar.text();
                 const hierarchyJson = parseRmssAttributes(text, state.rvm?.routing);
+                _enrichJsonWithMapperKinds(hierarchyJson);
                 if (!Array.isArray(hierarchyJson) || hierarchyJson.length === 0) {
                     notify({ type: 'warning', message: 'No branch/fitting topology was parsed from attribute file.' });
                 }
@@ -1285,6 +1338,7 @@ function _buildHTML(caps) {
 
 
     <div class="geo-right-panel rvm-right-panel">
+      <div class="rvm-right-panel-resize-handle" title="Drag to resize panel"></div>
       <div class="rvm-panel-header">Attributes</div>
       <input type="text" id="rvm-attr-search" placeholder="Filter attributes..." style="width: 100%; box-sizing: border-box; padding: 4px; background: #222; color: #fff; border: 1px solid #444;">
       <div id="rvm-attributes-content" class="rvm-attributes-panel"></div>

@@ -122,6 +122,12 @@ async function _getPyodide() {
 
 async function _ensureScripts(pyodide) {
   if (_scriptsLoaded) return;
+  // Install pypdf via micropip (needed by pdf_to_inputxml.py).
+  await pyodide.loadPackage('micropip');
+  await pyodide.runPythonAsync(`
+import micropip
+await micropip.install('pypdf')
+`);
   pyodide.FS.mkdirTree('/scripts');
   pyodide.FS.mkdirTree('/work');
   for (const fileName of SCRIPT_FILE_NAMES) {

@@ -10,6 +10,7 @@ import {
 } from '../converters/worker-contract.js';
 import { parseRmssAttributes, parseRmssStructuralMembers } from '../converters/rmss-attribute-parser.js';
 import { parseStpSupportMembers } from '../parser/stp-support-parser.js';
+import { resolveKindFromAttrs } from '../rvm-viewer/RvmSupportMapper.js';
 
 const STORAGE_KEY = 'model-converters.defaults.v1';
 const INPUTXML_HEADER_DEFAULTS = Object.freeze({
@@ -1386,6 +1387,28 @@ function _buildXmlNodeBlock(lines, node) {
   lines.push('      </Node>');
 }
 
+/**
+ * Walk the hierarchy and inject SUPPORT_TYPE into SUPPORT/ATTA nodes using
+ * the Support Mapper rules (localStorage). Only sets it when not already present.
+ */
+function _enrichHierarchyWithMapperKinds(nodes) {
+  if (!Array.isArray(nodes)) return;
+  for (const node of nodes) {
+    if (!node) continue;
+    const typeStr = String(node.type || node.attributes?.TYPE || '').toUpperCase();
+    if (typeStr === 'SUPPORT' || typeStr === 'ATTA' || typeStr === 'ANCI') {
+      const attrs = node.attributes || {};
+      if (!attrs.SUPPORT_TYPE) {
+        const kind = resolveKindFromAttrs(attrs);
+        if (kind) attrs.SUPPORT_TYPE = kind;
+      }
+    }
+    if (Array.isArray(node.children)) _enrichHierarchyWithMapperKinds(node.children);
+    if (Array.isArray(node.items)) _enrichHierarchyWithMapperKinds(node.items);
+    if (Array.isArray(node.branches)) _enrichHierarchyWithMapperKinds(node.branches);
+  }
+}
+
 function _buildPsiXmlFromRmssHierarchy(hierarchy, inputName, options) {
   const normalizedHierarchy = Array.isArray(hierarchy) ? hierarchy : [];
   const branches = normalizedHierarchy.filter((entry) => entry && Array.isArray(entry.children) && entry.children.length > 0);
@@ -2731,6 +2754,7 @@ export function renderModelConvertersTab(container) {
         } else if (secondaryFile && secondaryBytes) {
           const attText = _decodeTextUtf8(secondaryBytes);
           const hierarchy = parseRmssAttributes(attText, state.rvm?.routing);
+          _enrichHierarchyWithMapperKinds(hierarchy);
           const xmlFromAtt = _buildPsiXmlFromRmssHierarchy(hierarchy, secondaryFile.name, runValues);
           const attStem = _baseNameWithoutExtension(secondaryFile.name);
           let attStpText = null;
