@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RvmViewer3D } from './RvmViewer3D.js';
+import { getRvmSupportSymbolSettings } from './RvmSupportSymbols.js';
 
 const ROOT_NAME = '__RVM_SUPPORT_SYMBOLS__';
 const PATCHED = Symbol.for('pcf-glb-rvm-support-bore-anchor-patched');
@@ -174,7 +175,8 @@ function addBoreAnchoredSupportSymbols(viewer) {
   viewer.modelGroup.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(viewer.modelGroup);
   const diag = box.isEmpty() ? 1000 : Math.max(box.getSize(new THREE.Vector3()).length(), 1);
-  const scale = Math.max(8, Math.min(120, diag * 0.0035));
+  const { scaleMultiplier } = getRvmSupportSymbolSettings();
+  const scale = Math.max(8, Math.min(120, diag * 0.0035)) * (Number.isFinite(scaleMultiplier) ? scaleMultiplier : 1);
   const root = new THREE.Group(); root.name = ROOT_NAME;
   const seen = new Set();
   viewer.modelGroup.traverse((o) => {
@@ -202,6 +204,11 @@ export function installRvmSupportBoreAnchorPatch() {
   };
   RvmViewer3D.prototype.refreshSupportSymbols = function refreshSupportSymbols() {
     this.supportSymbolDiagnostics = addBoreAnchoredSupportSymbols(this);
+  };
+  RvmViewer3D.prototype.setSupportSymbolOptions = function setSupportSymbolOptions(options = {}) {
+    this.supportSymbolOptions = { ...(this.supportSymbolOptions || {}), ...options };
+    this.supportSymbolDiagnostics = addBoreAnchoredSupportSymbols(this);
+    return this.supportSymbolDiagnostics;
   };
   RvmViewer3D.prototype.setSupportSymbolLabelsVisible = function setSupportSymbolLabelsVisible() {
     // Labels are intentionally disabled for support symbols; use selection/attributes for details.

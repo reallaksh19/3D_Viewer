@@ -886,11 +886,14 @@ export class RvmViewer3D {
     // ── STP Support Member Overlay ─────────────────────────────────────
 
     appendStpMembers(members) {
-        if (!this.scene) return;
+        if (!this.modelGroup) return;
         if (!this._stpGroup) {
             this._stpGroup = new THREE.Group();
             this._stpGroup.name = 'stpOverlay';
-            this.scene.add(this._stpGroup);
+        }
+        // Re-attach if modelGroup.clear() removed it (e.g. on new model load).
+        if (!this._stpGroup.parent) {
+            this.modelGroup.add(this._stpGroup);
         }
         const positions = [];
         for (const member of members) {
@@ -900,7 +903,7 @@ export class RvmViewer3D {
         if (!positions.length) return;
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-        const material = new THREE.LineBasicMaterial({ color: 0xff8c00 });
+        const material = new THREE.LineBasicMaterial({ color: 0xff8c00, depthTest: false });
         this._stpGroup.add(new THREE.LineSegments(geometry, material));
     }
 
