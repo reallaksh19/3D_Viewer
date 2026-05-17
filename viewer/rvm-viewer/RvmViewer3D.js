@@ -134,6 +134,8 @@ export class RvmViewer3D {
     // And coordinate system normalization based on upAxis.
     setModel(model, upAxis = 'Y') {
         this.modelGroup.clear();
+        this._stpGroup = null; // reset so appendStpMembers re-creates it after clear
+        this._upAxis = upAxis;
         this.modelGroup.add(model);
 
         if (upAxis === 'Z') {
@@ -171,6 +173,9 @@ export class RvmViewer3D {
 
 
         this.fitAll();
+        // Store model diagonal for STP sphere sizing (computed before any STP geometry is added).
+        const _box = new THREE.Box3().setFromObject(this.modelGroup);
+        this._modelDiag = _box.isEmpty() ? 5000 : Math.max(_box.getSize(new THREE.Vector3()).length(), 1);
     }
 
     _onResize() {
@@ -891,35 +896,52 @@ export class RvmViewer3D {
             this._stpGroup = new THREE.Group();
             this._stpGroup.name = 'stpOverlay';
         }
-        // Re-attach if modelGroup.clear() removed it (e.g. on new model load).
         if (!this._stpGroup.parent) {
             this.modelGroup.add(this._stpGroup);
         }
+
+        // STP parser outputs coords as (x=E, y=N, z=U) — PDMS Z-up convention.
+        // When upAxis='Z', modelGroup is rotated -90° on X, so local (E,N,U) → world Y-up correctly.
+        // When upAxis='Y', modelGroup has no rotation, so we must remap to (E,U,-N) in local space.
+        const needsRemap = (this._upAxis || 'Z') === 'Y';
+        const remap = (pt) => needsRemap ? { x: pt.x, y: pt.z, z: -pt.y } : { x: pt.x, y: pt.y, z: pt.z };
+
         const positions = [];
         for (const member of members) {
-            positions.push(member.start.x, member.start.y, member.start.z);
-            positions.push(member.end.x, member.end.y, member.end.z);
+            const s = remap(member.start);
+            const e = remap(member.end);
+            positions.push(s.x, s.y, s.z, e.x, e.y, e.z);
         }
         if (!positions.length) return;
 
-        // Lines — always on top so they don't disappear inside geometry.
         const lineGeom = new THREE.BufferGeometry();
         lineGeom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
         const lineMat = new THREE.LineBasicMaterial({ color: 0xff8c00, depthTest: false });
         this._stpGroup.add(new THREE.LineSegments(lineGeom, lineMat));
 
-        // Sphere markers at each member midpoint — visible at full scene scale.
-        const modelBox = new THREE.Box3().setFromObject(this.modelGroup);
-        const diag = modelBox.isEmpty() ? 5000 : Math.max(modelBox.getSize(new THREE.Vector3()).length(), 1);
-        const radius = Math.max(50, diag * 0.004);
+        // Use stored model diagonal (computed before STP added) to avoid inflated box.
+        const diag = this._modelDiag || 5000;
+        const radius = Math.max(diag * 0.002, 20);
         const sphereGeom = new THREE.SphereGeometry(radius, 8, 6);
         const sphereMat = new THREE.MeshBasicMaterial({ color: 0xff8c00, depthTest: false });
         for (const member of members) {
-            const mx = (member.start.x + member.end.x) / 2;
-            const my = (member.start.y + member.end.y) / 2;
-            const mz = (member.start.z + member.end.z) / 2;
+            const s = remap(member.start);
+            const e = remap(member.end);
             const sphere = new THREE.Mesh(sphereGeom, sphereMat);
-            sphere.position.set(mx, my, mz);
+            sphere.position.set((s.x + e.x) / 2, (s.y + e.y) / 2, (s.z + e.z) / 2);
+            sphere.userData = {
+                isStp: true,
+                displayName: member.label || 'STP Member',
+                supportTag: member.label || '',
+                supportKind: member.kind || '',
+                attrs: {
+                    LABEL: member.label || '',
+                    KIND: member.kind || '',
+                    START: `E ${member.start.x.toFixed(1)} N ${member.start.y.toFixed(1)} U ${member.start.z.toFixed(1)}`,
+                    END: `E ${member.end.x.toFixed(1)} N ${member.end.y.toFixed(1)} U ${member.end.z.toFixed(1)}`,
+                    ...(member.attributes || {}),
+                },
+            };
             this._stpGroup.add(sphere);
         }
     }

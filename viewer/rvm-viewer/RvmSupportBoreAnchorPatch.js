@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RvmViewer3D } from './RvmViewer3D.js';
 import { getRvmSupportSymbolSettings } from './RvmSupportSymbols.js';
+import { resolveKindFromAttrs } from './RvmSupportMapper.js';
 
 const ROOT_NAME = '__RVM_SUPPORT_SYMBOLS__';
 const PATCHED = Symbol.for('pcf-glb-rvm-support-bore-anchor-patched');
@@ -61,8 +62,17 @@ function kindFrom(t) {
   if (/\bGUIDE\b/.test(s)) return 'GUIDE';
   if (/\bLINE\s*STOP\b|\bLINESTOP\b|\bSTOPPER\b|\bSTOP\b/.test(s)) return 'LINESTOP';
   if (/\bLIMIT\s*STOP\b|\bLIMIT\b/.test(s)) return 'LIMIT';
-  if (/\bRESTING\b|\bREST\b|\bSHOE\b|\bBP\b/.test(s)) return 'REST';
+  if (/\bRESTING\b|\bREST\b|\bSHOE\b/.test(s)) return 'REST';
   if (/\bANCHOR\b|\bFIXED\b/.test(s)) return 'ANCHOR';
+  // CMPSUPTYPE/MDSSUPPTYPE code prefixes
+  if (/\bPG[-_]/.test(s)) return 'GUIDE';
+  if (/\bLS[-_]/.test(s)) return 'LINESTOP';
+  if (/\bG[-_]\d/.test(s)) return 'GUIDE';
+  if (/\bAN\d/.test(s)) return 'ANCHOR';
+  if (/\bBP[-_]/.test(s)) return 'REST';
+  if (/\bGT\d/.test(s)) return 'GUIDE';
+  if (/\bBT\d/.test(s)) return 'REST';
+  if (/\bWP[-_]/.test(s)) return 'LINESTOP';
   return '';
 }
 
@@ -132,7 +142,7 @@ function plate(c, side, pipe, up, s, color) {
 }
 
 function symbol(o, a, viewer, scale) {
-  const k = kindFrom(text(o, a));
+  const k = kindFrom(text(o, a)) || resolveKindFromAttrs(a);
   if (!k) return null;
   const p = supportCoordinate(a, viewer);
   if (!p) return null;

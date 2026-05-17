@@ -3,6 +3,7 @@ import { RuntimeEvents } from '../contracts/runtime-events.js';
 import { on } from '../core/event-bus.js';
 import { RvmViewer3D } from './RvmViewer3D.js';
 import { getRvmSupportSymbolSettings } from './RvmSupportSymbols.js';
+import { resolveKindFromAttrs } from './RvmSupportMapper.js';
 
 const PATCHED = Symbol.for('pcf-glb-rvm-support-source-overlay-patched');
 const ROOT = '__RVM_SUPPORT_SYMBOLS__';
@@ -42,15 +43,24 @@ function p(v) {
 }
 function attrs(o) { return { ...(o?.attributes || {}), ...(o?.attrs || {}), ...(o?.rawAttributes || {}) }; }
 function txt(o, a) {
-  return [o?.type, o?.kind, o?.name, o?.path, o?.id, a.TYPE, a.STYP, a.DTXR, a.SUPPORT_TYPE, a.CMPSUPTYPE, a.CMPSUPREFN, a.SUPPORT_TAG, a.NAME, a.TAG, a.TAGNO, a.SKEY, a.SPRE, a.DESCRIPTION, a.DESC].map(s).join(' ');
+  return [o?.type, o?.kind, o?.name, o?.path, o?.id, a.TYPE, a.STYP, a.DTXR, a.SUPPORT_TYPE, a.CMPSUPTYPE, a.MDSSUPPTYPE, a.CMPSUPREFN, a.SUPPORT_TAG, a.NAME, a.TAG, a.TAGNO, a.SKEY, a.SPRE, a.DESCRIPTION, a.DESC].map(s).join(' ');
 }
 function kind(t) {
   const u = t.toUpperCase();
   if (/\bGUIDE\b/.test(u)) return 'GUIDE';
   if (/\bLINE\s*STOP\b|\bLINESTOP\b|\bSTOPPER\b|\bSTOP\b/.test(u)) return 'LINESTOP';
   if (/\bLIMIT\s*STOP\b|\bLIMIT\b/.test(u)) return 'LIMIT';
-  if (/\bRESTING\b|\bREST\b|\bSHOE\b|\bBP\b|\bBASE\s*PLATE\b/.test(u)) return 'REST';
+  if (/\bRESTING\b|\bREST\b|\bSHOE\b|\bBASE\s*PLATE\b/.test(u)) return 'REST';
   if (/\bANCHOR\b|\bFIXED\b/.test(u)) return 'ANCHOR';
+  // Match CMPSUPTYPE/MDSSUPPTYPE code prefixes: PG-*→GUIDE, LS-*→LINESTOP, G-*→GUIDE, AN*→ANCHOR, BP-*→REST
+  if (/\bPG[-_]/.test(u)) return 'GUIDE';
+  if (/\bLS[-_]/.test(u)) return 'LINESTOP';
+  if (/\bG[-_]\d/.test(u)) return 'GUIDE';
+  if (/\bAN\d/.test(u)) return 'ANCHOR';
+  if (/\bBP[-_]/.test(u)) return 'REST';
+  if (/\bGT\d/.test(u)) return 'GUIDE';
+  if (/\bBT\d/.test(u)) return 'REST';
+  if (/\bWP[-_]/.test(u)) return 'LINESTOP';
   return '';
 }
 function tag(o, a) {
@@ -82,7 +92,7 @@ function collect(root, out = []) {
     if (!o || typeof o !== 'object') continue;
     const a = attrs(o); const t = txt(o, a); const type = s(o.type || a.TYPE).toUpperCase();
     if (type !== 'PIPE' && type !== 'BRANCH' && (/\bSUPPORT\b|\bATTA\b|\bANCI\b/i.test(t) || SUPPORT_KIND.test(t))) {
-      const k = kind(t); const c = coord(a);
+      const k = kind(t) || resolveKindFromAttrs(a) || kind(s(a.CMPSUPTYPE) + ' ' + s(a.MDSSUPPTYPE) + ' ' + s(a.SUPPORT_TYPE)); const c = coord(a);
       if (k && c) out.push({ source: o, attrs: a, kind: k, local: c, tag: tag(o, a), bore: bore(a) });
     }
     if (Array.isArray(o.children)) collect(o.children, out);

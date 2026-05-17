@@ -14,6 +14,7 @@ import {
   normalizeRvmSupportSymbolScale,
   saveRvmSupportSymbolSettings,
 } from '../rvm-viewer/RvmSupportSymbols.js';
+import { renderSupportMapperPanel } from '../rvm-viewer/RvmSupportMapper.js';
 
 
 let _viewer = null;
@@ -797,6 +798,19 @@ function _ensureRvmSupportSymbolSettings(container) {
     </div>
   `;
 
+  // Support mapper collapsible section
+  const mapperToggle = document.createElement('details');
+  mapperToggle.style.cssText = 'margin-top:10px; border-top:1px solid #2a2d35; padding-top:8px;';
+  mapperToggle.innerHTML = `<summary style="cursor:pointer; color:#7ab3ff; font-size:12px; font-weight:600; user-select:none; list-style:none; display:flex; align-items:center; gap:6px;"><span>▸</span> Support Type Mapper</summary>`;
+  const mapperBody = document.createElement('div');
+  mapperBody.style.marginTop = '8px';
+  renderSupportMapperPanel(mapperBody);
+  mapperToggle.appendChild(mapperBody);
+  mapperToggle.addEventListener('toggle', () => {
+    mapperToggle.querySelector('span').textContent = mapperToggle.open ? '▾' : '▸';
+  });
+  card.appendChild(mapperToggle);
+
   const firstHeader = rightPanel.querySelector('.rvm-panel-header');
   if (firstHeader) {
     firstHeader.insertAdjacentElement('afterend', card);
@@ -1541,6 +1555,26 @@ function _bindTabListener() {
       if (!canonicalId) {
           attrContent.innerHTML = '<div style="padding: 10px; color: #888;">No selection</div>';
           return;
+      }
+
+      // Check if this is an STP sphere by scanning the stpGroup for matching UUID.
+      if (_viewer?._stpGroup) {
+          let stpObj = null;
+          _viewer._stpGroup.traverse(o => { if (o.uuid === canonicalId) stpObj = o; });
+          if (stpObj?.userData?.isStp) {
+              const ud = stpObj.userData;
+              let html = `<div style="padding:8px 10px; font-weight:bold; font-size:12px; border-bottom:1px solid #444; color:#ff8c00; margin-bottom:4px;">${escapeHtml(ud.displayName || ud.supportTag || 'STP Member')}</div>`;
+              html += `<div style="padding:2px 10px 4px; font-size:10px; color:#666;">Structural Support Member</div>`;
+              if (ud.attrs && Object.keys(ud.attrs).length > 0) {
+                  html += '<table style="width:100%; border-collapse:collapse; font-size:11px;">';
+                  for (const [key, val] of Object.entries(ud.attrs)) {
+                      html += `<tr class="rvm-attr-row" style="vertical-align:top;"><td style="padding:3px 6px 3px 10px; color:#8ab; white-space:nowrap; border-bottom:1px solid #2a2d35; font-weight:500;">${escapeHtml(key)}</td><td style="padding:3px 10px 3px 4px; color:#ddd; word-break:break-all; border-bottom:1px solid #2a2d35;">${escapeHtml(String(val))}</td></tr>`;
+                  }
+                  html += '</table>';
+              }
+              attrContent.innerHTML = html;
+              return;
+          }
       }
 
       // Look up in the pre-built search index entries (correct property)
