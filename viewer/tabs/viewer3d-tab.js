@@ -441,8 +441,8 @@ export function renderViewer3D(container) {
                 </label>
               </div>
             </div>
-            <div class="left-panel-resize-handle" id="viewer3d-settings-resize" aria-hidden="true"></div>
           </aside>
+          <div class="left-panel-resize-handle" id="viewer3d-settings-resize" aria-hidden="true"></div>
 
           <div class="canvas-wrap" id="viewer3d-canvas-wrap">
             ${components.length
@@ -1633,8 +1633,13 @@ function _wireLeftPanelResize(container) {
   const handle = container.querySelector('#viewer3d-settings-resize');
   if (!panel || !handle) return;
 
+  const _syncHandle = () => {
+    handle.style.left = `${panel.offsetWidth}px`;
+  };
+
   const saved = localStorage.getItem(_LEFT_PANEL_WIDTH_KEY);
   if (saved) panel.style.width = `${Math.max(80, Math.min(280, Number(saved)))}px`;
+  _syncHandle();
 
   handle.addEventListener('mousedown', (e) => {
     e.preventDefault();
@@ -1644,6 +1649,7 @@ function _wireLeftPanelResize(container) {
     const onMove = (ev) => {
       const newW = Math.max(80, Math.min(280, startW + ev.clientX - startX));
       panel.style.width = `${newW}px`;
+      handle.style.left = `${newW}px`;
     };
     const onUp = () => {
       handle.classList.remove('is-dragging');
