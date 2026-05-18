@@ -522,9 +522,9 @@ function _getRvmUiStats() {
   ];
 
   const selectedSources = [
+    _viewer?.selection?.getSelectionRenderIds?.(),
     _viewer?.selectedObjectIds,
     _viewer?.selectedCanonicalIds,
-    _viewer?.selection,
     _viewer?.selectionSet,
     state.rvm?.selectedObjectIds,
     state.rvm?.selectedCanonicalIds,
@@ -1208,8 +1208,7 @@ function _drawRvmAxisGizmo(canvas, camera) {
 
 function _wireRvmViewportExtras(container) {
   const viewport = container.querySelector('#rvm-viewport');
-  if (!viewport || viewport._rvmExtrasWired) return;
-  viewport._rvmExtrasWired = true;
+  if (!viewport) return;
 
   const gizmoCanvas = _buildRvmAxisGizmo(viewport);
 
@@ -1271,7 +1270,6 @@ function _ensureRvmUiEnhancements(container) {
   _bindRvmTagPanelActions(container);
   _refreshRvmUiStatus(container);
   _installRightPanelResizer(container);
-  _wireRvmViewportExtras(container);
 }
 
 function _bindRvmUiStatusEvents(container) {
@@ -2199,6 +2197,9 @@ export function renderViewer3DRvm(container) {
         themePreset: _getRvmThemePreset(),
       });
   }
+
+  // Wire extras after viewer init so gizmo canvas survives viewport.innerHTML = ''
+  _wireRvmViewportExtras(container);
 
   _applyRvmTheme(container, _getRvmThemePreset());
   _updateRvmModeChip(container, 'orbit');
