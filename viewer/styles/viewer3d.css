@@ -1,4 +1,4 @@
-@import url("./shared-viewer-tokens.css?v=20260518-conversion-support-map-7");
+@import url("./shared-viewer-tokens.css?v=20260518-statusbar-theme-12");
 
 /* viewer3d.css - Dedicated styles for the 3D Viewer tab */
 
@@ -712,10 +712,39 @@
   border-right: none;
   overflow: hidden;
 }
+.sb-segment.sb-coords {
+  min-width: 196px;
+}
+.sb-segment.sb-perf {
+  margin-left: auto;
+  border-left: 1px solid var(--vc-border-soft);
+  border-right: none;
+}
 .sb-vsep {
   width: 1px;
   height: 12px;
   background: var(--vc-border);
+}
+.v3d-status-coords {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--vc-text-dim);
+  font-family: var(--vc-font-mono);
+  font-size: 10px;
+}
+.v3d-status-axis {
+  color: var(--vc-accent);
+  font-weight: 700;
+}
+.v3d-status-value {
+  min-width: 34px;
+  color: var(--vc-text-dim);
+}
+.v3d-fps-readout {
+  color: var(--vc-text-muted);
+  font-family: var(--vc-font-mono);
+  font-size: 10px;
 }
 .v3d-mode-chip {
   display: inline-flex;
@@ -780,17 +809,22 @@
   border-bottom: 1px solid var(--vc-border);
   flex-shrink: 0;
   background: var(--vc-panel-bg);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
 }
+.side-panel-tabs::-webkit-scrollbar { display: none; }
 
 .panel-tab {
-  flex: 1;
-  padding: 8px 6px;
-  font-size: 11px;
+  flex: 0 0 auto;
+  padding: 8px 8px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: #5a7a9a;
   background: transparent;
+  white-space: nowrap;
   border: none;
   cursor: pointer;
   border-bottom: 2px solid transparent;
@@ -2230,4 +2264,241 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ── Shared hierarchy, context menu, and selection HUD ─────────────── */
+.v3d-hierarchy-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.v3d-tree-filter,
+.rvm-panel-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--vc-border-soft);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.v3d-tree-filter svg,
+.rvm-panel-filter-row svg {
+  width: 13px;
+  height: 13px;
+  color: var(--vc-text-muted);
+  flex-shrink: 0;
+}
+
+.v3d-tree-filter input,
+.rvm-panel-filter {
+  width: 100%;
+  min-width: 0;
+  background: var(--vc-input-bg, #0f1726);
+  border: 1px solid var(--vc-border);
+  border-radius: var(--vc-radius-xs);
+  color: var(--vc-text);
+  font: 11px var(--vc-font-body);
+  padding: 4px 7px;
+  outline: none;
+}
+
+.v3d-tree-filter input:focus,
+.rvm-panel-filter:focus {
+  border-color: var(--vc-accent);
+}
+
+.v3d-tree-root {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(129, 177, 230, 0.38) transparent;
+}
+
+.v3d-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 3px 8px 3px calc(8px + (var(--tree-depth, 0) * 14px));
+  color: var(--vc-text-dim);
+  cursor: default;
+  user-select: none;
+  border-left: 3px solid transparent;
+}
+
+.v3d-tree-row[data-component-id] {
+  cursor: pointer;
+}
+
+.v3d-tree-row:hover {
+  background: var(--vc-accent-soft);
+  color: var(--vc-text);
+}
+
+.v3d-tree-row.is-selected {
+  background: rgba(74, 158, 255, 0.2);
+  border-left-color: var(--vc-accent);
+  color: var(--vc-text);
+}
+
+.v3d-tree-caret {
+  width: 10px;
+  color: var(--vc-text-muted);
+  font-size: 9px;
+}
+
+.v3d-tree-kind {
+  min-width: 44px;
+  max-width: 74px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--vc-accent);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.v3d-tree-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.v3d-tree-count {
+  color: var(--vc-text-muted);
+  font: 9.5px var(--vc-font-mono);
+}
+
+.v3d-tree-empty {
+  padding: 20px 12px;
+  color: var(--vc-text-muted);
+  font-size: 11px;
+  text-align: center;
+  font-style: italic;
+}
+
+.viewer-selection-hud {
+  position: absolute;
+  right: 44px;
+  bottom: 42px;
+  z-index: 18;
+  min-width: 190px;
+  max-width: 320px;
+  padding: 9px 12px;
+  background: rgba(10, 16, 28, 0.88);
+  border: 1px solid rgba(96, 165, 250, 0.38);
+  border-radius: var(--vc-radius-md);
+  box-shadow: var(--vc-shadow-soft);
+  color: var(--vc-text);
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}
+
+.viewer-selection-hud[hidden] {
+  display: none;
+}
+
+.viewer-selection-hud-type {
+  color: var(--vc-accent);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.viewer-selection-hud-name {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--vc-text);
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-selection-hud-meta {
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--vc-text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-context-menu {
+  position: fixed;
+  z-index: 2000;
+  min-width: 184px;
+  padding: 4px 0;
+  background: rgba(13, 22, 40, 0.98);
+  border: 1px solid rgba(96, 165, 250, 0.32);
+  border-radius: 7px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+}
+
+.viewer-context-menu[hidden] {
+  display: none;
+}
+
+.viewer-context-menu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 12px;
+  background: transparent;
+  border: 0;
+  color: var(--vc-text-dim);
+  cursor: pointer;
+  font: 11px var(--vc-font-body);
+  text-align: left;
+}
+
+.viewer-context-menu-item:hover:not(:disabled) {
+  background: var(--vc-accent-soft);
+  color: var(--vc-text);
+}
+
+.viewer-context-menu-item:disabled {
+  color: rgba(148, 163, 184, 0.45);
+  cursor: not-allowed;
+}
+
+/* ── Axis gizmo: stay above CSS2D labels ───────────────────── */
+#pcf-axis-gizmo {
+  z-index: 30 !important;
+}
+
+/* ── Left panel resize handle ───────────────────────────────── */
+.left-panel-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: ew-resize;
+  z-index: 20;
+  background: transparent;
+  transition: background 0.15s;
+}
+.left-panel-resize-handle:hover,
+.left-panel-resize-handle.is-dragging {
+  background: var(--vc-accent-soft);
+}
+.geo-left-panel.viewer3d-settings-panel {
+  position: relative;
+}
+
+/* drawlight / highcontrast theme variants for resize handle */
+.geo-theme-drawlight .left-panel-resize-handle:hover,
+.geo-theme-drawlight .left-panel-resize-handle.is-dragging {
+  background: rgba(59, 130, 246, 0.1);
 }

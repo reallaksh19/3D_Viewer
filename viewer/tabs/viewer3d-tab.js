@@ -11,7 +11,7 @@ import { parsePcfText } from '../js/pcf2glb/pcf/parsePcfText.js';
 import { normalizePcfModel } from '../js/pcf2glb/pcf/normalizePcfModel.js';
 import { pcfxDocumentFromPcfText } from '../pcfx/Pcfx_PcfAdapter.js';
 import { viewerComponentFromCanonicalItem } from '../pcfx/Pcfx_GlbAdapter.js';
-import { PcfViewer3D } from '../viewer-3d.js?v=20260518-conversion-support-map-7';
+import { PcfViewer3D } from '../viewer-3d.js?v=20260518-statusbar-theme-12';
 import { getResolvedViewer3DConfig } from '../viewer-3d-config.js';
 import { resolveActionOrder, executeViewerAction } from '../viewer-actions.js';
 import { buildComponentPanelModel } from '../viewer3d/component-panel-model.js';
@@ -136,6 +136,22 @@ const ACTION_LABELS = {
   SECTION_DISABLE: 'Sec Off',
 };
 
+const PCF_THEME_OPTIONS = [
+  { value: 'NavisDark', label: 'Dark (Navy)' },
+  { value: 'HighContrast', label: 'High Contrast' },
+  { value: 'DrawLight', label: 'Light' },
+  { value: 'SteelNeutral', label: 'Steel Neutral' },
+];
+
+function _getViewerThemePreset() {
+  const themePreset = state.viewerSettings?.themePreset || state.viewer3DConfig?.scene?.themePreset || 'NavisDark';
+  return PCF_THEME_OPTIONS.some((option) => option.value === themePreset) ? themePreset : 'NavisDark';
+}
+
+function _getViewerThemeClass() {
+  return `geo-theme-${String(_getViewerThemePreset()).toLowerCase()}`;
+}
+
 const ACTION_ICONS = {
   NAV_SELECT: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/></svg>',
   NAV_ORBIT: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
@@ -161,7 +177,8 @@ const SPARE_ICON_UPLOAD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentC
 
 export function renderViewer3D(container) {
   const cfg = getResolvedViewer3DConfig(state);
-  const themeClass = `geo-theme-${String(state.viewerSettings.themePreset || 'NavisDark').toLowerCase()}`;
+  const themePreset = _getViewerThemePreset();
+  const themeClass = _getViewerThemeClass();
   const isLiveMount = container?.isConnected && container.id === 'tab-content';
 
   if (!_listenersRegistered) {
@@ -419,13 +436,12 @@ export function renderViewer3D(container) {
                 </label>
                 <label class="left-panel-label">Theme
                   <select id="viewer3d-theme-select" ${addOnDisabledAttr}>
-                    <option value="NavisDark" ${(state.viewerSettings?.themePreset || 'NavisDark') === 'NavisDark' ? 'selected' : ''}>Dark (Navy)</option>
-                    <option value="HighContrast" ${(state.viewerSettings?.themePreset) === 'HighContrast' ? 'selected' : ''}>High Contrast</option>
-                    <option value="DrawLight" ${(state.viewerSettings?.themePreset) === 'DrawLight' ? 'selected' : ''}>Light</option>
+                    ${PCF_THEME_OPTIONS.map((option) => `<option value="${option.value}" ${themePreset === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                   </select>
                 </label>
               </div>
             </div>
+            <div class="left-panel-resize-handle" id="viewer3d-settings-resize" aria-hidden="true"></div>
           </aside>
 
           <div class="canvas-wrap" id="viewer3d-canvas-wrap">
@@ -434,6 +450,8 @@ export function renderViewer3D(container) {
               : `<div class="canvas-placeholder" id="viewer3d-placeholder">${dataSource.fileName ? 'No drawable geometry could be built from the loaded file.' : 'Load a .PCF file to render the model'}</div>`
             }
             <button class="v3d-help-btn" id="v3d-help-btn" title="Keyboard shortcuts [?]" aria-label="Keyboard shortcuts">?</button>
+            ${_renderSelectionHud('pcf')}
+            ${_renderViewerContextMenu('pcf')}
             <div class="v3d-kbd-overlay" id="v3d-kbd-overlay" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
               <div class="v3d-kbd-panel">
                 <div class="v3d-kbd-title">Keyboard Shortcuts <button class="v3d-kbd-close" id="v3d-kbd-close" aria-label="Close">×</button></div>
@@ -461,13 +479,15 @@ export function renderViewer3D(container) {
 
           <aside class="geo-side-panel viewer3d-summary-panel">
             <div class="side-panel-tabs">
-              ${showComponentPanel ? '<button class="panel-tab active" type="button" data-target="v3d-panel-component">Component Panel</button>' : ''}
-              <button class="panel-tab ${showComponentPanel ? '' : 'active'}" type="button" data-target="v3d-panel-summary">Summary</button>
+              <button class="panel-tab active" type="button" data-target="v3d-panel-hierarchy">Hierarchy</button>
+              ${showComponentPanel ? '<button class="panel-tab" type="button" data-target="v3d-panel-component">Component Panel</button>' : ''}
+              <button class="panel-tab" type="button" data-target="v3d-panel-summary">Summary</button>
               <button class="panel-tab" type="button" data-target="v3d-panel-search">Search</button>
               <button class="panel-tab" type="button" data-target="v3d-panel-xml-diff" data-viewer3d-side-tab="xml-diff">XML Diff</button>
             </div>
-            ${showComponentPanel ? `<div class="panel-content active" id="v3d-panel-component" style="display:block;">${_renderComponentPanel(cfg)}</div>` : ''}
-            <div class="panel-content ${showComponentPanel ? '' : 'active'}" id="v3d-panel-summary" style="display:${showComponentPanel ? 'none' : 'block'};">
+            <div class="panel-content active" id="v3d-panel-hierarchy" style="display:block;">${_renderPcfHierarchyPanel(components, _selectedComponent?.id || '')}</div>
+            ${showComponentPanel ? `<div class="panel-content" id="v3d-panel-component" style="display:none;">${_renderComponentPanel(cfg)}</div>` : ''}
+            <div class="panel-content" id="v3d-panel-summary" style="display:none;">
               ${_renderSummaryPanel(cfg, summary, dataSource, components)}
             </div>
             <div class="panel-content" id="v3d-panel-search" style="display:none;">
@@ -489,7 +509,14 @@ export function renderViewer3D(container) {
           <div class="sb-segment">
             <span class="v3d-mode-chip" id="v3d-mode-chip">Orbit</span>
           </div>
-          <div class="sb-segment">
+          <div class="sb-segment sb-coords" aria-label="Cursor coordinates">
+            <div class="v3d-status-coords">
+              <span class="v3d-status-axis">X</span><span class="v3d-status-value" id="v3d-sx">-</span>
+              <span class="v3d-status-axis">Y</span><span class="v3d-status-value" id="v3d-sy">-</span>
+              <span class="v3d-status-axis">Z</span><span class="v3d-status-value" id="v3d-sz">-</span>
+            </div>
+          </div>
+          <div class="sb-segment sb-counts">
             <span class="sb-count-val" id="v3d-sel-count">0</span>
             <span class="sb-count-label">selected</span>
             <span class="sb-vsep"></span>
@@ -498,6 +525,9 @@ export function renderViewer3D(container) {
           </div>
           <div class="sb-segment sb-msg">
             <span class="status-message" id="v3d-status-msg">${_esc(statusMessage)}</span>
+          </div>
+          <div class="sb-segment sb-perf">
+            <span class="v3d-fps-readout" id="v3d-fps-tri">-fps | -K tri</span>
           </div>
         </div>
       </div>
@@ -542,6 +572,8 @@ export function renderViewer3D(container) {
   _wireSidePanelTabs(container);
   _wireKbdHelp(container);
   _wireSearchPanel(container, components);
+  _wireCoordinates(container);
+  _wireLeftPanelResize(container);
   const xmlDiffHost = container.querySelector('[data-viewer3d-side-panel="xml-diff"]');
   if (xmlDiffHost) {
     xmlDiffPanel = mountXmlComparePanel(xmlDiffHost, {
@@ -569,7 +601,14 @@ export function renderViewer3D(container) {
     });
   }
   _wireViewerControls(container, cfg, actions);
+  _bindPcfHierarchy(container, components);
+  _bindViewerContextMenu(container, {
+    type: 'pcf',
+    getSelection: () => _selectedComponent,
+    actions: _pcfContextActions(container),
+  });
   _registerShortcuts(cfg, container);
+  _updatePcfStatusBar(container, components.length, statusMessage);
 
   if (!components.length) return;
 
@@ -581,6 +620,8 @@ export function renderViewer3D(container) {
     onSelectionChange: (comp) => {
       _selectedComponent = comp || null;
       _updateComponentPanel(container, cfg);
+      _updatePcfHierarchySelection(container, comp?.id || '');
+      _updatePcfSelectionHud(container, comp);
       _updateSelectionCount(container, comp ? 1 : 0);
       addTraceEvent({ type: 'selection', category: 'viewer3d', payload: { componentId: comp?.id || null, componentType: comp?.type || null } });
     },
@@ -642,6 +683,7 @@ export function renderViewer3D(container) {
   });
   _viewer.render(components);
   _syncToolbarToNavMode(container);
+  _updatePcfStatusBar(container, components.length, statusMessage);
   _syncSectionModeControl(container, _viewer.getSectionMode?.() || 'OFF');
   _applyOverlayLayersToViewer(cfg, dataSource);
 
@@ -1404,6 +1446,22 @@ function _updateSelectionCount(container, count) {
   if (el) el.textContent = String(count ?? 0);
 }
 
+function _formatPcfTriangleStatus() {
+  const triangles = Number(_viewer?.renderer?.info?.render?.triangles);
+  if (!Number.isFinite(triangles) || triangles <= 0) return '-fps | -K tri';
+  const thousands = triangles / 1000;
+  return `-fps | ${thousands.toFixed(thousands >= 10 ? 0 : 1)}K tri`;
+}
+
+function _updatePcfStatusBar(container, componentCount, message) {
+  const compEl = container?.querySelector?.('#v3d-comp-count');
+  if (compEl) compEl.textContent = String(Number(componentCount || 0));
+  _setStatusMessage(container, message);
+
+  const perfEl = container?.querySelector?.('#v3d-fps-tri');
+  if (perfEl) perfEl.textContent = _formatPcfTriangleStatus();
+}
+
 /**
  * Read the viewer's current nav mode and sync toolbar button states.
  * Called after any operation that might change the mode internally.
@@ -1536,6 +1594,68 @@ function _wireAdaptiveCenteredSlider(slider, readout, onInput) {
   slider.addEventListener('input', applyValue);
 }
 
+function _wireCoordinates(container) {
+  const wrap = container.querySelector('#viewer3d-canvas-wrap');
+  const sx = container.querySelector('#v3d-sx');
+  const sy = container.querySelector('#v3d-sy');
+  const sz = container.querySelector('#v3d-sz');
+  if (!wrap || !sx || !sy || !sz) return;
+
+  const clear = () => { sx.textContent = sy.textContent = sz.textContent = '—'; };
+
+  wrap.addEventListener('mousemove', (e) => {
+    const v = _viewer;
+    if (!v?.renderer?.domElement || !v?.camera || !v?._componentGroup || !v?._raycaster) return;
+    const rect = v.renderer.domElement.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const ptr = {
+      x: ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      y: -((e.clientY - rect.top) / rect.height) * 2 + 1,
+    };
+    v._raycaster.setFromCamera(ptr, v.camera);
+    const hits = v._raycaster.intersectObject(v._componentGroup, true);
+    if (hits.length > 0) {
+      const p = hits[0].point;
+      sx.textContent = p.x.toFixed(0);
+      sy.textContent = p.y.toFixed(0);
+      sz.textContent = p.z.toFixed(0);
+    } else {
+      clear();
+    }
+  });
+  wrap.addEventListener('mouseleave', clear);
+}
+
+const _LEFT_PANEL_WIDTH_KEY = 'v3d-left-panel-width';
+
+function _wireLeftPanelResize(container) {
+  const panel = container.querySelector('#viewer3d-settings-panel');
+  const handle = container.querySelector('#viewer3d-settings-resize');
+  if (!panel || !handle) return;
+
+  const saved = localStorage.getItem(_LEFT_PANEL_WIDTH_KEY);
+  if (saved) panel.style.width = `${Math.max(80, Math.min(280, Number(saved)))}px`;
+
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    handle.classList.add('is-dragging');
+    const startX = e.clientX;
+    const startW = panel.offsetWidth;
+    const onMove = (ev) => {
+      const newW = Math.max(80, Math.min(280, startW + ev.clientX - startX));
+      panel.style.width = `${newW}px`;
+    };
+    const onUp = () => {
+      handle.classList.remove('is-dragging');
+      try { localStorage.setItem(_LEFT_PANEL_WIDTH_KEY, String(panel.offsetWidth)); } catch {}
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
 function _toggleKbdHelp(container) {
   const overlay = container?.querySelector?.('#v3d-kbd-overlay');
   if (!overlay) return;
@@ -1597,6 +1717,225 @@ function _wireSearchPanel(container, components) {
     clearTimeout(_debounceTimer);
     _debounceTimer = setTimeout(() => _renderResults(input.value), 150);
   });
+}
+
+function _buildPcfHierarchyModel(components) {
+  const pipelineMap = new Map();
+  for (const component of components || []) {
+    if (!component) continue;
+    const attrs = component.attributes || {};
+    const pipeline = String(attrs['PIPELINE-REFERENCE'] || attrs.PIPELINE || attrs.LINE || 'Unassigned Line').trim() || 'Unassigned Line';
+    const type = String(component.type || attrs.TYPE || 'UNKNOWN').trim().toUpperCase() || 'UNKNOWN';
+    if (!pipelineMap.has(pipeline)) {
+      pipelineMap.set(pipeline, { id: `pipe:${pipeline}`, label: pipeline, kind: 'PIPELINE', children: new Map() });
+    }
+    const pipelineNode = pipelineMap.get(pipeline);
+    if (!pipelineNode.children.has(type)) {
+      pipelineNode.children.set(type, { id: `type:${pipeline}:${type}`, label: type, kind: 'TYPE', children: [] });
+    }
+    const typeNode = pipelineNode.children.get(type);
+    typeNode.children.push({
+      id: String(component.id || component.tag || `${pipeline}:${type}:${typeNode.children.length}`),
+      label: String(component.tag || attrs.SKEY || attrs['COMPONENT-IDENTIFIER'] || component.id || type),
+      kind: type,
+      component,
+      children: [],
+    });
+  }
+  return Array.from(pipelineMap.values()).map((pipelineNode) => ({
+    ...pipelineNode,
+    children: Array.from(pipelineNode.children.values()).sort((a, b) => a.label.localeCompare(b.label)),
+  }));
+}
+
+function _renderPcfHierarchyNode(node, depth, selectedComponentId) {
+  const children = Array.isArray(node.children) ? node.children : [];
+  const isComponent = !!node.component;
+  const selected = isComponent && String(node.id) === String(selectedComponentId || '');
+  const row = `
+    <div
+      class="v3d-tree-row ${selected ? 'is-selected' : ''}"
+      data-v3d-tree-row
+      ${isComponent ? `data-component-id="${_escAttr(node.id)}"` : ''}
+      style="--tree-depth:${Number(depth || 0)}"
+      title="${_escAttr(node.label)}"
+    >
+      <span class="v3d-tree-caret">${children.length ? '▾' : ''}</span>
+      <span class="v3d-tree-kind">${_esc(node.kind || '')}</span>
+      <span class="v3d-tree-label">${_esc(node.label || '-')}</span>
+      ${children.length ? `<span class="v3d-tree-count">${children.length}</span>` : ''}
+    </div>
+  `;
+  if (!children.length) return row;
+  return `${row}<div class="v3d-tree-children">${children.map((child) => _renderPcfHierarchyNode(child, depth + 1, selectedComponentId)).join('')}</div>`;
+}
+
+function _renderPcfHierarchyPanel(components, selectedComponentId) {
+  const model = _buildPcfHierarchyModel(components);
+  return `
+    <div class="v3d-hierarchy-panel">
+      <div class="v3d-tree-filter">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input id="v3d-hierarchy-filter" type="search" placeholder="Filter components..." autocomplete="off" spellcheck="false">
+      </div>
+      <div id="v3d-hierarchy-tree" class="v3d-tree-root" role="tree" aria-label="PCF model hierarchy">
+        ${model.length ? model.map((node) => _renderPcfHierarchyNode(node, 0, selectedComponentId)).join('') : '<div class="v3d-tree-empty">No hierarchy available</div>'}
+      </div>
+    </div>
+  `;
+}
+
+function _updatePcfHierarchySelection(container, componentId) {
+  container.querySelectorAll('[data-v3d-tree-row].is-selected').forEach((row) => row.classList.remove('is-selected'));
+  if (!componentId) return;
+  const row = container.querySelector(`[data-component-id="${CSS.escape(String(componentId))}"]`);
+  row?.classList.add('is-selected');
+  row?.scrollIntoView?.({ block: 'nearest' });
+}
+
+function _bindPcfHierarchy(container, components) {
+  const tree = container.querySelector('#v3d-hierarchy-tree');
+  const filter = container.querySelector('#v3d-hierarchy-filter');
+  if (!tree) return;
+  const componentById = new Map((components || []).map((component) => [String(component.id || component.tag || ''), component]));
+  tree.addEventListener('click', (event) => {
+    const row = event.target.closest('[data-component-id]');
+    if (!row || !tree.contains(row)) return;
+    const component = componentById.get(String(row.dataset.componentId || ''));
+    if (!component) return;
+    _viewer?.selectComponent?.(component);
+    _activateSidePanel(container, 'v3d-panel-component');
+  });
+  filter?.addEventListener('input', () => {
+    const term = String(filter.value || '').trim().toLowerCase();
+    tree.querySelectorAll('[data-v3d-tree-row]').forEach((row) => {
+      const matches = !term || row.textContent.toLowerCase().includes(term);
+      row.hidden = !matches && row.hasAttribute('data-component-id');
+    });
+  });
+}
+
+function _renderSelectionHud(kind) {
+  const prefix = kind === 'rvm' ? 'rvm' : 'v3d';
+  return `
+    <div id="${prefix}-selection-hud" class="viewer-selection-hud" hidden>
+      <div class="viewer-selection-hud-type" data-selection-hud-type>Selection</div>
+      <div class="viewer-selection-hud-name" data-selection-hud-name>-</div>
+      <div class="viewer-selection-hud-meta" data-selection-hud-meta>-</div>
+    </div>
+  `;
+}
+
+function _updatePcfSelectionHud(container, component) {
+  const hud = container.querySelector('#v3d-selection-hud');
+  if (!hud) return;
+  hud.hidden = !component;
+  if (!component) return;
+  const attrs = component.attributes || {};
+  hud.querySelector('[data-selection-hud-type]').textContent = String(component.type || attrs.TYPE || 'COMPONENT');
+  hud.querySelector('[data-selection-hud-name]').textContent = String(component.tag || attrs.SKEY || component.id || '-');
+  const line = attrs['PIPELINE-REFERENCE'] || attrs.LINE || '-';
+  const len = attrs.LENGTH || attrs['LENGTH'] || attrs['PIPE-LENGTH'] || '-';
+  hud.querySelector('[data-selection-hud-meta]').textContent = `Line ${line} | Length ${len}`;
+}
+
+function _renderViewerContextMenu(type) {
+  const isRvm = type === 'rvm';
+  const id = isRvm ? 'rvm-context-menu' : 'v3d-context-menu';
+  const items = isRvm
+    ? [
+        ['fitSelection', 'Fit Selection'],
+        ['isolate', 'Isolate'],
+        ['showAll', 'Show All'],
+        ['attributes', 'View Attributes'],
+        ['tag', 'Add Review Tag'],
+        ['copyCoordinates', 'Copy Coordinates'],
+      ]
+    : [
+        ['fitSelection', 'Fit Selection'],
+        ['properties', 'Properties'],
+        ['copyCoordinates', 'Copy Coordinates'],
+        ['clearSelection', 'Clear Selection'],
+      ];
+  return `
+    <div id="${id}" class="viewer-context-menu" role="menu" hidden>
+      ${items.map(([action, label]) => `<button class="viewer-context-menu-item" type="button" role="menuitem" data-context-action="${action}">${_esc(label)}</button>`).join('')}
+    </div>
+  `;
+}
+
+function _bindViewerContextMenu(container, options) {
+  const menu = container.querySelector(options.type === 'rvm' ? '#rvm-context-menu' : '#v3d-context-menu');
+  const host = options.type === 'rvm'
+    ? container.querySelector('#rvm-viewport') || container
+    : container.querySelector('#viewer3d-canvas-wrap') || container;
+  if (!menu || !host) return;
+  const close = () => {
+    menu.hidden = true;
+    menu.classList.remove('is-open');
+  };
+  host.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    const selection = options.getSelection?.();
+    menu.querySelectorAll('[data-context-action]').forEach((item) => {
+      const action = item.dataset.contextAction;
+      const enabled = typeof options.actions?.[action] === 'function' && (action === 'showAll' || !!selection);
+      item.disabled = !enabled;
+    });
+    menu.style.left = `${event.clientX}px`;
+    menu.style.top = `${event.clientY}px`;
+    menu.hidden = false;
+    menu.classList.add('is-open');
+  });
+  menu.addEventListener('click', (event) => {
+    const item = event.target.closest('[data-context-action]');
+    if (!item || item.disabled) return;
+    options.actions?.[item.dataset.contextAction]?.();
+    close();
+  });
+  document.addEventListener('click', (event) => {
+    if (!menu.hidden && !menu.contains(event.target)) close();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') close();
+  });
+  window.addEventListener('scroll', close, true);
+}
+
+function _activateSidePanel(container, target) {
+  const tab = container.querySelector(`.panel-tab[data-target="${target}"]`);
+  if (!tab) return;
+  tab.click();
+}
+
+function _selectedComponentPoint(component) {
+  const attrs = component?.attributes || {};
+  const point = component?.coOrds || component?.point || component?.position || attrs.COORDS || attrs['CO-ORDS'] || attrs.SUPPORT_COORDS;
+  if (!point) return '';
+  if (typeof point === 'string') return point;
+  return ['x', 'y', 'z'].map((axis) => point?.[axis]).filter((value) => value !== undefined && value !== null).join(', ');
+}
+
+function _copyText(text) {
+  const value = String(text || '').trim();
+  if (!value) return;
+  navigator.clipboard?.writeText?.(value).catch(() => {});
+}
+
+function _pcfContextActions(container) {
+  return {
+    fitSelection: () => _viewer?.fitSelection?.(),
+    properties: () => _activateSidePanel(container, 'v3d-panel-component'),
+    copyCoordinates: () => _copyText(_selectedComponentPoint(_selectedComponent)),
+    clearSelection: () => {
+      _viewer?.clearSelection?.();
+      _selectedComponent = null;
+      _updateComponentPanel(container, getResolvedViewer3DConfig(state));
+      _updatePcfHierarchySelection(container, '');
+      _updatePcfSelectionHud(container, null);
+      _updateSelectionCount(container, 0);
+    },
+  };
 }
 
 function _wireSidePanelTabs(container) {

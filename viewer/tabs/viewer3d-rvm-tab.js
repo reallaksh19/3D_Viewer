@@ -1,11 +1,12 @@
+import * as THREE from 'three';
 import { RuntimeEvents } from '../contracts/runtime-events.js';
 import { state, saveStickyState, setActiveTab, updateRvmPcfExtractState } from '../core/state.js';
 import { on, off, emit } from '../core/event-bus.js';
 import { detectRvmCapabilities } from '../rvm/RvmCapabilities.js';
 import { notify } from '../diagnostics/notification-center.js';
-import { RvmViewer3D } from '../rvm-viewer/RvmViewer3D.js?v=20260518-conversion-support-map-7';
+import { RvmViewer3D } from '../rvm-viewer/RvmViewer3D.js?v=20260518-statusbar-theme-12';
 import { parseRmssAttributes } from '../converters/rmss-attribute-parser.js';
-import { resolveKindFromAttrs as _resolveKindFromAttrs } from '../rvm-viewer/RvmSupportMapper.js?v=20260518-conversion-support-map-7';
+import { resolveKindFromAttrs as _resolveKindFromAttrs } from '../rvm-viewer/RvmSupportMapper.js?v=20260518-support-mapper-11';
 import { parseStpSupportMembers } from '../parser/stp-support-parser.js';
 import { RvmSearchIndex } from '../rvm/RvmSearchIndex.js';
 import { RvmTagXmlStore } from '../rvm/RvmTagXmlStore.js';
@@ -14,8 +15,7 @@ import {
   getRvmSupportSymbolSettings,
   normalizeRvmSupportSymbolScale,
   saveRvmSupportSymbolSettings,
-} from '../rvm-viewer/RvmSupportSymbols.js?v=20260518-conversion-support-map-7';
-import { renderSupportMapperPanel } from '../rvm-viewer/RvmSupportMapper.js?v=20260518-conversion-support-map-7';
+} from '../rvm-viewer/RvmSupportSymbols.js?v=20260518-support-mapper-11';
 
 function _enrichJsonWithMapperKinds(nodes) {
   if (!Array.isArray(nodes)) return;
@@ -104,6 +104,7 @@ const THEME_OPTIONS = [
   { value: 'NavisDark', label: 'Dark (Navy)' },
   { value: 'HighContrast', label: 'High Contrast' },
   { value: 'DrawLight', label: 'Light' },
+  { value: 'SteelNeutral', label: 'Steel Neutral' },
 ];
 
 const RVM_TOOL_GROUPS = Object.freeze([
@@ -146,7 +147,7 @@ function _applyRvmTheme(container, themePreset) {
   if (!container) return;
   const nextTheme = THEME_OPTIONS.some((option) => option.value === themePreset) ? themePreset : 'NavisDark';
   const nextClass = `geo-theme-${String(nextTheme).toLowerCase()}`;
-  container.classList.remove('geo-theme-navisdark', 'geo-theme-highcontrast', 'geo-theme-drawlight');
+  THEME_OPTIONS.forEach((option) => container.classList.remove(`geo-theme-${String(option.value).toLowerCase()}`));
   container.classList.add(nextClass);
 
   const themeSelect = container.querySelector('#rvm-theme-select');
@@ -287,11 +288,33 @@ const TOOL_ACTION_TO_MODE = Object.freeze({
   VIEW_MARQUEE_ZOOM: 'zoom',
 });
 
+const RVM_MODE_LABELS = Object.freeze({
+  orbit: 'Orbit',
+  pan: 'Pan',
+  select: 'Select',
+  marquee_select: 'Box Sel',
+  measure: 'Measure',
+  zoom: 'Zoom',
+});
+
+function _updateRvmModeChip(container, mode) {
+  const chip = container?.querySelector?.('#rvm-mode-chip');
+  if (!chip) return;
+
+  const normalized = String(mode || 'orbit');
+  chip.textContent = RVM_MODE_LABELS[normalized] || normalized;
+  chip.className = 'mode-chip';
+  if (normalized === 'select' || normalized === 'marquee_select') chip.classList.add('select');
+  if (normalized === 'measure') chip.classList.add('measure');
+}
+
 function _setActiveToolButton(container, action) {
   const buttons = container.querySelectorAll('.rvm-tool-btn[data-action]');
   buttons.forEach((btn) => {
     btn.classList.toggle('is-active', btn.dataset.action === action);
   });
+  const mode = TOOL_ACTION_TO_MODE[action];
+  if (mode) _updateRvmModeChip(container, mode);
 }
 
 function _applyToolbarClickedState(container, action, btn) {
@@ -563,6 +586,71 @@ function _updateRvmStatusStrip(container) {
   _setRvmStatusChip(container, 'selected', 'Selected', stats.selected);
   _setRvmStatusChip(container, 'tags', 'Tags', stats.tags);
   _setRvmStatusChip(container, 'unresolved', 'Unresolved', stats.unresolved);
+  _updateRvmBottomStatus(container, stats);
+}
+
+function _setRvmBottomSelection(container, count) {
+  const el = container?.querySelector?.('#rvm-sel-count');
+  if (el) el.textContent = String(Number(count || 0));
+}
+
+function _setRvmBottomMessage(container, message) {
+  const el = container?.querySelector?.('#rvm-sb-msg');
+  if (el) el.textContent = String(message || '');
+}
+
+function _setRvmBottomPerf(container) {
+  const el = container?.querySelector?.('#rvm-fps');
+  if (!el) return;
+  const triangles = Number(_viewer?.renderer?.info?.render?.triangles);
+  if (!Number.isFinite(triangles) || triangles <= 0) {
+    el.textContent = '-fps';
+    return;
+  }
+  const thousands = triangles / 1000;
+  el.textContent = `-fps | ${thousands.toFixed(thousands >= 10 ? 0 : 1)}K tri`;
+}
+
+function _setRvmStatusCoords(container, coords) {
+  const values = Array.isArray(coords) && coords.length >= 3 ? coords : ['-', '-', '-'];
+  ['rsx', 'rsy', 'rsz'].forEach((id, index) => {
+    const el = container?.querySelector?.(`#${id}`);
+    if (!el) return;
+    const value = values[index];
+    el.textContent = Number.isFinite(Number(value)) ? Number(value).toFixed(1) : '-';
+  });
+}
+
+function _parseRvmCoordValue(value) {
+  if (Array.isArray(value) && value.length >= 3) return value.slice(0, 3);
+  const text = String(value ?? '');
+  if (!text.trim()) return null;
+  const matches = text.match(/[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi);
+  if (!matches || matches.length < 3) return null;
+  const coords = matches.slice(0, 3).map(Number);
+  return coords.every((coord) => Number.isFinite(coord)) ? coords : null;
+}
+
+function _extractRvmCoordsFromAttrs(attrs) {
+  if (!attrs || typeof attrs !== 'object') return null;
+  const keys = ['COORDS', 'CO-ORDS', 'POSITION', 'CENTRE', 'CENTER', 'ORIGIN'];
+  for (const key of keys) {
+    const value = attrs[key] ?? attrs[key.toLowerCase()];
+    const coords = _parseRvmCoordValue(value);
+    if (coords) return coords;
+  }
+  return null;
+}
+
+function _updateRvmBottomStatus(container, stats = _getRvmUiStats()) {
+  _setRvmBottomSelection(container, stats.selected);
+  _setRvmBottomMessage(
+    container,
+    stats.objects > 0
+      ? `Objects ${stats.objects.toLocaleString()} | Visible ${stats.visible.toLocaleString()}`
+      : 'Load a dataset to begin'
+  );
+  _setRvmBottomPerf(container);
 }
 
 function _insertEmptyStateOnce(host, id, html) {
@@ -885,19 +973,11 @@ function _ensureRvmSupportSymbolSettings(container) {
     </div>
   `;
 
-  // Support mapper collapsible section
-  const mapperToggle = document.createElement('details');
-  mapperToggle.style.cssText = 'margin-top:10px; border-top:1px solid #2a2d35; padding-top:8px;';
-  mapperToggle.innerHTML = `<summary style="cursor:pointer; color:#7ab3ff; font-size:12px; font-weight:600; user-select:none; list-style:none; display:flex; align-items:center; gap:6px;"><span>▸</span> Support Type Mapper</summary>`;
-  const mapperBody = document.createElement('div');
-  mapperBody.style.marginTop = '8px';
-  renderSupportMapperPanel(mapperBody);
-  mapperToggle.appendChild(mapperBody);
-  mapperToggle.addEventListener('toggle', () => {
-    mapperToggle.querySelector('span').textContent = mapperToggle.open ? '▾' : '▸';
-  });
-  card.appendChild(mapperToggle);
-
+  /*
+   * Support type mapping is configured in Model Converters because the rules are
+   * applied during ATT/RVM -> XML+JSON+STP conversion. The RVM viewer only reads
+   * saved rules for appearance/rendering and must not expose the editor here.
+   */
   const firstHeader = rightPanel.querySelector('.rvm-panel-header');
   if (firstHeader) {
     firstHeader.insertAdjacentElement('afterend', card);
@@ -905,7 +985,6 @@ function _ensureRvmSupportSymbolSettings(container) {
     rightPanel.prepend(card);
   }
 }
-
 function _syncRvmSupportScaleControls(container, scale) {
   const value = _formatSupportScale(scale);
 
@@ -1053,6 +1132,138 @@ function _installRightPanelResizer(container) {
   });
 }
 
+// ── RVM axis gizmo (canvas-based) ────────────────────────────────────────────
+
+function _buildRvmAxisGizmo(viewport) {
+  if (viewport.querySelector('#rvm-axis-gizmo')) return;
+  const SIZE = 80;
+  const c = document.createElement('canvas');
+  c.id = 'rvm-axis-gizmo';
+  c.width = SIZE * (window.devicePixelRatio || 1);
+  c.height = SIZE * (window.devicePixelRatio || 1);
+  Object.assign(c.style, {
+    position: 'absolute', bottom: '12px', right: '12px',
+    width: `${SIZE}px`, height: `${SIZE}px`,
+    pointerEvents: 'none', zIndex: '30',
+  });
+  viewport.appendChild(c);
+  return c;
+}
+
+function _drawRvmAxisGizmo(canvas, camera) {
+  if (!canvas || !camera) return;
+  const dpr = window.devicePixelRatio || 1;
+  const S = canvas.width / dpr;
+  const cx = canvas.width / 2, cy = canvas.height / 2;
+  const R = (S / 2 - 10) * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  const up = camera.up.clone().normalize();
+  const right = new THREE.Vector3().crossVectors(dir, up).normalize();
+
+  const axes = [
+    { v: new THREE.Vector3(1, 0, 0), label: 'X', pos: '#e05555', neg: '#803030' },
+    { v: new THREE.Vector3(0, 1, 0), label: 'Y', pos: '#55cc55', neg: '#306030' },
+    { v: new THREE.Vector3(0, 0, 1), label: 'Z', pos: '#4499ee', neg: '#204880' },
+  ];
+
+  const projected = axes.map(({ v, label, pos, neg }) => {
+    const px = v.dot(right);
+    const py = -v.dot(up);
+    return { px, py, label, pos, neg, z: v.dot(dir) };
+  });
+
+  // Draw back halves first (negative z = facing away)
+  const sorted = [...projected].sort((a, b) => a.z - b.z);
+  for (const a of sorted) {
+    const ex = cx + a.px * R, ey = cy + a.py * R;
+    const nx = cx - a.px * R * 0.5, ny = cy - a.py * R * 0.5;
+    ctx.strokeStyle = a.neg; ctx.lineWidth = 2 * dpr;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(nx, ny); ctx.stroke();
+    if (a.z < 0) {
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey); ctx.strokeStyle = a.pos; ctx.stroke();
+      ctx.fillStyle = a.pos;
+      ctx.font = `bold ${10 * dpr}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(a.label, ex + a.px * 10 * dpr, ey + a.py * 10 * dpr);
+    }
+  }
+  for (const a of sorted.slice().reverse()) {
+    if (a.z >= 0) {
+      const ex = cx + a.px * R, ey = cy + a.py * R;
+      ctx.strokeStyle = a.pos; ctx.lineWidth = 2.5 * dpr;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.fillStyle = a.pos;
+      ctx.font = `bold ${10 * dpr}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(a.label, ex + a.px * 10 * dpr, ey + a.py * 10 * dpr);
+    }
+  }
+}
+
+// ── RVM viewport: hover coords + axis gizmo + multi-select fix ────────────────
+
+function _wireRvmViewportExtras(container) {
+  const viewport = container.querySelector('#rvm-viewport');
+  if (!viewport || viewport._rvmExtrasWired) return;
+  viewport._rvmExtrasWired = true;
+
+  const gizmoCanvas = _buildRvmAxisGizmo(viewport);
+
+  // Hover coordinates via raycasting
+  const rsx = container.querySelector('#rsx');
+  const rsy = container.querySelector('#rsy');
+  const rsz = container.querySelector('#rsz');
+  const clearCoords = () => {
+    if (rsx) rsx.textContent = '-';
+    if (rsy) rsy.textContent = '-';
+    if (rsz) rsz.textContent = '-';
+  };
+
+  viewport.addEventListener('mousemove', (e) => {
+    const v = _viewer;
+    if (!v?.renderer?.domElement || !v?.camera || !v?.raycaster) return;
+    const rect = v.renderer.domElement.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const mouse = {
+      x: ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      y: -((e.clientY - rect.top) / rect.height) * 2 + 1,
+    };
+    v.raycaster.setFromCamera(mouse, v.camera);
+    const hits = v.raycaster.intersectObjects(v.scene.children, true)
+      .filter(h => h.object.isMesh && h.object.visible);
+    if (hits.length > 0) {
+      const p = hits[0].point;
+      if (rsx) rsx.textContent = p.x.toFixed(0);
+      if (rsy) rsy.textContent = p.y.toFixed(0);
+      if (rsz) rsz.textContent = p.z.toFixed(0);
+    } else {
+      clearCoords();
+    }
+    _drawRvmAxisGizmo(gizmoCanvas, v.camera);
+  });
+
+  viewport.addEventListener('mouseleave', clearCoords);
+
+  // Multi-select count: refresh strip shortly after mouseup (marquee completes on up)
+  viewport.addEventListener('mouseup', () => {
+    setTimeout(() => _updateRvmStatusStrip(container), 80);
+  });
+
+  // Continuously redraw axis gizmo on animation frame to track camera changes
+  let _gizmoRafId = null;
+  const _tickGizmo = () => {
+    if (!container.isConnected) return;
+    const v = _viewer;
+    if (v?.camera) _drawRvmAxisGizmo(gizmoCanvas, v.camera);
+    _gizmoRafId = requestAnimationFrame(_tickGizmo);
+  };
+  _tickGizmo();
+}
+
 function _ensureRvmUiEnhancements(container) {
   _ensureRvmStatusStrip(container);
   _ensureRvmEmptyStates(container);
@@ -1060,6 +1271,7 @@ function _ensureRvmUiEnhancements(container) {
   _bindRvmTagPanelActions(container);
   _refreshRvmUiStatus(container);
   _installRightPanelResizer(container);
+  _wireRvmViewportExtras(container);
 }
 
 function _bindRvmUiStatusEvents(container) {
@@ -1302,6 +1514,117 @@ function _resetRvmInteractionToOrbit(container) {
   }
 }
 
+function _normalizeRvmPanelControls(container) {
+  ['rvm-tree-check-all', 'rvm-tree-uncheck-all', 'rvm-tree-expand-all', 'rvm-tree-collapse-all'].forEach((id) => {
+    const button = container.querySelector(`#${id}`);
+    if (!button) return;
+    button.classList.add('rvm-panel-control-btn');
+    button.removeAttribute('style');
+  });
+}
+
+function _bindRvmHierarchyFilter(container) {
+  const input = container.querySelector('#rvm-tree-filter');
+  const tree = container.querySelector('#rvm-hierarchy-tree');
+  if (!input || !tree) return;
+  input.addEventListener('input', () => {
+    const term = String(input.value || '').trim().toLowerCase();
+    tree.querySelectorAll('li').forEach((row) => {
+      row.hidden = Boolean(term) && !row.textContent.toLowerCase().includes(term);
+    });
+  });
+}
+
+function _renderRvmSelectionHud() {
+  return `
+    <div id="rvm-selection-hud" class="viewer-selection-hud rvm-selection-hud" hidden>
+      <div class="viewer-selection-hud-type" data-rvm-selection-type>Selection</div>
+      <div class="viewer-selection-hud-name" data-rvm-selection-name>-</div>
+      <div class="viewer-selection-hud-meta" data-rvm-selection-meta>-</div>
+    </div>
+  `;
+}
+
+function _updateRvmSelectionHud(container, selection, entry = null) {
+  const hud = container?.querySelector?.('#rvm-selection-hud');
+  if (!hud) return;
+  const canonicalId = selection?.canonicalObjectId || selection?.canonicalId || '';
+  hud.hidden = !canonicalId;
+  if (!canonicalId) return;
+  hud.querySelector('[data-rvm-selection-type]').textContent = String(entry?.kind || 'RVM Object');
+  hud.querySelector('[data-rvm-selection-name]').textContent = String(entry?.name || canonicalId);
+  hud.querySelector('[data-rvm-selection-meta]').textContent = String(canonicalId);
+}
+
+function _renderRvmContextMenu() {
+  const items = [
+    ['fitSelection', 'Fit Selection'],
+    ['isolate', 'Isolate'],
+    ['showAll', 'Show All'],
+    ['attributes', 'View Attributes'],
+    ['tag', 'Add Review Tag'],
+    ['copyCoordinates', 'Copy Coordinates'],
+  ];
+  return `
+    <div id="rvm-context-menu" class="viewer-context-menu" role="menu" hidden>
+      ${items.map(([action, label]) => `<button class="viewer-context-menu-item" type="button" role="menuitem" data-rvm-context-action="${action}">${escapeHtml(label)}</button>`).join('')}
+    </div>
+  `;
+}
+
+function _copyRvmSelectionCoordinates(selection) {
+  const canonicalId = selection?.canonicalObjectId || selection?.canonicalId || '';
+  if (!canonicalId) return;
+  const entry = _viewer?.searchIndex?._searchableEntries?.find(e => e.canonicalObjectId === canonicalId);
+  const attrs = entry?.attrs || {};
+  const coord = attrs.COORDS || attrs['CO-ORDS'] || attrs.POSITION || attrs.CENTRE || attrs.CENTER || canonicalId;
+  navigator.clipboard?.writeText?.(String(coord)).catch(() => {});
+}
+
+function _bindRvmContextMenu(container) {
+  const menu = container.querySelector('#rvm-context-menu');
+  const host = container.querySelector('.rvm-body') || container;
+  if (!menu || !host) return;
+  const close = () => {
+    menu.hidden = true;
+    menu.classList.remove('is-open');
+  };
+  host.addEventListener('contextmenu', (event) => {
+    if (event.target.closest('.rvm-right-panel, .rvm-left-panel')) return;
+    event.preventDefault();
+    const selection = _viewer?.getSelection?.() || state.rvm?.selection || {};
+    const hasSelection = Boolean(selection?.canonicalObjectId || selection?.canonicalId);
+    menu.querySelectorAll('[data-rvm-context-action]').forEach((item) => {
+      const action = item.dataset.rvmContextAction;
+      item.disabled = action !== 'showAll' && !hasSelection;
+    });
+    menu.style.left = `${event.clientX}px`;
+    menu.style.top = `${event.clientY}px`;
+    menu.hidden = false;
+    menu.classList.add('is-open');
+  });
+  menu.addEventListener('click', (event) => {
+    const item = event.target.closest('[data-rvm-context-action]');
+    if (!item || item.disabled) return;
+    const action = item.dataset.rvmContextAction;
+    const selection = _viewer?.getSelection?.() || state.rvm?.selection || {};
+    if (action === 'fitSelection') _viewer?.fitSelection?.();
+    if (action === 'isolate') _viewer?.isolateSelection?.();
+    if (action === 'showAll') _viewer?.showAll?.();
+    if (action === 'attributes') container.querySelector('#rvm-attr-search')?.focus?.();
+    if (action === 'tag') _openTagModal(container, selection);
+    if (action === 'copyCoordinates') _copyRvmSelectionCoordinates(selection);
+    close();
+  });
+  document.addEventListener('click', (event) => {
+    if (!menu.hidden && !menu.contains(event.target)) close();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') close();
+  });
+  window.addEventListener('scroll', close, true);
+}
+
 function _bindShortcuts(container) {
   if (_shortcutHandler) {
     window.removeEventListener('keydown', _shortcutHandler, true);
@@ -1415,6 +1738,10 @@ function _buildHTML(caps) {
         </span>
       </div>
       <ul id="rvm-hierarchy-tree" class="rvm-tree" role="tree" aria-label="Model hierarchy"></ul>
+      <div class="rvm-panel-filter-row">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input id="rvm-tree-filter" class="rvm-panel-filter" type="search" placeholder="Filter hierarchy..." autocomplete="off">
+      </div>
       <div class="rvm-panel-header">Search Results</div>
       <ul id="rvm-search-results" class="rvm-tree" role="list"></ul>
     </div>
@@ -1439,15 +1766,21 @@ function _buildHTML(caps) {
     </div>
 
 
+    ${_renderRvmSelectionHud()}
+    ${_renderRvmContextMenu()}
+
     <div class="geo-right-panel rvm-right-panel">
       <div class="rvm-right-panel-resize-handle" title="Drag to resize panel"></div>
       <div class="rvm-panel-header">Attributes</div>
-      <input type="text" id="rvm-attr-search" placeholder="Filter attributes..." style="width: 100%; box-sizing: border-box; padding: 4px; background: #222; color: #fff; border: 1px solid #444;">
+      <div class="rvm-panel-filter-row">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" id="rvm-attr-search" class="rvm-panel-filter" placeholder="Filter attributes...">
+      </div>
       <div id="rvm-attributes-content" class="rvm-attributes-panel"></div>
 
       <div class="rvm-panel-header">Review Tags</div>
-      <div style="display:flex;gap:5px;padding:5px;background:#1a1a1a;">
-        <select id="rvm-tag-severity-filter" style="flex:1;background:#333;color:#fff;border:1px solid #555;">
+      <div class="rvm-tag-filter-row">
+        <select id="rvm-tag-severity-filter" class="rvm-tag-severity-filter">
           <option value="all">All Tags</option>
           <option value="high">High</option>
           <option value="medium">Medium</option>
@@ -1455,17 +1788,40 @@ function _buildHTML(caps) {
           <option value="info">Info</option>
         </select>
       </div>
-      <div style="display:flex;gap:5px;padding:5px;">
-        <label class="rvm-btn" style="flex:1;text-align:center;cursor:pointer;" title="Import Tags from XML">
+      <div class="rvm-tag-file-row">
+        <label class="rvm-btn rvm-tag-file-btn" title="Import Tags from XML">
           Import Tags XML
           <input type="file" id="rvm-import-tags-input" accept=".xml" style="display:none">
         </label>
-        <button class="rvm-btn" id="rvm-export-tags-btn" style="flex:1;" disabled title="Export Tags to XML">Export Tags XML</button>
+        <button class="rvm-btn rvm-tag-file-btn" id="rvm-export-tags-btn" disabled title="Export Tags to XML">Export Tags XML</button>
       </div>
       <div id="rvm-tag-list" class="rvm-tag-list"></div>
       <button class="rvm-btn" id="rvm-add-tag-btn" disabled>+ Add Tag</button>
     </div>
 
+  </div>
+  <div id="rvm-statusbar" class="rvm-statusbar" role="status" aria-live="polite">
+    <div class="sb rvm-status-product">
+      <span class="rvm-status-product-label">RVM</span>
+      <span class="mode-chip" id="rvm-mode-chip">Orbit</span>
+    </div>
+    <div class="sb rvm-status-coord-segment" aria-label="Selection coordinates">
+      <div class="sc-coords">
+        <span class="sc-ax">X</span><span class="sc-v" id="rsx">-</span>
+        <span class="sc-ax">Y</span><span class="sc-v" id="rsy">-</span>
+        <span class="sc-ax">Z</span><span class="sc-v" id="rsz">-</span>
+      </div>
+    </div>
+    <div class="sb">
+      <span class="rvm-status-count" id="rvm-sel-count">0</span>
+      <span class="rvm-status-count-label">selected</span>
+    </div>
+    <div class="sb rvm-sb-msg">
+      <span id="rvm-sb-msg">Load a dataset to begin</span>
+    </div>
+    <div class="sb rvm-sb-perf">
+      <span id="rvm-fps">-fps</span>
+    </div>
   </div>
   <div id="rvm-tag-modal" class="rvm-tag-modal" aria-hidden="true">
     <div class="rvm-tag-modal-card">
@@ -1669,6 +2025,7 @@ function _bindTabListener() {
 
             // Initial render of tags if any were loaded with bundle
             _renderTagList(container);
+            _updateRvmStatusStrip(container);
         }
     }
   };
@@ -1717,6 +2074,9 @@ function _bindTabListener() {
 
       if (!canonicalId) {
           attrContent.innerHTML = '<div style="padding: 10px; color: #888;">No selection</div>';
+          _updateRvmSelectionHud(root, null);
+          _setRvmStatusCoords(root, null);
+          _updateRvmStatusStrip(root);
           return;
       }
 
@@ -1736,6 +2096,9 @@ function _bindTabListener() {
                   html += '</table>';
               }
               attrContent.innerHTML = html;
+              _updateRvmSelectionHud(root, { canonicalObjectId: canonicalId }, { name: ud.displayName || ud.supportTag || 'STP Member', kind: 'STP' });
+              _setRvmStatusCoords(root, _extractRvmCoordsFromAttrs(ud.attrs));
+              _updateRvmStatusStrip(root);
               return;
           }
       }
@@ -1744,6 +2107,9 @@ function _bindTabListener() {
       const entry = _viewer?.searchIndex?._searchableEntries?.find(e => e.canonicalObjectId === canonicalId);
       if (!entry) {
           attrContent.innerHTML = `<div style="padding: 10px; font-weight:bold; color:#ccc;">${escapeHtml(canonicalId)}</div><div style="padding: 6px 10px; color: #888;">No attribute data available</div>`;
+          _updateRvmSelectionHud(root, { canonicalObjectId: canonicalId });
+          _setRvmStatusCoords(root, null);
+          _updateRvmStatusStrip(root);
           return;
       }
 
@@ -1764,6 +2130,9 @@ function _bindTabListener() {
           html += '<div style="padding:10px; color:#888;">No attribute data</div>';
       }
       attrContent.innerHTML = html;
+      _updateRvmSelectionHud(root, { canonicalObjectId: canonicalId }, entry);
+      _setRvmStatusCoords(root, _extractRvmCoordsFromAttrs(entry.attrs));
+      _updateRvmStatusStrip(root);
 
       // Re-apply any active search filter
       const filterInput = root?.querySelector('#rvm-attr-search');
@@ -1803,6 +2172,9 @@ export function renderViewer3DRvm(container) {
   _bindStpLoader(container);
   _bindAttrSearch(container);
   _bindSearch(container);
+  _normalizeRvmPanelControls(container);
+  _bindRvmHierarchyFilter(container);
+  _bindRvmContextMenu(container);
   _bindToolbarClickedState(container);
   _bindToolbarActions(container);
   _bindResize(container);
@@ -1829,6 +2201,9 @@ export function renderViewer3DRvm(container) {
   }
 
   _applyRvmTheme(container, _getRvmThemePreset());
+  _updateRvmModeChip(container, 'orbit');
+  _setRvmStatusCoords(container, null);
+  _updateRvmStatusStrip(container);
 
   const settingsBtn = container.querySelector('#rvm-settings-btn');
   if (settingsBtn) {
