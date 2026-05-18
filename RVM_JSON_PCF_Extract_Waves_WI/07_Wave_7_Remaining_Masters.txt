@@ -1,0 +1,68 @@
+Wave 7 — Remaining Masters Before PCF Emission
+
+Goal:
+Apply SKEY, Drop Rules, Support Mapping, Branch Geometry/BRLEN, and CA Attribute masters.
+
+Primary files:
+- viewer/rvm-pcf-extract/RvmRemainingMastersMapper.js
+- viewer/core/state.js
+- viewer/rvm-pcf-extract/RvmFinal2dCsvBuilder.js
+- viewer/tabs/rvm-json-pcf-extract-tab.js
+
+Order:
+1. SKEY
+2. Drop Rules
+3. Branch Geometry / BRLEN
+4. CA Attributes
+5. Support Mapping
+
+Reason:
+CA rules must see CA8 already populated by Wave 6.
+
+SKEY defaults:
+BEND -> ELBW
+TEE -> TEBW
+OLET -> OLET
+FLANGE -> FLWN
+VALVE -> VVBW
+REDUCER-CONCENTRIC -> RCBW
+REDUCER-ECCENTRIC -> REBW
+
+Drop rules:
+GASK, INST, WELD, UNKNOWN, MISC are include=false but visible in CSV.
+
+Support mapping:
+- Explicit support name first.
+- Else friction/gap blocks.
+- Else fallbackName CA150.
+- SUPPORT_GUID gets UCI: prefix.
+- SUPPORT rows clear CA1 to CA10.
+
+Branch Geometry / BRLEN:
+For TEE/OLET:
+1. source BRLEN
+2. CP-BP distance
+3. Branch Geometry Master
+4. unresolved warning
+
+CA rules:
+PIPE/BEND/TEE/OLET:
+- CA1-7 allowed
+- CA8 skipped
+- CA9-10 allowed
+- CA97/CA98 allowed
+
+FLANGE/VALVE/REDUCER:
+- CA1-10 allowed
+- CA8 allowed
+
+SUPPORT:
+- CA1-10 cleared
+
+Validation gate:
+PASS: SKEY resolved.
+PASS: Drop rules applied.
+PASS: BRLEN resolves or warns.
+PASS: SUPPORT_NAME/GUID applied.
+PASS: SUPPORT ca = {}.
+PASS: VALVE CA8 preserved.

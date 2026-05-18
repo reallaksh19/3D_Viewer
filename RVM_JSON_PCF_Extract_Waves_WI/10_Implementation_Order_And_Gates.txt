@@ -1,0 +1,56 @@
+Implementation Order and Gates
+
+Recommended order:
+1. Wave 1 — Multi-select hierarchy and canvas highlight.
+2. Wave 2 — Extract button and tab shell.
+3. Wave 3 — Final 2D CSV builder.
+4. Wave 4 — Pipeline Ref and Bore conversion.
+5. Wave 5 — Piping Class mapping.
+6. Wave 6 — Legacy Valve CA8 Weight.
+7. Wave 7 — Remaining Masters.
+8. Wave 8 — PCF emitter and downloads.
+9. Wave 9 — Hardening.
+
+Why this order:
+- Scope selection must exist before extraction.
+- Tab/state shell must exist before CSV workflow.
+- Pipeline Ref and Converted Bore are foundational.
+- Piping Class enriches rating/material/schedule.
+- Valve CA8 must use Bore + Rating + Length, not class/material.
+- CA rules run after CA8 so valve weight is preserved.
+- PCF emission requires enriched rows.
+- Hardening adds import/export, ambiguity resolution, and deterministic output.
+
+Global completion definition:
+1. RVM hierarchy checkbox multi-select works.
+2. Selected hierarchy highlights canvas geometry.
+3. Extract PCF opens JSON → PCF Extract tab.
+4. Final 2D CSV builds from selected or full model.
+5. Pipeline Ref auto-populates from hierarchy.
+6. Converted Bore resolves.
+7. Piping Class maps.
+8. Valve CA8 maps by Bore + Rating + Length.
+9. SKEY, Drop, Support, BRLEN, and CA masters apply.
+10. PCF validates and emits per Pipeline Ref.
+11. CSV, PCF, diagnostics, validation register, and masters downloads work.
+12. Same input + same masters produce deterministic output.
+
+Smoke tests:
+T1 Leaf node selection highlights one geometry.
+T2 Parent branch selection highlights descendants.
+T3 Multiple branches remain selected.
+T4 No selection extracts full model.
+T5 Selection extracts selected subtree.
+T6 Pipeline Ref resolves from parent hierarchy.
+T7 Missing parent uses fallback.
+T8 Bore conversion handles NPS/DN/OD.
+T9 Piping Class maps by line/list/class master.
+T10 Valve CA8 maps by bore/rating/length.
+T11 Ambiguous valve candidates require selection.
+T12 GASK visible but not emitted.
+T13 SUPPORT emits name/guid and clears CA.
+T14 TEE/OLET BRLEN resolves or warns.
+T15 PCF validates geometry.
+T16 Supported PCF blocks emit.
+T17 Multiple pipeline refs download separately.
+T18 Output order is deterministic.

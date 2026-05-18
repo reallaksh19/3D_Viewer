@@ -1,0 +1,4284 @@
+UXML integration
+
+
+
+```text
+CL1 = UXML Consumer Layer 1 / Route Package Layer
+
+Purpose:
+After DecisionGate + RouteHandoffPolicy, create a deterministic package that downstream routes can consume.
+
+UXML
+  ↓
+DecisionGate
+  ↓
+RouteHandoffPolicy
+  ↓
+CL1 Route Package
+  ↓
+Future route-specific adapters:
+    PCF legacy route / CII / GLB / 2D / InputXML export
+```
+
+This does **not** touch XML/InputXML mappers. New agent can continue input-related work separately.
+
+---
+
+# CL1 Agent Prompt
+
+```text
+You are CL1 Agent for PCF_GLB_Viewer_Conv UXML program.
+
+Your task:
+Create the UXML CL1 Route Package layer.
+
+Purpose:
+After UxmlRouteHandoffPolicy allows or blocks a target route, CL1 must create a deterministic, route-owned payload package that downstream adapters can consume later.
+
+Add:
+- viewer/uxml/UxmlCl1RoutePackage.js
+- viewer/tests/uxml-cl1-route-package.test.js
+
+Patch:
+- tools/uxml-certification.mjs
+- .github/workflows/uxml-certification.yml
+
+Do not touch:
+- XML/InputXML mappers
+- UxmlNormalizer.js
+- UxmlProfileDetector.js
+- PCF writer/emitter
+- master mapper files
+- RVM/JSON → PCF bridge modules
+- topology builders
+
+CL1 must:
+1. Accept UXML, topologyDecision, acceptedTopologyHandoff, diagnostics, lossContract, and targetRoute.
+2. Evaluate UxmlRouteHandoffPolicy.
+3. Create deterministic package metadata.
+4. Preserve route contract.
+5. Preserve loss contract and diagnostics.
+6. Include entity counts.
+7. Include topology decision counts.
+8. Include handoff counts.
+9. Never mutate UXML.
+10. Never generate PCF.
+11. Never resolve masters.
+12. Never apply topology fixes.
+```
+
+---
+
+# File 1
+
+```text
+viewer/uxml/UxmlCl1RoutePackage.js
+```
+
+```js
+/**
+ * UxmlCl1RoutePackage.js
+ *
+ * CL1 — UXML Consumer Layer 1 / Route Package Layer.
+ *
+ * Purpose:
+ * - Package UXML topology-decision evidence into a deterministic downstream
+ *   route payload.
+ * - Sit after:
+ *   UXML → FaceModel → UniversalTopoGraph → RayTopoGraph → Comparator
+ *   → DecisionGate → RouteHandoffPolicy → CL1 Route Package
+ *
+ * Important:
+ * - Does not emit PCF.
+ * - Does not resolve masters.
+ * - Does not mutate coordinates.
+ * - Does not apply fixes.
+ * - Does not parse XML/InputXML.
+ * - Does not build topology.
+ */
+
+import {
+  UXML_ROUTE_TARGETS,
+  evaluateUxmlRouteHandoffPolicy,
+  summarizeUxmlRouteHandoff,
+} from './UxmlRouteHandoffPolicy.js';
+
+export const UXML_CL1_ROUTE_PACKAGE_SCHEMA =
+  'uxml-cl1-route-package/v1';
+
+export const UXML_CL1_ROUTE_PACKAGE_BLOCK_CODES = Object.freeze({
+  NO_UXML: 'UXML-CL1-NO-UXML',
+  ROUTE_HANDOFF_BLOCKED: 'UXML-CL1-ROUTE-HANDOFF-BLOCKED',
+});
+
+function clean(value) {
+  return String(value ?? '').trim();
+}
+
+function list(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function number(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function bool(value) {
+  return value === true;
+}
+
+function cloneJson(value) {
+  if (value == null) return value;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function canonicalJson(value) {
+  if (value == null) return 'null';
+
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(',')}]`;
+  }
+
+  if (typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(',')}}`;
+  }
+
+  return JSON.stringify(value);
+}
+
+/**
+ * Small deterministic non-cryptographic hash.
+ * This is only a stable package ID helper, not a security primitive.
+ */
+function stableHash(value) {
+  const text = canonicalJson(value);
+  let hash = 2166136261;
+
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return `cl1-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function uxmlCounts(uxml = {}) {
+  return {
+    sourceCount: list(uxml.sources).length,
+    pipelineCount: list(uxml.pipelines).length,
+    componentCount: list(uxml.components).length,
+    anchorCount: list(uxml.anchors).length,
+    portCount: list(uxml.ports).length,
+    segmentCount: list(uxml.segments).length,
+    supportCount: list(uxml.supports).length,
+    mappingCount: list(uxml.mappings).length,
+    diagnosticCount: list(uxml.diagnostics).length,
+    lossCount: list(uxml.lossContract).length,
+  };
+}
+
+function decisionCounts(topologyDecision = {}) {
+  const summary = topologyDecision.summary || {};
+
+  return {
+    outputBridgeReady: bool(topologyDecision.outputBridgeReady),
+    exportAllowed: bool(topologyDecision.exportAllowed),
+    acceptedConnectionCount: number(summary.acceptedConnectionCount),
+    agreementAcceptedCount: number(summary.agreementAcceptedCount),
+    universalOnlyAcceptedCount: number(summary.universalOnlyAcceptedCount),
+    rayPromotionAcceptedCount: number(summary.rayPromotionAcceptedCount),
+    faceProximityAcceptedCount: number(summary.faceProximityAcceptedCount),
+    manualReviewCount: number(summary.manualReviewCount),
+    rejectedCount: number(summary.rejectedCount),
+    unresolvedCount: number(summary.unresolvedCount),
+    diagnosticCount: number(summary.diagnosticCount),
+  };
+}
+
+function handoffCounts(acceptedTopologyHandoff = {}) {
+  const summary = acceptedTopologyHandoff.summary || {};
+
+  return {
+    handoffConnectionCount: number(summary.handoffConnectionCount),
+    annotatedRowCount: number(summary.annotatedRowCount),
+    totalRowCount: number(summary.totalRowCount),
+    pipelineCount: number(summary.pipelineCount),
+    coordinatesMutated: summary.coordinatesMutated === true,
+    legacyRoutingContinues: summary.legacyRoutingContinues === true,
+    mastersDeferredToLegacyRoute: summary.mastersDeferredToLegacyRoute === true,
+    pcfEmitterDeferredToLegacyRoute: summary.pcfEmitterDeferredToLegacyRoute === true,
+  };
+}
+
+function pipelineRefs(uxml = {}) {
+  return list(uxml.pipelines)
+    .map(p => clean(p.pipelineRef || p.id))
+    .filter(Boolean)
+    .sort();
+}
+
+function componentTypes(uxml = {}) {
+  const counts = {};
+
+  for (const component of list(uxml.components)) {
+    const type = clean(component.normalizedType || component.type || 'UNKNOWN');
+    counts[type] = (counts[type] || 0) + 1;
+  }
+
+  return Object.fromEntries(
+    Object.entries(counts).sort(([a], [b]) => a.localeCompare(b))
+  );
+}
+
+function makePackageId({
+  targetRoute,
+  sourceInfo,
+  entityCounts,
+  topologyCounts,
+  handoffSummary,
+}) {
+  return stableHash({
+    schema: UXML_CL1_ROUTE_PACKAGE_SCHEMA,
+    targetRoute,
+    sourceInfo,
+    entityCounts,
+    topologyCounts,
+    handoffSummary,
+  });
+}
+
+function makeBlockedPackage({
+  targetRoute,
+  blockCode,
+  blockedReason,
+  policy = null,
+  sourceInfo = {},
+  uxml = null,
+  topologyDecision = null,
+  acceptedTopologyHandoff = null,
+  diagnostics = [],
+  lossContract = [],
+}) {
+  const entityCounts = uxmlCounts(uxml || {});
+  const topologyCounts = decisionCounts(topologyDecision || {});
+  const handoffSummary = handoffCounts(acceptedTopologyHandoff || {});
+
+  return {
+    schema: UXML_CL1_ROUTE_PACKAGE_SCHEMA,
+    ok: false,
+    allowed: false,
+    blocked: true,
+    blockCode,
+    blockedReason,
+    packageId: makePackageId({
+      targetRoute,
+      sourceInfo,
+      entityCounts,
+      topologyCounts,
+      handoffSummary,
+    }),
+    targetRoute,
+    sourceInfo: cloneJson(sourceInfo),
+    policy: cloneJson(policy),
+    entityCounts,
+    topologyCounts,
+    handoffSummary,
+    componentTypes: componentTypes(uxml || {}),
+    pipelineRefs: pipelineRefs(uxml || {}),
+    diagnostics: cloneJson(list(diagnostics)),
+    lossContract: cloneJson(list(lossContract)),
+    routeContract: policy?.routeContract || {
+      uxmlMutatesCoordinates: false,
+      uxmlAppliesFixes: false,
+      uxmlEmitsPcfDirectly: false,
+    },
+    payload: null,
+  };
+}
+
+export function createUxmlCl1RoutePackage({
+  targetRoute = UXML_ROUTE_TARGETS.DIAGNOSTICS_ONLY,
+  uxml = null,
+  topologyDecision = null,
+  acceptedTopologyHandoff = null,
+  diagnostics = [],
+  lossContract = [],
+  allowPartialExport = false,
+  sourceInfo = {},
+} = {}) {
+  if (!uxml || typeof uxml !== 'object') {
+    return makeBlockedPackage({
+      targetRoute,
+      blockCode: UXML_CL1_ROUTE_PACKAGE_BLOCK_CODES.NO_UXML,
+      blockedReason: 'Cannot create CL1 route package because UXML document is missing.',
+      sourceInfo,
+      uxml,
+      topologyDecision,
+      acceptedTopologyHandoff,
+      diagnostics,
+      lossContract,
+    });
+  }
+
+  const policy = evaluateUxmlRouteHandoffPolicy({
+    targetRoute,
+    uxml,
+    topologyDecision,
+    acceptedTopologyHandoff,
+    diagnostics,
+    lossContract,
+    allowPartialExport,
+  });
+
+  if (!policy.allowed) {
+    return makeBlockedPackage({
+      targetRoute: policy.targetRoute || targetRoute,
+      blockCode: UXML_CL1_ROUTE_PACKAGE_BLOCK_CODES.ROUTE_HANDOFF_BLOCKED,
+      blockedReason: policy.blockedReason,
+      policy,
+      sourceInfo,
+      uxml,
+      topologyDecision,
+      acceptedTopologyHandoff,
+      diagnostics,
+      lossContract,
+    });
+  }
+
+  const entityCounts = uxmlCounts(uxml);
+  const topologyCounts = decisionCounts(topologyDecision || {});
+  const handoffSummary = handoffCounts(acceptedTopologyHandoff || {});
+  const packageId = makePackageId({
+    targetRoute: policy.targetRoute,
+    sourceInfo,
+    entityCounts,
+    topologyCounts,
+    handoffSummary,
+  });
+
+  return {
+    schema: UXML_CL1_ROUTE_PACKAGE_SCHEMA,
+    ok: true,
+    allowed: true,
+    blocked: false,
+    blockCode: '',
+    blockedReason: '',
+    packageId,
+    targetRoute: policy.targetRoute,
+    targetRouteLabel: policy.targetRouteLabel,
+    sourceInfo: cloneJson(sourceInfo),
+    policy: cloneJson(policy),
+    entityCounts,
+    topologyCounts,
+    handoffSummary,
+    componentTypes: componentTypes(uxml),
+    pipelineRefs: pipelineRefs(uxml),
+    diagnostics: cloneJson(list(diagnostics)),
+    lossContract: cloneJson(list(lossContract)),
+    routeContract: cloneJson(policy.routeContract),
+    payload: {
+      uxml: cloneJson(uxml),
+      topologyDecision: cloneJson(topologyDecision),
+      acceptedTopologyHandoff: cloneJson(acceptedTopologyHandoff),
+      requiredPayload: cloneJson(policy.requiredPayload),
+      masterOwner: policy.masterOwner,
+      diagnosticsPolicy: cloneJson(policy.diagnosticsPolicy),
+      lossPolicy: cloneJson(policy.lossPolicy),
+    },
+  };
+}
+
+export function assertUxmlCl1RoutePackageAllowed(options = {}) {
+  const pkg = createUxmlCl1RoutePackage(options);
+
+  if (!pkg.allowed) {
+    const err = new Error(pkg.blockedReason);
+    err.code = pkg.blockCode;
+    err.cl1RoutePackage = pkg;
+    throw err;
+  }
+
+  return pkg;
+}
+
+export function summarizeUxmlCl1RoutePackage(pkg) {
+  if (!pkg) return 'CL1 route package was not created.';
+
+  if (!pkg.allowed) {
+    return `CL1 route package blocked: ${pkg.blockedReason}`;
+  }
+
+  const routeText = summarizeUxmlRouteHandoff(pkg.policy);
+
+  return `${routeText} CL1 package=${pkg.packageId}; components=${pkg.entityCounts.componentCount}; accepted=${pkg.topologyCounts.acceptedConnectionCount}.`;
+}
+
+export const buildUxmlCl1RoutePackage = createUxmlCl1RoutePackage;
+```
+
+---
+
+# File 2
+
+```text
+viewer/tests/uxml-cl1-route-package.test.js
+```
+
+```js
+import { describe, expect, it } from 'vitest';
+
+import {
+  UXML_ROUTE_TARGETS,
+} from '../uxml/UxmlRouteHandoffPolicy.js';
+
+import {
+  UXML_CL1_ROUTE_PACKAGE_BLOCK_CODES,
+  assertUxmlCl1RoutePackageAllowed,
+  buildUxmlCl1RoutePackage,
+  createUxmlCl1RoutePackage,
+  summarizeUxmlCl1RoutePackage,
+} from '../uxml/UxmlCl1RoutePackage.js';
+
+function uxmlDoc() {
+  return {
+    schema: 'uxml/v1',
+    sources: [{ id: 'SRC-1', name: 'sample.xml' }],
+    pipelines: [{ id: 'PL-1', pipelineRef: '/P1' }],
+    components: [
+      { id: 'PIPE-1', type: 'PIPE', normalizedType: 'PIPE', pipelineRef: '/P1' },
+      { id: 'VALVE-1', type: 'VALVE', normalizedType: 'VALVE', pipelineRef: '/P1' },
+    ],
+    anchors: [
+      { id: 'A1', componentId: 'PIPE-1' },
+      { id: 'A2', componentId: 'PIPE-1' },
+      { id: 'A3', componentId: 'VALVE-1' },
+      { id: 'A4', componentId: 'VALVE-1' },
+    ],
+    ports: [
+      { id: 'P1', componentId: 'PIPE-1' },
+      { id: 'P2', componentId: 'PIPE-1' },
+      { id: 'P3', componentId: 'VALVE-1' },
+      { id: 'P4', componentId: 'VALVE-1' },
+    ],
+    segments: [
+      { id: 'S1', componentId: 'PIPE-1' },
+      { id: 'S2', componentId: 'VALVE-1' },
+    ],
+    supports: [],
+    mappings: [],
+    diagnostics: [{ code: 'D-1' }],
+    lossContract: [{ code: 'L-1' }],
+  };
+}
+
+function topologyDecision(overrides = {}) {
+  return {
+    schema: 'uxml-topology-decision-gate/v1',
+    outputBridgeReady: true,
+    exportAllowed: true,
+    summary: {
+      acceptedConnectionCount: 1,
+      agreementAcceptedCount: 1,
+      universalOnlyAcceptedCount: 0,
+      rayPromotionAcceptedCount: 0,
+      faceProximityAcceptedCount: 0,
+      manualReviewCount: 0,
+      rejectedCount: 0,
+      unresolvedCount: 0,
+      diagnosticCount: 0,
+    },
+    acceptedConnections: [
+      {
+        id: 'TD-1',
+        sourceComponentId: 'PIPE-1',
+        targetComponentId: 'VALVE-1',
+        decision: 'ACCEPT',
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function acceptedTopologyHandoff(overrides = {}) {
+  return {
+    schema: 'rvm-pcf-accepted-topology-handoff/v1',
+    handoffConnections: [
+      {
+        id: 'H-1',
+        sourceComponentId: 'PIPE-1',
+        targetComponentId: 'VALVE-1',
+      },
+    ],
+    summary: {
+      handoffConnectionCount: 1,
+      annotatedRowCount: 2,
+      totalRowCount: 2,
+      pipelineCount: 1,
+      coordinatesMutated: false,
+      legacyRoutingContinues: true,
+      mastersDeferredToLegacyRoute: true,
+      pcfEmitterDeferredToLegacyRoute: true,
+    },
+    ...overrides,
+  };
+}
+
+describe('UxmlCl1RoutePackage', () => {
+  it('creates deterministic CL1 package for legacy PCF route', () => {
+    const a = createUxmlCl1RoutePackage({
+      targetRoute: UXML_ROUTE_TARGETS.EXTRACT_PCF_LEGACY,
+      uxml: uxmlDoc(),
+      topologyDecision: topologyDecision(),
+      acceptedTopologyHandoff: acceptedTopologyHandoff(),
+      diagnostics: [{ code: 'D-1' }],
+      lossContract: [{ code: 'L-1' }],
+      sourceInfo: {
+        sourceFile: 'sample.xml',
+      },
+    });
+
+    const b = createUxmlCl1RoutePackage({
+      targetRoute: UXML_ROUTE_TARGETS.EXTRACT_PCF_LEGACY,
+      uxml: uxmlDoc(),
+      topologyDecision: topologyDecision(),
+      acceptedTopologyHandoff: acceptedTopologyHandoff(),
+      diagnostics: [{ code: 'D-1' }],
+      lossContract: [{ code: 'L-1' }],
+      sourceInfo: {
+        sourceFile: 'sample.xml',
+      },
+    });
+
+    expect(a.schema).toBe('uxml-cl1-route-package/v1');
+    expect(a.ok).toBe(true);
+    expect(a.allowed).toBe(true);
+    expect(a.packageId).toBe(b.packageId);
+
+    expect(a.targetRoute).toBe(UXML_ROUTE_TARGETS.EXTRACT_PCF_LEGACY);
+    expect(a.entityCounts.componentCount).toBe(2);
+    expect(a.entityCounts.anchorCount).toBe(4);
+    expect(a.entityCounts.portCount).toBe(4);
+    expect(a.entityCounts.segmentCount).toBe(2);
+
+    expect(a.topologyCounts.acceptedConnectionCount).toBe(1);
+    expect(a.handoffSummary.handoffConnectionCount).toBe(1);
+    expect(a.routeContract.uxmlEmitsPcfDirectly).toBe(false);
+    expect(a.routeContract.uxmlMutatesCoordinates).toBe(false);
+    expect(a.routeContract.uxmlAppliesFixes).toBe(false);
+
+    expect(a.payload.requiredPayload).toContain('legacyMasterRoute');
+    expect(a.payload.requiredPayload).toContain('legacyPcfEmitter');
+  });
+
+  it('blocks when UXML is missing', () => {
+    const pkg = createUxmlCl1RoutePackage({
+      targetRoute: UXML_ROUTE_TARGETS.EXTRACT_PCF_LEGACY,
+      uxml: null,
+      topologyDecision: topologyDecision(),
+      acceptedTopologyHandoff: acceptedTopologyHandoff(),
+    });
+
+    expect(pkg.allowed).toBe(false);
+    expect(pkg.blockCode).toBe(UXML_CL1_ROUTE_PACKAGE_BLOCK_CODES.NO_UXML);
+    expect(pkg.payload).toBeNull();
+  });
+
+  it('blocks when route handoff policy blocks', () => {
+    const pkg = createUxmlCl1RoutePackage({
+      targetRoute: UXML_ROUTE_TARGETS.EXTRACT_PCF_LEGACY,
+      uxml: uxmlDoc(),
+      topologyDecision: topologyDecision({
+        outputBridgeReady: false,
+        exportAllowed: false,
+      }),
+      acceptedTopologyHandoff: acceptedTopologyHandoff(),
+    });
+
+    expect(pkg.allowed).toBe(false);
+    expect(pkg.blockCode).toBe(UXML_CL1_ROUTE_PACKAGE_BLOCK_CODES.ROUTE_HANDOFF_BLOCKED);
+    expect(pkg.blockedReason).toContain('output bridge');
+  });
+
+  it('supports diagnostics-only route package', () => {
+    const pkg = createUxmlCl1RoutePackage({
+      targetRoute: UXML_ROUTE_TARGETS.DIAGNOSTICS_ONLY,
+      uxml: uxmlDoc(),
+      topologyDecision: topologyDecision(),
+      acceptedTopologyHandoff: acceptedTopologyHandoff(),
+      diagnostics: [{ code: 'D-1' }],
+      lossContract: [{ code: 'L-1' }],
+      allowPartialExport: true,
+    });
+
+    expect(pkg.allowed).toBe(true);
+    expect(pkg.targetRoute).toBe(UXML_ROUTE_TARGETS.DIAGNOSTICS_ONLY);
+    expect(pkg.payload.masterOwner).toBe('NONE');
+    expect(pkg.diagnostics).toHaveLength(1);
+    expect(pkg.lossContract).toHaveLength(1);
+  });
+
+  it('preserves source objects by cloning payload instead of mutating inputs', () => {
+    const uxml = uxmlDoc();
+    const decision = topologyDecision();
+    const handoff = acceptedTopologyHandoff();
+
+    const beforeUxml = JSON.stringify(uxml);
+    const beforeDecision = JSON.stringify(decision);
+    const beforeHandoff = JSON.stringify(handoff);
+
+    const pkg = createUxmlCl1RoutePackage({
+      targetRoute: UXML_ROUTE_TARGETS.EXTRACT_PCF_LEGACY,
+      uxml,
+      topologyDecision: decision,
+      acceptedTopologyHandoff: handoff,
+    });
+
+    expect(JSON.stringify(uxml)).toBe(beforeUxml);
+    expect(JSON.stringify(decision)).toBe(beforeDecision);
+    expect(JSON.stringify(handoff)).toBe(beforeHandoff);
+
+    expect(pkg.payload.uxml).not.toBe(uxml);
+    expect(pkg.payload.topologyDecision).not.toBe(decision);
+    expect(pkg.payload.acceptedTopologyHandoff).not.toBe(handoff);
+  });
+
+  it('assert helper throws with CL1 package payload when blocked', () => {
+    expect(() => assertUxmlCl1RoutePackageAllowed({
+      targetRoute: UXML_ROUTE_TARGETS.EXTRACT_PCF_LEGACY,
+      uxml: null,
+      topologyDecision: topologyDecision(),
+      acceptedTopologyHandoff: acceptedTopologyHandoff(),
+    })).toThrow('Cannot create CL1 route package');
+
+    try {
+      assertUxmlCl1RoutePackageAllowed({
+        targetRoute: UXML_ROUTE_TARGETS.EXTRACT_PCF_LEGACY,
+        uxml: null,
+        topologyDecision: topologyDecision(),
+        acceptedTopologyHandoff: acceptedTopologyHandoff(),
+      });
+    } catch (err) {
+      expect(err.code).toBe(UXML_CL1_ROUTE_PACKAGE_BLOCK_CODES.NO_UXML);
+      expect(err.cl1RoutePackage.allowed).toBe(false);
+    }
+  });
+
+  it('summarizes allowed and blocked packages', () => {
+    const allowed = createUxmlCl1RoutePackage({
+      targetRoute: UXML_ROUTE_TARGETS.EXTRACT_PCF_LEGACY,
+      uxml: uxmlDoc(),
+      topologyDecision: topologyDecision(),
+      acceptedTopologyHandoff: acceptedTopologyHandoff(),
+    });
+
+    expect(summarizeUxmlCl1RoutePackage(allowed)).toContain('CL1 package=');
+    expect(summarizeUxmlCl1RoutePackage(allowed)).toContain('components=2');
+
+    const blocked = createUxmlCl1RoutePackage({
+      targetRoute: UXML_ROUTE_TARGETS.EXTRACT_PCF_LEGACY,
+      uxml: null,
+      topologyDecision: topologyDecision(),
+      acceptedTopologyHandoff: acceptedTopologyHandoff(),
+    });
+
+    expect(summarizeUxmlCl1RoutePackage(blocked)).toContain('blocked');
+  });
+
+  it('provides alias export', () => {
+    const pkg = buildUxmlCl1RoutePackage({
+      targetRoute: UXML_ROUTE_TARGETS.EXTRACT_PCF_LEGACY,
+      uxml: uxmlDoc(),
+      topologyDecision: topologyDecision(),
+      acceptedTopologyHandoff: acceptedTopologyHandoff(),
+    });
+
+    expect(pkg.schema).toBe('uxml-cl1-route-package/v1');
+    expect(pkg.allowed).toBe(true);
+  });
+});
+```
+
+---
+
+# Certification Update
+
+Add module:
+
+```js
+'viewer/uxml/UxmlCl1RoutePackage.js',
+```
+
+Add test:
+
+```js
+'viewer/tests/uxml-cl1-route-package.test.js',
+```
+
+Add export marker:
+
+```js
+{
+  file: 'viewer/uxml/UxmlCl1RoutePackage.js',
+  markers: [
+    'createUxmlCl1RoutePackage',
+    'assertUxmlCl1RoutePackageAllowed',
+    'summarizeUxmlCl1RoutePackage',
+  ],
+},
+```
+
+Add workflow test:
+
+```bash
+viewer/tests/uxml-cl1-route-package.test.js
+```
+
+---
+
+# Required Verification
+
+```bash
+npx vitest run \
+  viewer/tests/uxml-route-handoff-policy.test.js \
+  viewer/tests/uxml-cl1-route-package.test.js
+```
+
+Then:
+
+```bash
+node tools/uxml-certification.mjs
+```
+
+---
+
+# CL1 Hard Pass Gate
+
+```text
+cl1RoutePackageModuleExists = true
+cl1RoutePackageTestExists = true
+
+routeHandoffPolicyConsumed = true
+packageIdDeterministic = true
+entityCountsIncluded = true
+topologyCountsIncluded = true
+handoffSummaryIncluded = true
+routeContractPreserved = true
+diagnosticsPreserved = true
+lossContractPreserved = true
+
+noUxmlBlocked = true
+routePolicyBlockedStatePreserved = true
+diagnosticsOnlyRouteSupported = true
+legacyPcfRouteSupported = true
+
+sourceInputsNotMutated = true
+payloadCloned = true
+
+pcfWriterTouched = false
+masterMappersTouched = false
+rvmJsonPcfBridgeTouched = false
+xmlInputMapperTouched = false
+uxmlNormalizerTouched = false
+topologyBuildersTouched = false
+coordinateMutation = false
+```
+
+
+
+--------------------------------------------------------------------
+
+
+Next for **CL1** should be:
+
+```text
+CL1-B — Wire CL1 Route Package into Universal XML Converter tab
+```
+
+Reason: CL1-A created the route package module/test, but the workbench still needs to show and store the CL1 package after route handoff.
+
+Current repo status note: **PR #111 still appears open**, so keep CL1-B isolated from input mapper work.
+
+---
+
+# CL1-B Agent Prompt
+
+```text
+You are CL1-B Agent for PCF_GLB_Viewer_Conv.
+
+Base:
+- UxmlRouteHandoffPolicy is merged.
+- CL1-A created UxmlCl1RoutePackage.js and uxml-cl1-route-package.test.js.
+- New Agent continues XML/InputXML mapper work separately.
+
+Your task:
+Wire CL1 Route Package into the Universal XML Converter tab runtime.
+
+Purpose:
+After:
+UXML → Validation → FaceModel → UniversalTopoGraph → RayTopoGraph → Comparator → DecisionGate → RouteHandoffPolicy
+
+the tab must now create:
+CL1 Route Package
+
+Add/patch:
+- viewer/tabs/universal-xml-converter-tab.js
+- viewer/tests/universal-xml-converter-tab.test.js
+
+Allowed certification updates:
+- tools/uxml-certification.mjs
+- .github/workflows/uxml-certification.yml
+
+Do not touch:
+- XML/InputXML mapper files
+- UxmlNormalizer.js
+- UxmlProfileDetector.js
+- PCF writer/emitter
+- master mapper files
+- RVM/JSON → PCF bridge modules
+- topology builders
+```
+
+---
+
+# Required Runtime Changes
+
+## 1. Import CL1 module
+
+In:
+
+```text
+viewer/tabs/universal-xml-converter-tab.js
+```
+
+Add:
+
+```js
+import {
+  createUxmlCl1RoutePackage,
+  summarizeUxmlCl1RoutePackage,
+} from '../uxml/UxmlCl1RoutePackage.js';
+```
+
+---
+
+## 2. Add CL1 state
+
+In initial state, add:
+
+```js
+cl1RoutePackage: null,
+```
+
+Inside `pipeline`:
+
+```js
+cl1RoutePackage: null,
+```
+
+Inside `reports`:
+
+```js
+'cl1-package': null,
+```
+
+---
+
+## 3. Add CL1 stage
+
+In `PIPELINE_STAGES`, after `route-handoff`, add:
+
+```js
+{
+  id: 'cl1-package',
+  title: '11. CL1 Route Package',
+  description: 'Create deterministic downstream route payload package from accepted topology evidence.',
+},
+```
+
+Then renumber later stages:
+
+```text
+12. Route Targets
+13. Masters by Target Route
+```
+
+---
+
+## 4. Add action
+
+After `run-route-handoff`, add:
+
+```js
+if (action === 'run-cl1-package') {
+  if (!state.pipeline.routeHandoff) runPipelineAction(state, 'run-route-handoff');
+
+  const cl1RoutePackage = createUxmlCl1RoutePackage({
+    targetRoute: state.pipeline.routeHandoff?.targetRoute || UXML_ROUTE_TARGETS.DIAGNOSTICS_ONLY,
+    uxml: state.pipeline.uxml,
+    topologyDecision: state.pipeline.topologyDecision,
+    acceptedTopologyHandoff: null,
+    diagnostics: state.pipeline.uxml?.diagnostics || [],
+    lossContract: state.pipeline.uxml?.lossContract || [],
+    allowPartialExport: true,
+    sourceInfo: {
+      fileName: state.sourceFile?.name || '',
+      selectedSourceType: state.selectedSourceType || '',
+      detectedSourceType: state.detectedSourceType || '',
+      profile: state.pipeline.profileReport?.profile || '',
+    },
+  });
+
+  state.pipeline.cl1RoutePackage = cl1RoutePackage;
+  state.cl1RoutePackage = cl1RoutePackage;
+  state.reports['cl1-package'] = stageReport('cl1-package', cl1RoutePackage);
+
+  state.status = {
+    kind: cl1RoutePackage.allowed ? 'ok' : 'warn',
+    message: summarizeUxmlCl1RoutePackage(cl1RoutePackage),
+  };
+
+  return cl1RoutePackage;
+}
+```
+
+---
+
+## 5. Update full pipeline
+
+In `run-full-pipeline`, after:
+
+```js
+runPipelineAction(state, 'run-route-handoff');
+```
+
+add:
+
+```js
+runPipelineAction(state, 'run-cl1-package');
+```
+
+---
+
+## 6. Add action button mapping
+
+Add:
+
+```js
+'cl1-package': {
+  label: 'Build CL1 package',
+  action: 'run-cl1-package',
+},
+```
+
+---
+
+## 7. Add CL1 panel
+
+Add panel block:
+
+```js
+if (panel === 'cl1-package') {
+  const pkg = state.pipeline.cl1RoutePackage;
+
+  return `
+    <section class="uxml-panel-section">
+      <h3>CL1 Route Package</h3>
+      <p>
+        Packages accepted topology evidence into a deterministic downstream route payload.
+        CL1 does not emit PCF, resolve masters, mutate coordinates, or apply topology fixes.
+      </p>
+
+      ${pkg ? `
+        <div class="uxml-kv-grid">
+          <div><b>Schema</b><span>${escapeHtml(pkg.schema)}</span></div>
+          <div><b>Package ID</b><span>${escapeHtml(pkg.packageId)}</span></div>
+          <div><b>Target route</b><span>${escapeHtml(pkg.targetRoute)}</span></div>
+          <div><b>Allowed</b><span>${pkg.allowed ? 'YES' : 'NO'}</span></div>
+          <div><b>Components</b><span>${safeCount(pkg.entityCounts?.componentCount)}</span></div>
+          <div><b>Anchors</b><span>${safeCount(pkg.entityCounts?.anchorCount)}</span></div>
+          <div><b>Ports</b><span>${safeCount(pkg.entityCounts?.portCount)}</span></div>
+          <div><b>Segments</b><span>${safeCount(pkg.entityCounts?.segmentCount)}</span></div>
+          <div><b>Accepted topology</b><span>${safeCount(pkg.topologyCounts?.acceptedConnectionCount)}</span></div>
+          <div><b>Manual / rejected / unresolved</b><span>${safeCount(pkg.topologyCounts?.manualReviewCount)} / ${safeCount(pkg.topologyCounts?.rejectedCount)} / ${safeCount(pkg.topologyCounts?.unresolvedCount)}</span></div>
+        </div>
+
+        ${pkg.blockedReason ? `
+          <div class="uxml-placeholder" style="margin-top:12px;">
+            <b>Blocked reason:</b><br>${escapeHtml(pkg.blockedReason)}
+          </div>
+        ` : ''}
+
+        <div class="uxml-placeholder" style="margin-top:12px;">
+          <b>CL1 contract:</b><br>
+          Emits PCF directly: ${pkg.routeContract?.uxmlEmitsPcfDirectly ? 'YES' : 'NO'}<br>
+          Mutates coordinates: ${pkg.routeContract?.uxmlMutatesCoordinates ? 'YES' : 'NO'}<br>
+          Applies fixes: ${pkg.routeContract?.uxmlAppliesFixes ? 'YES' : 'NO'}
+        </div>
+      ` : `
+        <div class="uxml-placeholder">Run route handoff, then build CL1 package.</div>
+      `}
+    </section>
+  `;
+}
+```
+
+---
+
+# Test Additions
+
+In:
+
+```text
+viewer/tests/universal-xml-converter-tab.test.js
+```
+
+Add tests:
+
+```js
+it('exposes CL1 route package stage after route handoff', () => {
+  const stageIds = PIPELINE_STAGES.map(stage => stage.id);
+
+  expect(stageIds).toContain('decision-gate');
+  expect(stageIds).toContain('route-handoff');
+  expect(stageIds).toContain('cl1-package');
+
+  expect(stageIds.indexOf('cl1-package')).toBeGreaterThan(stageIds.indexOf('route-handoff'));
+});
+
+it('keeps CL1 wording separate from direct PCF export and master resolution', () => {
+  const html = renderUniversalXmlConverterTab();
+
+  expect(html).toContain('CL1 Route Package');
+  expect(html).toContain('does not emit PCF');
+  expect(html).toContain('Masters by Target Route');
+  expect(html).not.toContain('Masters deferred');
+});
+```
+
+Adapt function names if the current test file uses different exports/helpers.
+
+---
+
+# Required Verification
+
+```bash
+npx vitest run \
+  viewer/tests/uxml-route-handoff-policy.test.js \
+  viewer/tests/uxml-cl1-route-package.test.js \
+  viewer/tests/universal-xml-converter-tab.test.js
+```
+
+Then:
+
+```bash
+node tools/uxml-certification.mjs
+```
+
+---
+
+# CL1-B Hard Pass Gate
+
+```text
+cl1StageVisible = true
+cl1ActionExists = true
+fullPipelineRunsCl1Package = true
+cl1PanelRendersPackageId = true
+cl1PanelRendersEntityCounts = true
+cl1PanelRendersTopologyCounts = true
+cl1PanelStatesNoPcfNoMastersNoMutation = true
+
+xmlInputMapperTouched = false
+uxmlNormalizerTouched = false
+uxmlProfileDetectorTouched = false
+pcfWriterTouched = false
+masterMappersTouched = false
+rvmJsonPcfBridgeTouched = false
+topologyBuildersTouched = false
+```
+
+After CL1-B, next is:
+
+```text
+CL1-C — CL1 Package Snapshot/Export JSON for debugging only
+```
+
+That will let the tab download the CL1 package as JSON, still without generating PCF or touching masters.
+
+
+--------------------------------------------------
+Current status note: **PR #111 still appears open**, so keep CL1 work isolated from XML/InputXML mapper work.
+
+Next for CL1:
+
+```text
+CL1-C — CL1 Package Snapshot / Export JSON for Debugging Only
+```
+
+Purpose:
+
+```text
+CL1 Route Package
+  ↓
+CL1 Snapshot JSON
+  ↓
+Download/debug/replay artifact only
+
+No PCF export.
+No master resolution.
+No coordinate mutation.
+No topology repair.
+```
+
+---
+
+# CL1-C Agent Prompt
+
+```text
+You are CL1-C Agent for PCF_GLB_Viewer_Conv.
+
+Base:
+- UxmlRouteHandoffPolicy is merged.
+- CL1-A created UxmlCl1RoutePackage.js.
+- CL1-B wires CL1 package into Universal XML Converter tab.
+- New Agent continues XML/InputXML mapper work separately.
+
+Your task:
+Add a deterministic CL1 package snapshot/export JSON layer for debugging only.
+
+Add:
+- viewer/uxml/UxmlCl1PackageSnapshot.js
+- viewer/tests/uxml-cl1-package-snapshot.test.js
+
+Patch:
+- viewer/tabs/universal-xml-converter-tab.js
+- viewer/tests/universal-xml-converter-tab.test.js
+- tools/uxml-certification.mjs
+- .github/workflows/uxml-certification.yml
+
+Do not touch:
+- XML/InputXML mapper files
+- UxmlNormalizer.js
+- UxmlProfileDetector.js
+- PCF writer/emitter
+- master mapper files
+- RVM/JSON → PCF bridge modules
+- topology builders
+
+Important:
+This snapshot is for diagnostics/replay only.
+It must not generate PCF.
+It must not resolve masters.
+It must not mutate coordinates.
+It must not apply topology fixes.
+```
+
+---
+
+# File 1
+
+```text
+viewer/uxml/UxmlCl1PackageSnapshot.js
+```
+
+```js
+/**
+ * UxmlCl1PackageSnapshot.js
+ *
+ * CL1-C — CL1 Package Snapshot / Export JSON.
+ *
+ * Purpose:
+ * - Create deterministic JSON snapshots from CL1 route packages.
+ * - Support debug/replay/export inspection only.
+ *
+ * Important:
+ * - Does not emit PCF.
+ * - Does not resolve masters.
+ * - Does not mutate coordinates.
+ * - Does not apply topology fixes.
+ * - Does not parse XML/InputXML.
+ * - Does not build topology.
+ */
+
+export const UXML_CL1_PACKAGE_SNAPSHOT_SCHEMA =
+  'uxml-cl1-package-snapshot/v1';
+
+function clean(value) {
+  return String(value ?? '').trim();
+}
+
+function list(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function cloneJson(value) {
+  if (value == null) return value;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function canonicalJson(value) {
+  if (value == null) return 'null';
+
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(',')}]`;
+  }
+
+  if (typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(',')}}`;
+  }
+
+  return JSON.stringify(value);
+}
+
+/**
+ * Deterministic non-cryptographic hash for snapshot identity.
+ * Not a security primitive.
+ */
+function stableHash(value) {
+  const text = canonicalJson(value);
+  let hash = 2166136261;
+
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return `cl1snap-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function sanitizeFilePart(value, fallback = 'cl1-package') {
+  const text = clean(value)
+    .replace(/[^\w.-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  return text || fallback;
+}
+
+function pickSourceInfo(pkg = {}) {
+  return {
+    sourceFile: clean(pkg.sourceInfo?.sourceFile || pkg.sourceInfo?.fileName || ''),
+    selectedSourceType: clean(pkg.sourceInfo?.selectedSourceType || ''),
+    detectedSourceType: clean(pkg.sourceInfo?.detectedSourceType || ''),
+    profile: clean(pkg.sourceInfo?.profile || ''),
+  };
+}
+
+function makeSnapshotCore(pkg = {}) {
+  return {
+    packageId: clean(pkg.packageId),
+    targetRoute: clean(pkg.targetRoute),
+    targetRouteLabel: clean(pkg.targetRouteLabel),
+    allowed: pkg.allowed === true,
+    blocked: pkg.blocked === true,
+    blockCode: clean(pkg.blockCode),
+    blockedReason: clean(pkg.blockedReason),
+    sourceInfo: pickSourceInfo(pkg),
+    entityCounts: cloneJson(pkg.entityCounts || {}),
+    topologyCounts: cloneJson(pkg.topologyCounts || {}),
+    handoffSummary: cloneJson(pkg.handoffSummary || {}),
+    componentTypes: cloneJson(pkg.componentTypes || {}),
+    pipelineRefs: cloneJson(list(pkg.pipelineRefs)),
+    routeContract: cloneJson(pkg.routeContract || {}),
+    policy: cloneJson(pkg.policy || null),
+    diagnostics: cloneJson(list(pkg.diagnostics)),
+    lossContract: cloneJson(list(pkg.lossContract)),
+  };
+}
+
+export function buildUxmlCl1PackageSnapshot(cl1RoutePackage, {
+  includePayload = false,
+  includeDiagnostics = true,
+  includeLossContract = true,
+} = {}) {
+  const pkg = cl1RoutePackage || {};
+  const core = makeSnapshotCore(pkg);
+
+  const snapshotSeed = {
+    schema: UXML_CL1_PACKAGE_SNAPSHOT_SCHEMA,
+    packageId: core.packageId,
+    targetRoute: core.targetRoute,
+    allowed: core.allowed,
+    entityCounts: core.entityCounts,
+    topologyCounts: core.topologyCounts,
+    handoffSummary: core.handoffSummary,
+    componentTypes: core.componentTypes,
+    pipelineRefs: core.pipelineRefs,
+    includePayload,
+    includeDiagnostics,
+    includeLossContract,
+  };
+
+  return {
+    schema: UXML_CL1_PACKAGE_SNAPSHOT_SCHEMA,
+    snapshotId: stableHash(snapshotSeed),
+    deterministic: true,
+    debugOnly: true,
+    pcfGenerated: false,
+    mastersResolved: false,
+    coordinatesMutated: false,
+    fixesApplied: false,
+    ...core,
+    diagnostics: includeDiagnostics ? core.diagnostics : [],
+    lossContract: includeLossContract ? core.lossContract : [],
+    payloadIncluded: includePayload === true,
+    payload: includePayload ? cloneJson(pkg.payload || null) : null,
+  };
+}
+
+export function serializeUxmlCl1PackageSnapshot(snapshot, {
+  pretty = true,
+} = {}) {
+  return JSON.stringify(snapshot, null, pretty ? 2 : 0);
+}
+
+export function createUxmlCl1SnapshotFileName(snapshot, {
+  prefix = 'uxml-cl1',
+  extension = 'json',
+} = {}) {
+  const source = sanitizeFilePart(
+    snapshot?.sourceInfo?.sourceFile ||
+    snapshot?.sourceInfo?.profile ||
+    'package'
+  );
+
+  const route = sanitizeFilePart(snapshot?.targetRoute || 'route');
+  const id = sanitizeFilePart(snapshot?.snapshotId || 'snapshot');
+
+  return `${sanitizeFilePart(prefix)}-${source}-${route}-${id}.${sanitizeFilePart(extension, 'json')}`;
+}
+
+export function createUxmlCl1SnapshotDownload({
+  cl1RoutePackage,
+  includePayload = false,
+  includeDiagnostics = true,
+  includeLossContract = true,
+  pretty = true,
+} = {}) {
+  const snapshot = buildUxmlCl1PackageSnapshot(cl1RoutePackage, {
+    includePayload,
+    includeDiagnostics,
+    includeLossContract,
+  });
+
+  const text = serializeUxmlCl1PackageSnapshot(snapshot, {
+    pretty,
+  });
+
+  return {
+    schema: 'uxml-cl1-snapshot-download/v1',
+    snapshot,
+    text,
+    fileName: createUxmlCl1SnapshotFileName(snapshot),
+    mimeType: 'application/json',
+    byteLength: new TextEncoder().encode(text).length,
+    debugOnly: true,
+    pcfGenerated: false,
+    mastersResolved: false,
+    coordinatesMutated: false,
+    fixesApplied: false,
+  };
+}
+
+export const buildUxmlCl1Snapshot = buildUxmlCl1PackageSnapshot;
+```
+
+---
+
+# File 2
+
+```text
+viewer/tests/uxml-cl1-package-snapshot.test.js
+```
+
+```js
+import { describe, expect, it } from 'vitest';
+
+import {
+  buildUxmlCl1PackageSnapshot,
+  buildUxmlCl1Snapshot,
+  createUxmlCl1SnapshotDownload,
+  createUxmlCl1SnapshotFileName,
+  serializeUxmlCl1PackageSnapshot,
+} from '../uxml/UxmlCl1PackageSnapshot.js';
+
+function packageFixture() {
+  return {
+    schema: 'uxml-cl1-route-package/v1',
+    ok: true,
+    allowed: true,
+    blocked: false,
+    blockCode: '',
+    blockedReason: '',
+    packageId: 'cl1-abc12345',
+    targetRoute: 'EXTRACT_PCF_LEGACY',
+    targetRouteLabel: 'Extract PCF legacy route',
+    sourceInfo: {
+      sourceFile: '1001-P - COPY_INPUT.XML',
+      selectedSourceType: 'INPUT_XML',
+      detectedSourceType: 'INPUT_XML',
+      profile: 'INPUT_XML',
+    },
+    policy: {
+      schema: 'uxml-route-handoff-policy/v1',
+      allowed: true,
+      targetRoute: 'EXTRACT_PCF_LEGACY',
+      masterOwner: 'LEGACY_PCF_ROUTE',
+      routeContract: {
+        uxmlMutatesCoordinates: false,
+        uxmlAppliesFixes: false,
+        uxmlEmitsPcfDirectly: false,
+      },
+    },
+    entityCounts: {
+      componentCount: 10,
+      anchorCount: 20,
+      portCount: 20,
+      segmentCount: 9,
+      supportCount: 1,
+    },
+    topologyCounts: {
+      outputBridgeReady: true,
+      exportAllowed: true,
+      acceptedConnectionCount: 8,
+      manualReviewCount: 0,
+      rejectedCount: 0,
+      unresolvedCount: 0,
+    },
+    handoffSummary: {
+      handoffConnectionCount: 8,
+      annotatedRowCount: 10,
+      pipelineCount: 1,
+      coordinatesMutated: false,
+    },
+    componentTypes: {
+      PIPE: 5,
+      VALVE: 1,
+      FLANGE: 2,
+      TEE: 1,
+      SUPPORT: 1,
+    },
+    pipelineRefs: ['/P1'],
+    diagnostics: [{ code: 'D1', message: 'diagnostic' }],
+    lossContract: [{ code: 'L1', message: 'loss' }],
+    routeContract: {
+      uxmlMutatesCoordinates: false,
+      uxmlAppliesFixes: false,
+      uxmlEmitsPcfDirectly: false,
+    },
+    payload: {
+      uxml: { schema: 'uxml/v1', components: [{ id: 'PIPE-1' }] },
+      topologyDecision: { schema: 'uxml-topology-decision-gate/v1' },
+      acceptedTopologyHandoff: { schema: 'rvm-pcf-accepted-topology-handoff/v1' },
+    },
+  };
+}
+
+describe('UxmlCl1PackageSnapshot CL1-C', () => {
+  it('creates deterministic debug-only snapshot without payload by default', () => {
+    const pkg = packageFixture();
+
+    const a = buildUxmlCl1PackageSnapshot(pkg);
+    const b = buildUxmlCl1PackageSnapshot(pkg);
+
+    expect(a.schema).toBe('uxml-cl1-package-snapshot/v1');
+    expect(a.snapshotId).toBe(b.snapshotId);
+    expect(a.deterministic).toBe(true);
+    expect(a.debugOnly).toBe(true);
+
+    expect(a.pcfGenerated).toBe(false);
+    expect(a.mastersResolved).toBe(false);
+    expect(a.coordinatesMutated).toBe(false);
+    expect(a.fixesApplied).toBe(false);
+
+    expect(a.packageId).toBe('cl1-abc12345');
+    expect(a.targetRoute).toBe('EXTRACT_PCF_LEGACY');
+    expect(a.entityCounts.componentCount).toBe(10);
+    expect(a.topologyCounts.acceptedConnectionCount).toBe(8);
+    expect(a.handoffSummary.handoffConnectionCount).toBe(8);
+
+    expect(a.payloadIncluded).toBe(false);
+    expect(a.payload).toBeNull();
+  });
+
+  it('can include payload explicitly for replay/debug use', () => {
+    const snapshot = buildUxmlCl1PackageSnapshot(packageFixture(), {
+      includePayload: true,
+    });
+
+    expect(snapshot.payloadIncluded).toBe(true);
+    expect(snapshot.payload.uxml.schema).toBe('uxml/v1');
+    expect(snapshot.payload.topologyDecision.schema).toBe('uxml-topology-decision-gate/v1');
+  });
+
+  it('can suppress diagnostics and loss contract', () => {
+    const snapshot = buildUxmlCl1PackageSnapshot(packageFixture(), {
+      includeDiagnostics: false,
+      includeLossContract: false,
+    });
+
+    expect(snapshot.diagnostics).toEqual([]);
+    expect(snapshot.lossContract).toEqual([]);
+  });
+
+  it('serializes snapshot to readable JSON', () => {
+    const snapshot = buildUxmlCl1PackageSnapshot(packageFixture());
+    const text = serializeUxmlCl1PackageSnapshot(snapshot);
+
+    expect(text).toContain('"schema": "uxml-cl1-package-snapshot/v1"');
+    expect(text).toContain('"debugOnly": true');
+
+    const parsed = JSON.parse(text);
+    expect(parsed.snapshotId).toBe(snapshot.snapshotId);
+  });
+
+  it('creates safe deterministic file name', () => {
+    const snapshot = buildUxmlCl1PackageSnapshot(packageFixture());
+    const fileName = createUxmlCl1SnapshotFileName(snapshot);
+
+    expect(fileName).toContain('uxml-cl1-');
+    expect(fileName).toContain('EXTRACT_PCF_LEGACY');
+    expect(fileName.endsWith('.json')).toBe(true);
+    expect(fileName).not.toContain(' ');
+  });
+
+  it('creates download object without writing files or creating PCF', () => {
+    const download = createUxmlCl1SnapshotDownload({
+      cl1RoutePackage: packageFixture(),
+      includePayload: false,
+    });
+
+    expect(download.schema).toBe('uxml-cl1-snapshot-download/v1');
+    expect(download.fileName.endsWith('.json')).toBe(true);
+    expect(download.mimeType).toBe('application/json');
+    expect(download.byteLength).toBeGreaterThan(0);
+
+    expect(download.debugOnly).toBe(true);
+    expect(download.pcfGenerated).toBe(false);
+    expect(download.mastersResolved).toBe(false);
+    expect(download.coordinatesMutated).toBe(false);
+    expect(download.fixesApplied).toBe(false);
+
+    const parsed = JSON.parse(download.text);
+    expect(parsed.schema).toBe('uxml-cl1-package-snapshot/v1');
+  });
+
+  it('does not mutate source CL1 package', () => {
+    const pkg = packageFixture();
+    const before = JSON.stringify(pkg);
+
+    const snapshot = buildUxmlCl1PackageSnapshot(pkg, {
+      includePayload: true,
+    });
+
+    expect(JSON.stringify(pkg)).toBe(before);
+    expect(snapshot.payload).not.toBe(pkg.payload);
+  });
+
+  it('provides alias export', () => {
+    const snapshot = buildUxmlCl1Snapshot(packageFixture());
+
+    expect(snapshot.schema).toBe('uxml-cl1-package-snapshot/v1');
+  });
+});
+```
+
+---
+
+# Patch — Universal XML Converter tab
+
+```text
+viewer/tabs/universal-xml-converter-tab.js
+```
+
+## 1. Import snapshot functions
+
+```js
+import {
+  buildUxmlCl1PackageSnapshot,
+  createUxmlCl1SnapshotDownload,
+  createUxmlCl1SnapshotFileName,
+} from '../uxml/UxmlCl1PackageSnapshot.js';
+```
+
+---
+
+## 2. Add state
+
+In initial state:
+
+```js
+cl1Snapshot: null,
+```
+
+Inside `pipeline`:
+
+```js
+cl1Snapshot: null,
+```
+
+Inside reports:
+
+```js
+'cl1-snapshot': null,
+```
+
+---
+
+## 3. Add stage after `cl1-package`
+
+```js
+{
+  id: 'cl1-snapshot',
+  title: '12. CL1 Snapshot JSON',
+  description: 'Create deterministic debug/replay JSON snapshot from the CL1 package.',
+},
+```
+
+Then renumber later stages:
+
+```text
+13. Route Targets
+14. Masters by Target Route
+```
+
+---
+
+## 4. Add action
+
+After `run-cl1-package`, add:
+
+```js
+if (action === 'run-cl1-snapshot') {
+  if (!state.pipeline.cl1RoutePackage) runPipelineAction(state, 'run-cl1-package');
+
+  const cl1Snapshot = buildUxmlCl1PackageSnapshot(state.pipeline.cl1RoutePackage, {
+    includePayload: false,
+    includeDiagnostics: true,
+    includeLossContract: true,
+  });
+
+  state.pipeline.cl1Snapshot = cl1Snapshot;
+  state.cl1Snapshot = cl1Snapshot;
+  state.reports['cl1-snapshot'] = stageReport('cl1-snapshot', cl1Snapshot);
+
+  state.status = {
+    kind: cl1Snapshot.allowed ? 'ok' : 'warn',
+    message: `CL1 snapshot ready: ${cl1Snapshot.snapshotId}. Debug JSON only; no PCF or masters generated.`,
+  };
+
+  return cl1Snapshot;
+}
+```
+
+---
+
+## 5. Update full pipeline
+
+After:
+
+```js
+runPipelineAction(state, 'run-cl1-package');
+```
+
+add:
+
+```js
+runPipelineAction(state, 'run-cl1-snapshot');
+```
+
+---
+
+## 6. Add button mapping
+
+```js
+'cl1-snapshot': {
+  label: 'Build CL1 snapshot',
+  action: 'run-cl1-snapshot',
+},
+```
+
+---
+
+## 7. Add panel
+
+```js
+if (panel === 'cl1-snapshot') {
+  const snapshot = state.pipeline.cl1Snapshot;
+
+  return `
+    <section class="uxml-panel-section">
+      <h3>CL1 Snapshot JSON</h3>
+      <p>
+        Creates a deterministic debug/replay JSON snapshot from the CL1 route package.
+        This is not PCF export and does not resolve masters.
+      </p>
+
+      ${snapshot ? `
+        <div class="uxml-kv-grid">
+          <div><b>Schema</b><span>${escapeHtml(snapshot.schema)}</span></div>
+          <div><b>Snapshot ID</b><span>${escapeHtml(snapshot.snapshotId)}</span></div>
+          <div><b>Package ID</b><span>${escapeHtml(snapshot.packageId)}</span></div>
+          <div><b>Target route</b><span>${escapeHtml(snapshot.targetRoute)}</span></div>
+          <div><b>Debug only</b><span>${snapshot.debugOnly ? 'YES' : 'NO'}</span></div>
+          <div><b>Payload included</b><span>${snapshot.payloadIncluded ? 'YES' : 'NO'}</span></div>
+          <div><b>Components</b><span>${safeCount(snapshot.entityCounts?.componentCount)}</span></div>
+          <div><b>Accepted topology</b><span>${safeCount(snapshot.topologyCounts?.acceptedConnectionCount)}</span></div>
+        </div>
+
+        <div class="uxml-placeholder" style="margin-top:12px;">
+          <b>Snapshot contract:</b><br>
+          PCF generated: ${snapshot.pcfGenerated ? 'YES' : 'NO'}<br>
+          Masters resolved: ${snapshot.mastersResolved ? 'YES' : 'NO'}<br>
+          Coordinates mutated: ${snapshot.coordinatesMutated ? 'YES' : 'NO'}<br>
+          Fixes applied: ${snapshot.fixesApplied ? 'YES' : 'NO'}<br>
+          Suggested file: ${escapeHtml(createUxmlCl1SnapshotFileName(snapshot))}
+        </div>
+      ` : `
+        <div class="uxml-placeholder">Build CL1 package, then build CL1 snapshot.</div>
+      `}
+    </section>
+  `;
+}
+```
+
+---
+
+## 8. Optional download handler
+
+If the tab already has a generic download helper, wire this action:
+
+```js
+if (action === 'download-cl1-snapshot') {
+  if (!state.pipeline.cl1RoutePackage) runPipelineAction(state, 'run-cl1-package');
+
+  const download = createUxmlCl1SnapshotDownload({
+    cl1RoutePackage: state.pipeline.cl1RoutePackage,
+    includePayload: false,
+  });
+
+  downloadTextFile(download.fileName, download.text, download.mimeType);
+
+  state.status = {
+    kind: 'ok',
+    message: `Downloaded CL1 snapshot: ${download.fileName}`,
+  };
+
+  return download;
+}
+```
+
+If no safe download helper exists yet, **do not add DOM download code in this agent**. Just expose the snapshot panel.
+
+---
+
+# Test additions
+
+In:
+
+```text
+viewer/tests/universal-xml-converter-tab.test.js
+```
+
+Add:
+
+```js
+it('exposes CL1 snapshot stage after CL1 package', () => {
+  const stageIds = PIPELINE_STAGES.map(stage => stage.id);
+
+  expect(stageIds).toContain('cl1-package');
+  expect(stageIds).toContain('cl1-snapshot');
+
+  expect(stageIds.indexOf('cl1-snapshot')).toBeGreaterThan(stageIds.indexOf('cl1-package'));
+});
+
+it('keeps CL1 snapshot wording debug-only and separate from PCF export', () => {
+  const html = renderUniversalXmlConverterTab();
+
+  expect(html).toContain('CL1 Snapshot JSON');
+  expect(html).toContain('debug/replay JSON snapshot');
+  expect(html).toContain('does not resolve masters');
+  expect(html).not.toContain('Masters deferred');
+});
+```
+
+---
+
+# Certification update
+
+Add module:
+
+```js
+'viewer/uxml/UxmlCl1PackageSnapshot.js',
+```
+
+Add test:
+
+```js
+'viewer/tests/uxml-cl1-package-snapshot.test.js',
+```
+
+Add export marker:
+
+```js
+{
+  file: 'viewer/uxml/UxmlCl1PackageSnapshot.js',
+  markers: [
+    'buildUxmlCl1PackageSnapshot',
+    'createUxmlCl1SnapshotDownload',
+    'serializeUxmlCl1PackageSnapshot',
+  ],
+},
+```
+
+Add workflow test:
+
+```bash
+viewer/tests/uxml-cl1-package-snapshot.test.js
+```
+
+---
+
+# Required verification
+
+```bash
+npx vitest run \
+  viewer/tests/uxml-route-handoff-policy.test.js \
+  viewer/tests/uxml-cl1-route-package.test.js \
+  viewer/tests/uxml-cl1-package-snapshot.test.js \
+  viewer/tests/universal-xml-converter-tab.test.js
+```
+
+Then:
+
+```bash
+node tools/uxml-certification.mjs
+```
+
+---
+
+# CL1-C hard pass gate
+
+```text
+cl1SnapshotModuleExists = true
+cl1SnapshotTestExists = true
+cl1SnapshotStageVisible = true
+cl1SnapshotActionExists = true
+fullPipelineRunsCl1Snapshot = true
+
+snapshotIdDeterministic = true
+snapshotJsonSerializable = true
+payloadExcludedByDefault = true
+payloadOptionalForDebug = true
+safeFileNameGenerated = true
+
+debugOnly = true
+pcfGenerated = false
+mastersResolved = false
+coordinatesMutated = false
+fixesApplied = false
+
+xmlInputMapperTouched = false
+uxmlNormalizerTouched = false
+uxmlProfileDetectorTouched = false
+pcfWriterTouched = false
+masterMappersTouched = false
+rvmJsonPcfBridgeTouched = false
+topologyBuildersTouched = false
+```
+
+Next after CL1-C:
+
+```text
+CL1-D — CL1 Snapshot Replay Validator
+```
+
+That should validate whether a saved CL1 snapshot is structurally replayable without running XML parsing or topology again.
+---------------------------------------------
+Next for CL1:
+
+```text
+CL1-D — CL1 Snapshot Replay Validator
+```
+
+Purpose:
+
+```text
+Saved CL1 Snapshot JSON
+  ↓
+Replay Validator
+  ↓
+Validate structure, counts, route contract, debug-only safety
+  ↓
+Replay-ready / blocked report
+
+No XML parsing.
+No topology rebuild.
+No PCF generation.
+No master resolution.
+No coordinate mutation.
+```
+
+Repo status note: **PR #111 still appears open**, so keep CL1-D isolated from mapper/input files.
+
+---
+
+# CL1-D Agent Prompt
+
+```text
+You are CL1-D Agent for PCF_GLB_Viewer_Conv.
+
+Base:
+- UxmlRouteHandoffPolicy is merged.
+- CL1-A created UxmlCl1RoutePackage.js.
+- CL1-B wired CL1 package into Universal XML Converter tab.
+- CL1-C created UxmlCl1PackageSnapshot.js.
+- New Agent continues XML/InputXML mapper work separately.
+
+Your task:
+Add CL1 Snapshot Replay Validator.
+
+Add:
+- viewer/uxml/UxmlCl1SnapshotReplayValidator.js
+- viewer/tests/uxml-cl1-snapshot-replay-validator.test.js
+
+Patch:
+- viewer/tabs/universal-xml-converter-tab.js
+- viewer/tests/universal-xml-converter-tab.test.js
+- tools/uxml-certification.mjs
+- .github/workflows/uxml-certification.yml
+
+Do not touch:
+- XML/InputXML mapper files
+- UxmlNormalizer.js
+- UxmlProfileDetector.js
+- PCF writer/emitter
+- master mapper files
+- RVM/JSON → PCF bridge modules
+- topology builders
+
+Important:
+Replay Validator must only validate a saved CL1 snapshot structure.
+It must not rebuild topology.
+It must not parse source XML.
+It must not generate PCF.
+It must not resolve masters.
+It must not mutate coordinates.
+It must not apply fixes.
+```
+
+---
+
+# File 1
+
+```text
+viewer/uxml/UxmlCl1SnapshotReplayValidator.js
+```
+
+```js
+/**
+ * UxmlCl1SnapshotReplayValidator.js
+ *
+ * CL1-D — CL1 Snapshot Replay Validator.
+ *
+ * Purpose:
+ * - Validate whether a CL1 snapshot JSON is structurally replayable.
+ * - Provide deterministic diagnostics for saved/debug CL1 packages.
+ *
+ * Important:
+ * - Does not parse XML/InputXML.
+ * - Does not rebuild topology.
+ * - Does not emit PCF.
+ * - Does not resolve masters.
+ * - Does not mutate coordinates.
+ * - Does not apply fixes.
+ */
+
+import {
+  UXML_CL1_PACKAGE_SNAPSHOT_SCHEMA,
+} from './UxmlCl1PackageSnapshot.js';
+
+export const UXML_CL1_SNAPSHOT_REPLAY_VALIDATOR_SCHEMA =
+  'uxml-cl1-snapshot-replay-validator/v1';
+
+export const UXML_CL1_REPLAY_BLOCK_CODES = Object.freeze({
+  INVALID_JSON: 'UXML-CL1-REPLAY-INVALID-JSON',
+  INVALID_SNAPSHOT_SCHEMA: 'UXML-CL1-REPLAY-INVALID-SNAPSHOT-SCHEMA',
+  NOT_DEBUG_ONLY: 'UXML-CL1-REPLAY-NOT-DEBUG-ONLY',
+  PCF_GENERATED_FLAG_TRUE: 'UXML-CL1-REPLAY-PCF-GENERATED-FLAG-TRUE',
+  MASTERS_RESOLVED_FLAG_TRUE: 'UXML-CL1-REPLAY-MASTERS-RESOLVED-FLAG-TRUE',
+  COORDINATES_MUTATED_FLAG_TRUE: 'UXML-CL1-REPLAY-COORDINATES-MUTATED-FLAG-TRUE',
+  FIXES_APPLIED_FLAG_TRUE: 'UXML-CL1-REPLAY-FIXES-APPLIED-FLAG-TRUE',
+  MISSING_PACKAGE_ID: 'UXML-CL1-REPLAY-MISSING-PACKAGE-ID',
+  MISSING_SNAPSHOT_ID: 'UXML-CL1-REPLAY-MISSING-SNAPSHOT-ID',
+  MISSING_TARGET_ROUTE: 'UXML-CL1-REPLAY-MISSING-TARGET-ROUTE',
+  MISSING_COUNTS: 'UXML-CL1-REPLAY-MISSING-COUNTS',
+  ROUTE_CONTRACT_UNSAFE: 'UXML-CL1-REPLAY-ROUTE-CONTRACT-UNSAFE',
+});
+
+function clean(value) {
+  return String(value ?? '').trim();
+}
+
+function list(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function isPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function number(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function makeIssue({
+  severity = 'ERROR',
+  code,
+  message,
+  path = '',
+  details = {},
+}) {
+  return {
+    severity,
+    code,
+    message,
+    path,
+    details,
+  };
+}
+
+function parseSnapshot(input) {
+  if (typeof input === 'string') {
+    try {
+      return {
+        ok: true,
+        snapshot: JSON.parse(input),
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err,
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    snapshot: input,
+  };
+}
+
+function countSummary(snapshot = {}) {
+  const entityCounts = snapshot.entityCounts || {};
+  const topologyCounts = snapshot.topologyCounts || {};
+  const handoffSummary = snapshot.handoffSummary || {};
+
+  return {
+    componentCount: number(entityCounts.componentCount),
+    anchorCount: number(entityCounts.anchorCount),
+    portCount: number(entityCounts.portCount),
+    segmentCount: number(entityCounts.segmentCount),
+    supportCount: number(entityCounts.supportCount),
+    acceptedConnectionCount: number(topologyCounts.acceptedConnectionCount),
+    manualReviewCount: number(topologyCounts.manualReviewCount),
+    rejectedCount: number(topologyCounts.rejectedCount),
+    unresolvedCount: number(topologyCounts.unresolvedCount),
+    handoffConnectionCount: number(handoffSummary.handoffConnectionCount),
+    annotatedRowCount: number(handoffSummary.annotatedRowCount),
+  };
+}
+
+function validateSafetyFlags(snapshot, issues) {
+  if (snapshot.debugOnly !== true) {
+    issues.push(makeIssue({
+      code: UXML_CL1_REPLAY_BLOCK_CODES.NOT_DEBUG_ONLY,
+      message: 'CL1 snapshot must be debug-only for replay validation.',
+      path: 'debugOnly',
+    }));
+  }
+
+  if (snapshot.pcfGenerated === true) {
+    issues.push(makeIssue({
+      code: UXML_CL1_REPLAY_BLOCK_CODES.PCF_GENERATED_FLAG_TRUE,
+      message: 'Snapshot claims PCF was generated; replay validator only accepts non-PCF debug snapshots.',
+      path: 'pcfGenerated',
+    }));
+  }
+
+  if (snapshot.mastersResolved === true) {
+    issues.push(makeIssue({
+      code: UXML_CL1_REPLAY_BLOCK_CODES.MASTERS_RESOLVED_FLAG_TRUE,
+      message: 'Snapshot claims masters were resolved; replay validator only accepts topology/debug snapshots.',
+      path: 'mastersResolved',
+    }));
+  }
+
+  if (snapshot.coordinatesMutated === true) {
+    issues.push(makeIssue({
+      code: UXML_CL1_REPLAY_BLOCK_CODES.COORDINATES_MUTATED_FLAG_TRUE,
+      message: 'Snapshot claims coordinates were mutated.',
+      path: 'coordinatesMutated',
+    }));
+  }
+
+  if (snapshot.fixesApplied === true) {
+    issues.push(makeIssue({
+      code: UXML_CL1_REPLAY_BLOCK_CODES.FIXES_APPLIED_FLAG_TRUE,
+      message: 'Snapshot claims fixes were applied.',
+      path: 'fixesApplied',
+    }));
+  }
+}
+
+function validateRouteContract(snapshot, issues) {
+  const contract = snapshot.routeContract || {};
+
+  if (contract.uxmlEmitsPcfDirectly === true) {
+    issues.push(makeIssue({
+      code: UXML_CL1_REPLAY_BLOCK_CODES.ROUTE_CONTRACT_UNSAFE,
+      message: 'Route contract is unsafe: uxmlEmitsPcfDirectly is true.',
+      path: 'routeContract.uxmlEmitsPcfDirectly',
+    }));
+  }
+
+  if (contract.uxmlMutatesCoordinates === true) {
+    issues.push(makeIssue({
+      code: UXML_CL1_REPLAY_BLOCK_CODES.ROUTE_CONTRACT_UNSAFE,
+      message: 'Route contract is unsafe: uxmlMutatesCoordinates is true.',
+      path: 'routeContract.uxmlMutatesCoordinates',
+    }));
+  }
+
+  if (contract.uxmlAppliesFixes === true) {
+    issues.push(makeIssue({
+      code: UXML_CL1_REPLAY_BLOCK_CODES.ROUTE_CONTRACT_UNSAFE,
+      message: 'Route contract is unsafe: uxmlAppliesFixes is true.',
+      path: 'routeContract.uxmlAppliesFixes',
+    }));
+  }
+}
+
+function validateRequiredFields(snapshot, issues) {
+  if (snapshot.schema !== UXML_CL1_PACKAGE_SNAPSHOT_SCHEMA) {
+    issues.push(makeIssue({
+      code: UXML_CL1_REPLAY_BLOCK_CODES.INVALID_SNAPSHOT_SCHEMA,
+      message: `Expected snapshot schema ${UXML_CL1_PACKAGE_SNAPSHOT_SCHEMA}.`,
+      path: 'schema',
+      details: {
+        actual: snapshot.schema,
+      },
+    }));
+  }
+
+  if (!clean(snapshot.snapshotId)) {
+    issues.push(makeIssue({
+      code: UXML_CL1_REPLAY_BLOCK_CODES.MISSING_SNAPSHOT_ID,
+      message: 'Snapshot ID is missing.',
+      path: 'snapshotId',
+    }));
+  }
+
+  if (!clean(snapshot.packageId)) {
+    issues.push(makeIssue({
+      code: UXML_CL1_REPLAY_BLOCK_CODES.MISSING_PACKAGE_ID,
+      message: 'Package ID is missing.',
+      path: 'packageId',
+    }));
+  }
+
+  if (!clean(snapshot.targetRoute)) {
+    issues.push(makeIssue({
+      code: UXML_CL1_REPLAY_BLOCK_CODES.MISSING_TARGET_ROUTE,
+      message: 'Target route is missing.',
+      path: 'targetRoute',
+    }));
+  }
+
+  if (
+    !isPlainObject(snapshot.entityCounts) ||
+    !isPlainObject(snapshot.topologyCounts) ||
+    !isPlainObject(snapshot.handoffSummary)
+  ) {
+    issues.push(makeIssue({
+      code: UXML_CL1_REPLAY_BLOCK_CODES.MISSING_COUNTS,
+      message: 'Snapshot must include entityCounts, topologyCounts and handoffSummary objects.',
+      path: 'entityCounts/topologyCounts/handoffSummary',
+    }));
+  }
+}
+
+function readinessFromIssues(issues) {
+  const blockingIssues = issues.filter(issue => issue.severity === 'ERROR');
+
+  return {
+    replayReady: blockingIssues.length === 0,
+    blockingIssueCount: blockingIssues.length,
+    warningCount: issues.filter(issue => issue.severity === 'WARNING').length,
+  };
+}
+
+export function validateUxmlCl1SnapshotReplay(input, {
+  requirePayloadForReplay = false,
+} = {}) {
+  const parsed = parseSnapshot(input);
+
+  if (!parsed.ok) {
+    const issues = [
+      makeIssue({
+        code: UXML_CL1_REPLAY_BLOCK_CODES.INVALID_JSON,
+        message: `Invalid CL1 snapshot JSON: ${parsed.error.message}`,
+        path: '$',
+      }),
+    ];
+
+    return {
+      schema: UXML_CL1_SNAPSHOT_REPLAY_VALIDATOR_SCHEMA,
+      ok: false,
+      replayReady: false,
+      snapshot: null,
+      summary: {
+        replayReady: false,
+        blockingIssueCount: 1,
+        warningCount: 0,
+      },
+      countSummary: {},
+      issues,
+      debugOnly: true,
+      pcfGenerated: false,
+      mastersResolved: false,
+      coordinatesMutated: false,
+      fixesApplied: false,
+    };
+  }
+
+  const snapshot = parsed.snapshot;
+  const issues = [];
+
+  if (!isPlainObject(snapshot)) {
+    issues.push(makeIssue({
+      code: UXML_CL1_REPLAY_BLOCK_CODES.INVALID_SNAPSHOT_SCHEMA,
+      message: 'Snapshot input must be a JSON object.',
+      path: '$',
+    }));
+  } else {
+    validateRequiredFields(snapshot, issues);
+    validateSafetyFlags(snapshot, issues);
+    validateRouteContract(snapshot, issues);
+
+    if (requirePayloadForReplay && snapshot.payloadIncluded !== true) {
+      issues.push(makeIssue({
+        severity: 'WARNING',
+        code: 'UXML-CL1-REPLAY-PAYLOAD-NOT-INCLUDED',
+        message: 'Snapshot is structurally valid but payload is not included for deep replay.',
+        path: 'payloadIncluded',
+      }));
+    }
+  }
+
+  const summary = readinessFromIssues(issues);
+
+  return {
+    schema: UXML_CL1_SNAPSHOT_REPLAY_VALIDATOR_SCHEMA,
+    ok: summary.replayReady,
+    replayReady: summary.replayReady,
+    snapshot,
+    summary,
+    countSummary: isPlainObject(snapshot) ? countSummary(snapshot) : {},
+    issues,
+    debugOnly: snapshot?.debugOnly === true,
+    pcfGenerated: snapshot?.pcfGenerated === true,
+    mastersResolved: snapshot?.mastersResolved === true,
+    coordinatesMutated: snapshot?.coordinatesMutated === true,
+    fixesApplied: snapshot?.fixesApplied === true,
+  };
+}
+
+export function assertUxmlCl1SnapshotReplayReady(input, options = {}) {
+  const report = validateUxmlCl1SnapshotReplay(input, options);
+
+  if (!report.replayReady) {
+    const first = report.issues[0];
+    const err = new Error(first?.message || 'CL1 snapshot is not replay-ready.');
+    err.code = first?.code || 'UXML-CL1-REPLAY-BLOCKED';
+    err.replayReport = report;
+    throw err;
+  }
+
+  return report;
+}
+
+export function summarizeUxmlCl1SnapshotReplay(report) {
+  if (!report) return 'CL1 snapshot replay validator did not run.';
+
+  if (!report.replayReady) {
+    const first = report.issues?.[0];
+    return `CL1 snapshot replay blocked: ${first?.message || 'unknown issue'}`;
+  }
+
+  return `CL1 snapshot replay-ready. Components=${report.countSummary.componentCount}; accepted=${report.countSummary.acceptedConnectionCount}; warnings=${report.summary.warningCount}.`;
+}
+
+export const validateUxmlCl1ReplaySnapshot = validateUxmlCl1SnapshotReplay;
+```
+
+---
+
+# File 2
+
+```text
+viewer/tests/uxml-cl1-snapshot-replay-validator.test.js
+```
+
+```js
+import { describe, expect, it } from 'vitest';
+
+import {
+  buildUxmlCl1PackageSnapshot,
+  serializeUxmlCl1PackageSnapshot,
+} from '../uxml/UxmlCl1PackageSnapshot.js';
+
+import {
+  UXML_CL1_REPLAY_BLOCK_CODES,
+  assertUxmlCl1SnapshotReplayReady,
+  summarizeUxmlCl1SnapshotReplay,
+  validateUxmlCl1ReplaySnapshot,
+  validateUxmlCl1SnapshotReplay,
+} from '../uxml/UxmlCl1SnapshotReplayValidator.js';
+
+function packageFixture() {
+  return {
+    schema: 'uxml-cl1-route-package/v1',
+    ok: true,
+    allowed: true,
+    packageId: 'cl1-abc12345',
+    targetRoute: 'EXTRACT_PCF_LEGACY',
+    targetRouteLabel: 'Extract PCF legacy route',
+    sourceInfo: {
+      sourceFile: 'sample.xml',
+      selectedSourceType: 'INPUT_XML',
+      detectedSourceType: 'INPUT_XML',
+      profile: 'INPUT_XML',
+    },
+    entityCounts: {
+      componentCount: 10,
+      anchorCount: 20,
+      portCount: 20,
+      segmentCount: 9,
+      supportCount: 1,
+    },
+    topologyCounts: {
+      outputBridgeReady: true,
+      exportAllowed: true,
+      acceptedConnectionCount: 8,
+      manualReviewCount: 0,
+      rejectedCount: 0,
+      unresolvedCount: 0,
+    },
+    handoffSummary: {
+      handoffConnectionCount: 8,
+      annotatedRowCount: 10,
+      pipelineCount: 1,
+      coordinatesMutated: false,
+    },
+    componentTypes: {
+      PIPE: 5,
+      VALVE: 1,
+    },
+    pipelineRefs: ['/P1'],
+    diagnostics: [],
+    lossContract: [],
+    routeContract: {
+      uxmlMutatesCoordinates: false,
+      uxmlAppliesFixes: false,
+      uxmlEmitsPcfDirectly: false,
+    },
+    policy: {
+      routeContract: {
+        uxmlMutatesCoordinates: false,
+        uxmlAppliesFixes: false,
+        uxmlEmitsPcfDirectly: false,
+      },
+    },
+    payload: {
+      uxml: { schema: 'uxml/v1' },
+    },
+  };
+}
+
+function validSnapshot(options = {}) {
+  return buildUxmlCl1PackageSnapshot(packageFixture(), options);
+}
+
+describe('UxmlCl1SnapshotReplayValidator CL1-D', () => {
+  it('validates a replay-ready CL1 snapshot object', () => {
+    const report = validateUxmlCl1SnapshotReplay(validSnapshot());
+
+    expect(report.schema).toBe('uxml-cl1-snapshot-replay-validator/v1');
+    expect(report.ok).toBe(true);
+    expect(report.replayReady).toBe(true);
+    expect(report.issues).toEqual([]);
+
+    expect(report.countSummary.componentCount).toBe(10);
+    expect(report.countSummary.acceptedConnectionCount).toBe(8);
+
+    expect(report.debugOnly).toBe(true);
+    expect(report.pcfGenerated).toBe(false);
+    expect(report.mastersResolved).toBe(false);
+    expect(report.coordinatesMutated).toBe(false);
+    expect(report.fixesApplied).toBe(false);
+  });
+
+  it('validates a replay-ready CL1 snapshot JSON string', () => {
+    const text = serializeUxmlCl1PackageSnapshot(validSnapshot());
+    const report = validateUxmlCl1SnapshotReplay(text);
+
+    expect(report.replayReady).toBe(true);
+    expect(report.countSummary.componentCount).toBe(10);
+  });
+
+  it('blocks invalid JSON string', () => {
+    const report = validateUxmlCl1SnapshotReplay('{bad json');
+
+    expect(report.replayReady).toBe(false);
+    expect(report.issues[0].code).toBe(UXML_CL1_REPLAY_BLOCK_CODES.INVALID_JSON);
+  });
+
+  it('blocks invalid snapshot schema', () => {
+    const snapshot = validSnapshot();
+    snapshot.schema = 'wrong-schema';
+
+    const report = validateUxmlCl1SnapshotReplay(snapshot);
+
+    expect(report.replayReady).toBe(false);
+    expect(report.issues.some(issue =>
+      issue.code === UXML_CL1_REPLAY_BLOCK_CODES.INVALID_SNAPSHOT_SCHEMA
+    )).toBe(true);
+  });
+
+  it('blocks unsafe safety flags', () => {
+    const snapshot = validSnapshot();
+
+    snapshot.debugOnly = false;
+    snapshot.pcfGenerated = true;
+    snapshot.mastersResolved = true;
+    snapshot.coordinatesMutated = true;
+    snapshot.fixesApplied = true;
+
+    const report = validateUxmlCl1SnapshotReplay(snapshot);
+
+    expect(report.replayReady).toBe(false);
+    expect(report.issues.some(issue => issue.code === UXML_CL1_REPLAY_BLOCK_CODES.NOT_DEBUG_ONLY)).toBe(true);
+    expect(report.issues.some(issue => issue.code === UXML_CL1_REPLAY_BLOCK_CODES.PCF_GENERATED_FLAG_TRUE)).toBe(true);
+    expect(report.issues.some(issue => issue.code === UXML_CL1_REPLAY_BLOCK_CODES.MASTERS_RESOLVED_FLAG_TRUE)).toBe(true);
+    expect(report.issues.some(issue => issue.code === UXML_CL1_REPLAY_BLOCK_CODES.COORDINATES_MUTATED_FLAG_TRUE)).toBe(true);
+    expect(report.issues.some(issue => issue.code === UXML_CL1_REPLAY_BLOCK_CODES.FIXES_APPLIED_FLAG_TRUE)).toBe(true);
+  });
+
+  it('blocks unsafe route contract', () => {
+    const snapshot = validSnapshot();
+
+    snapshot.routeContract.uxmlEmitsPcfDirectly = true;
+    snapshot.routeContract.uxmlMutatesCoordinates = true;
+    snapshot.routeContract.uxmlAppliesFixes = true;
+
+    const report = validateUxmlCl1SnapshotReplay(snapshot);
+
+    expect(report.replayReady).toBe(false);
+    expect(report.issues.filter(issue =>
+      issue.code === UXML_CL1_REPLAY_BLOCK_CODES.ROUTE_CONTRACT_UNSAFE
+    )).toHaveLength(3);
+  });
+
+  it('warns when payload is required but not included', () => {
+    const snapshot = validSnapshot({
+      includePayload: false,
+    });
+
+    const report = validateUxmlCl1SnapshotReplay(snapshot, {
+      requirePayloadForReplay: true,
+    });
+
+    expect(report.replayReady).toBe(true);
+    expect(report.summary.warningCount).toBe(1);
+    expect(report.issues[0].code).toBe('UXML-CL1-REPLAY-PAYLOAD-NOT-INCLUDED');
+  });
+
+  it('assert helper throws with replay report when blocked', () => {
+    const snapshot = validSnapshot();
+    snapshot.pcfGenerated = true;
+
+    expect(() => assertUxmlCl1SnapshotReplayReady(snapshot))
+      .toThrow('Snapshot claims PCF was generated');
+
+    try {
+      assertUxmlCl1SnapshotReplayReady(snapshot);
+    } catch (err) {
+      expect(err.code).toBe(UXML_CL1_REPLAY_BLOCK_CODES.PCF_GENERATED_FLAG_TRUE);
+      expect(err.replayReport.replayReady).toBe(false);
+    }
+  });
+
+  it('summarizes replay-ready and blocked reports', () => {
+    const ready = validateUxmlCl1SnapshotReplay(validSnapshot());
+
+    expect(summarizeUxmlCl1SnapshotReplay(ready)).toContain('replay-ready');
+    expect(summarizeUxmlCl1SnapshotReplay(ready)).toContain('Components=10');
+
+    const blocked = validateUxmlCl1SnapshotReplay('{bad json');
+
+    expect(summarizeUxmlCl1SnapshotReplay(blocked)).toContain('blocked');
+  });
+
+  it('provides alias export', () => {
+    const report = validateUxmlCl1ReplaySnapshot(validSnapshot());
+
+    expect(report.schema).toBe('uxml-cl1-snapshot-replay-validator/v1');
+    expect(report.replayReady).toBe(true);
+  });
+});
+```
+
+---
+
+# Patch — Universal XML Converter tab
+
+```text
+viewer/tabs/universal-xml-converter-tab.js
+```
+
+## 1. Import validator
+
+```js
+import {
+  summarizeUxmlCl1SnapshotReplay,
+  validateUxmlCl1SnapshotReplay,
+} from '../uxml/UxmlCl1SnapshotReplayValidator.js';
+```
+
+## 2. Add state
+
+In initial state:
+
+```js
+cl1ReplayValidation: null,
+```
+
+Inside `pipeline`:
+
+```js
+cl1ReplayValidation: null,
+```
+
+Inside reports:
+
+```js
+'cl1-replay': null,
+```
+
+## 3. Add stage after `cl1-snapshot`
+
+```js
+{
+  id: 'cl1-replay',
+  title: '13. CL1 Replay Validator',
+  description: 'Validate saved CL1 snapshot structure for debug/replay readiness without rebuilding topology.',
+},
+```
+
+Then renumber later stages:
+
+```text
+14. Route Targets
+15. Masters by Target Route
+```
+
+## 4. Add action after `run-cl1-snapshot`
+
+```js
+if (action === 'run-cl1-replay') {
+  if (!state.pipeline.cl1Snapshot) runPipelineAction(state, 'run-cl1-snapshot');
+
+  const cl1ReplayValidation = validateUxmlCl1SnapshotReplay(state.pipeline.cl1Snapshot, {
+    requirePayloadForReplay: false,
+  });
+
+  state.pipeline.cl1ReplayValidation = cl1ReplayValidation;
+  state.cl1ReplayValidation = cl1ReplayValidation;
+  state.reports['cl1-replay'] = stageReport('cl1-replay', cl1ReplayValidation);
+
+  state.status = {
+    kind: cl1ReplayValidation.replayReady ? 'ok' : 'warn',
+    message: summarizeUxmlCl1SnapshotReplay(cl1ReplayValidation),
+  };
+
+  return cl1ReplayValidation;
+}
+```
+
+## 5. Update full pipeline
+
+After:
+
+```js
+runPipelineAction(state, 'run-cl1-snapshot');
+```
+
+add:
+
+```js
+runPipelineAction(state, 'run-cl1-replay');
+```
+
+## 6. Add button mapping
+
+```js
+'cl1-replay': {
+  label: 'Validate CL1 replay',
+  action: 'run-cl1-replay',
+},
+```
+
+## 7. Add panel
+
+```js
+if (panel === 'cl1-replay') {
+  const replay = state.pipeline.cl1ReplayValidation;
+
+  return `
+    <section class="uxml-panel-section">
+      <h3>CL1 Replay Validator</h3>
+      <p>
+        Validates a CL1 snapshot for debug/replay readiness.
+        This does not parse XML, rebuild topology, emit PCF, resolve masters, mutate coordinates, or apply fixes.
+      </p>
+
+      ${replay ? `
+        <div class="uxml-kv-grid">
+          <div><b>Schema</b><span>${escapeHtml(replay.schema)}</span></div>
+          <div><b>Replay ready</b><span>${replay.replayReady ? 'YES' : 'NO'}</span></div>
+          <div><b>Blocking issues</b><span>${safeCount(replay.summary?.blockingIssueCount)}</span></div>
+          <div><b>Warnings</b><span>${safeCount(replay.summary?.warningCount)}</span></div>
+          <div><b>Components</b><span>${safeCount(replay.countSummary?.componentCount)}</span></div>
+          <div><b>Accepted topology</b><span>${safeCount(replay.countSummary?.acceptedConnectionCount)}</span></div>
+          <div><b>Manual / rejected / unresolved</b><span>${safeCount(replay.countSummary?.manualReviewCount)} / ${safeCount(replay.countSummary?.rejectedCount)} / ${safeCount(replay.countSummary?.unresolvedCount)}</span></div>
+        </div>
+
+        <div class="uxml-placeholder" style="margin-top:12px;">
+          <b>Replay safety flags:</b><br>
+          Debug only: ${replay.debugOnly ? 'YES' : 'NO'}<br>
+          PCF generated: ${replay.pcfGenerated ? 'YES' : 'NO'}<br>
+          Masters resolved: ${replay.mastersResolved ? 'YES' : 'NO'}<br>
+          Coordinates mutated: ${replay.coordinatesMutated ? 'YES' : 'NO'}<br>
+          Fixes applied: ${replay.fixesApplied ? 'YES' : 'NO'}
+        </div>
+
+        ${replay.issues?.length ? `
+          <div class="uxml-placeholder" style="margin-top:12px;">
+            <b>Issues:</b>
+            <ul>
+              ${replay.issues.map(issue => `
+                <li><code>${escapeHtml(issue.code)}</code> — ${escapeHtml(issue.message)}</li>
+              `).join('')}
+            </ul>
+          </div>
+        ` : ''}
+      ` : `
+        <div class="uxml-placeholder">Build CL1 snapshot, then validate replay readiness.</div>
+      `}
+    </section>
+  `;
+}
+```
+
+---
+
+# Test additions
+
+In:
+
+```text
+viewer/tests/universal-xml-converter-tab.test.js
+```
+
+Add:
+
+```js
+it('exposes CL1 replay validator stage after CL1 snapshot', () => {
+  const stageIds = PIPELINE_STAGES.map(stage => stage.id);
+
+  expect(stageIds).toContain('cl1-snapshot');
+  expect(stageIds).toContain('cl1-replay');
+
+  expect(stageIds.indexOf('cl1-replay')).toBeGreaterThan(stageIds.indexOf('cl1-snapshot'));
+});
+
+it('keeps CL1 replay wording debug-only and separate from topology rebuild or PCF export', () => {
+  const html = renderUniversalXmlConverterTab();
+
+  expect(html).toContain('CL1 Replay Validator');
+  expect(html).toContain('does not parse XML');
+  expect(html).toContain('rebuild topology');
+  expect(html).toContain('emit PCF');
+  expect(html).toContain('resolve masters');
+  expect(html).not.toContain('Masters deferred');
+});
+```
+
+Adapt helper names to the current test exports if needed.
+
+---
+
+# Certification update
+
+Add module:
+
+```js
+'viewer/uxml/UxmlCl1SnapshotReplayValidator.js',
+```
+
+Add test:
+
+```js
+'viewer/tests/uxml-cl1-snapshot-replay-validator.test.js',
+```
+
+Add export marker:
+
+```js
+{
+  file: 'viewer/uxml/UxmlCl1SnapshotReplayValidator.js',
+  markers: [
+    'validateUxmlCl1SnapshotReplay',
+    'assertUxmlCl1SnapshotReplayReady',
+    'summarizeUxmlCl1SnapshotReplay',
+  ],
+},
+```
+
+Add workflow test:
+
+```bash
+viewer/tests/uxml-cl1-snapshot-replay-validator.test.js
+```
+
+---
+
+# Required verification
+
+```bash
+npx vitest run \
+  viewer/tests/uxml-cl1-route-package.test.js \
+  viewer/tests/uxml-cl1-package-snapshot.test.js \
+  viewer/tests/uxml-cl1-snapshot-replay-validator.test.js \
+  viewer/tests/universal-xml-converter-tab.test.js
+```
+
+Then:
+
+```bash
+node tools/uxml-certification.mjs
+```
+
+---
+
+# CL1-D hard pass gate
+
+```text
+cl1ReplayValidatorModuleExists = true
+cl1ReplayValidatorTestExists = true
+cl1ReplayStageVisible = true
+cl1ReplayActionExists = true
+fullPipelineRunsCl1Replay = true
+
+validSnapshotReplayReady = true
+invalidJsonBlocked = true
+invalidSchemaBlocked = true
+unsafeSafetyFlagsBlocked = true
+unsafeRouteContractBlocked = true
+payloadMissingWarnsOnly = true
+
+noXmlParsing = true
+noTopologyRebuild = true
+pcfGenerated = false
+mastersResolved = false
+coordinatesMutated = false
+fixesApplied = false
+
+xmlInputMapperTouched = false
+uxmlNormalizerTouched = false
+uxmlProfileDetectorTouched = false
+pcfWriterTouched = false
+masterMappersTouched = false
+rvmJsonPcfBridgeTouched = false
+topologyBuildersTouched = false
+```
+
+Next after CL1-D:
+
+```text
+CL1-E — CL1 Workbench Summary Panel / One-screen QA Status
+```
+
+That will add a compact final summary in the Universal XML tab showing: DecisionGate, RouteHandoff, CL1 package, Snapshot, Replay all green/warn/block in one place.
+----------------------------------
+Next for CL1:
+
+```text
+CL1-E — CL1 Workbench Summary Panel / One-Screen QA Status
+```
+
+Purpose:
+
+```text
+DecisionGate
+  ↓
+RouteHandoffPolicy
+  ↓
+CL1 Package
+  ↓
+CL1 Snapshot
+  ↓
+CL1 Replay Validator
+  ↓
+One-screen QA summary
+```
+
+This gives the Universal XML Converter tab a final compact status panel showing what is green/warn/blocked.
+
+Repo status note: **PR #111 still appears open**, so keep CL1-E isolated from XML/InputXML mapper work.
+
+---
+
+# CL1-E Agent Prompt
+
+```text
+You are CL1-E Agent for PCF_GLB_Viewer_Conv.
+
+Base:
+- UxmlRouteHandoffPolicy is merged.
+- CL1-A created UxmlCl1RoutePackage.js.
+- CL1-B wired CL1 package into Universal XML Converter tab.
+- CL1-C created CL1 snapshot JSON.
+- CL1-D created CL1 snapshot replay validator.
+- New Agent continues XML/InputXML mapper work separately.
+
+Your task:
+Add CL1 Workbench Summary / One-Screen QA Status.
+
+Add:
+- viewer/uxml/UxmlCl1WorkbenchSummary.js
+- viewer/tests/uxml-cl1-workbench-summary.test.js
+
+Patch:
+- viewer/tabs/universal-xml-converter-tab.js
+- viewer/tests/universal-xml-converter-tab.test.js
+- tools/uxml-certification.mjs
+- .github/workflows/uxml-certification.yml
+
+Do not touch:
+- XML/InputXML mapper files
+- UxmlNormalizer.js
+- UxmlProfileDetector.js
+- PCF writer/emitter
+- master mapper files
+- RVM/JSON → PCF bridge modules
+- topology builders
+
+Important:
+This summary is read-only QA status.
+It must not generate PCF.
+It must not resolve masters.
+It must not mutate coordinates.
+It must not apply topology fixes.
+```
+
+---
+
+# File 1
+
+```text
+viewer/uxml/UxmlCl1WorkbenchSummary.js
+```
+
+```js
+/**
+ * UxmlCl1WorkbenchSummary.js
+ *
+ * CL1-E — Workbench Summary / One-Screen QA Status.
+ *
+ * Purpose:
+ * - Summarize the final Universal XML workbench chain:
+ *   DecisionGate → RouteHandoffPolicy → CL1 Package → Snapshot → Replay Validator
+ * - Provide one compact QA object for UI display and tests.
+ *
+ * Important:
+ * - Does not parse XML/InputXML.
+ * - Does not rebuild topology.
+ * - Does not emit PCF.
+ * - Does not resolve masters.
+ * - Does not mutate coordinates.
+ * - Does not apply fixes.
+ */
+
+export const UXML_CL1_WORKBENCH_SUMMARY_SCHEMA =
+  'uxml-cl1-workbench-summary/v1';
+
+export const UXML_CL1_WORKBENCH_STATUS = Object.freeze({
+  PASS: 'PASS',
+  WARN: 'WARN',
+  BLOCKED: 'BLOCKED',
+  NOT_RUN: 'NOT_RUN',
+});
+
+function clean(value) {
+  return String(value ?? '').trim();
+}
+
+function number(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function bool(value) {
+  return value === true;
+}
+
+function stageStatus({ present, pass, warn = false }) {
+  if (!present) return UXML_CL1_WORKBENCH_STATUS.NOT_RUN;
+  if (pass) return warn ? UXML_CL1_WORKBENCH_STATUS.WARN : UXML_CL1_WORKBENCH_STATUS.PASS;
+  return UXML_CL1_WORKBENCH_STATUS.BLOCKED;
+}
+
+function countBlocked(stages) {
+  return Object.values(stages).filter(s => s.status === UXML_CL1_WORKBENCH_STATUS.BLOCKED).length;
+}
+
+function countWarn(stages) {
+  return Object.values(stages).filter(s => s.status === UXML_CL1_WORKBENCH_STATUS.WARN).length;
+}
+
+function countNotRun(stages) {
+  return Object.values(stages).filter(s => s.status === UXML_CL1_WORKBENCH_STATUS.NOT_RUN).length;
+}
+
+function makeStage({ id, label, status, message = '', details = {} }) {
+  return {
+    id,
+    label,
+    status,
+    message,
+    details,
+  };
+}
+
+function decisionStage(topologyDecision) {
+  const present = !!topologyDecision;
+  const summary = topologyDecision?.summary || {};
+  const outputBridgeReady = bool(topologyDecision?.outputBridgeReady);
+  const exportAllowed = bool(topologyDecision?.exportAllowed);
+  const manual = number(summary.manualReviewCount);
+  const rejected = number(summary.rejectedCount);
+  const unresolved = number(summary.unresolvedCount);
+  const warn = manual > 0 || rejected > 0 || unresolved > 0 || !exportAllowed;
+
+  return makeStage({
+    id: 'decision-gate',
+    label: 'Decision Gate',
+    status: stageStatus({
+      present,
+      pass: outputBridgeReady,
+      warn,
+    }),
+    message: !present
+      ? 'Decision gate has not run.'
+      : outputBridgeReady
+        ? `Decision gate ready. Accepted=${number(summary.acceptedConnectionCount)}, Manual=${manual}, Rejected=${rejected}, Unresolved=${unresolved}.`
+        : 'Decision gate output bridge is not ready.',
+    details: {
+      outputBridgeReady,
+      exportAllowed,
+      acceptedConnectionCount: number(summary.acceptedConnectionCount),
+      manualReviewCount: manual,
+      rejectedCount: rejected,
+      unresolvedCount: unresolved,
+    },
+  });
+}
+
+function routeHandoffStage(routeHandoff) {
+  const policy = routeHandoff?.policy || routeHandoff || null;
+  const present = !!policy;
+  const allowed = bool(policy?.allowed);
+
+  return makeStage({
+    id: 'route-handoff',
+    label: 'Route Handoff',
+    status: stageStatus({
+      present,
+      pass: allowed,
+    }),
+    message: !present
+      ? 'Route handoff has not run.'
+      : allowed
+        ? `Route handoff allowed to ${clean(policy.targetRouteLabel || policy.targetRoute)}.`
+        : `Route handoff blocked: ${clean(policy.blockedReason)}`,
+    details: {
+      targetRoute: clean(policy?.targetRoute),
+      targetRouteLabel: clean(policy?.targetRouteLabel),
+      allowed,
+      blockCode: clean(policy?.blockCode),
+      blockedReason: clean(policy?.blockedReason),
+      masterOwner: clean(policy?.masterOwner),
+    },
+  });
+}
+
+function cl1PackageStage(pkg) {
+  const present = !!pkg;
+  const allowed = bool(pkg?.allowed);
+
+  return makeStage({
+    id: 'cl1-package',
+    label: 'CL1 Package',
+    status: stageStatus({
+      present,
+      pass: allowed,
+    }),
+    message: !present
+      ? 'CL1 route package has not been built.'
+      : allowed
+        ? `CL1 package ready: ${clean(pkg.packageId)}.`
+        : `CL1 package blocked: ${clean(pkg.blockedReason)}`,
+    details: {
+      packageId: clean(pkg?.packageId),
+      targetRoute: clean(pkg?.targetRoute),
+      allowed,
+      componentCount: number(pkg?.entityCounts?.componentCount),
+      anchorCount: number(pkg?.entityCounts?.anchorCount),
+      portCount: number(pkg?.entityCounts?.portCount),
+      segmentCount: number(pkg?.entityCounts?.segmentCount),
+      acceptedConnectionCount: number(pkg?.topologyCounts?.acceptedConnectionCount),
+    },
+  });
+}
+
+function snapshotStage(snapshot) {
+  const present = !!snapshot;
+  const safe =
+    bool(snapshot?.debugOnly) &&
+    snapshot?.pcfGenerated !== true &&
+    snapshot?.mastersResolved !== true &&
+    snapshot?.coordinatesMutated !== true &&
+    snapshot?.fixesApplied !== true;
+
+  return makeStage({
+    id: 'cl1-snapshot',
+    label: 'CL1 Snapshot',
+    status: stageStatus({
+      present,
+      pass: safe,
+    }),
+    message: !present
+      ? 'CL1 snapshot has not been built.'
+      : safe
+        ? `CL1 snapshot ready: ${clean(snapshot.snapshotId)}.`
+        : 'CL1 snapshot has unsafe flags.',
+    details: {
+      snapshotId: clean(snapshot?.snapshotId),
+      packageId: clean(snapshot?.packageId),
+      debugOnly: bool(snapshot?.debugOnly),
+      pcfGenerated: snapshot?.pcfGenerated === true,
+      mastersResolved: snapshot?.mastersResolved === true,
+      coordinatesMutated: snapshot?.coordinatesMutated === true,
+      fixesApplied: snapshot?.fixesApplied === true,
+    },
+  });
+}
+
+function replayStage(replay) {
+  const present = !!replay;
+  const replayReady = bool(replay?.replayReady);
+  const warnings = number(replay?.summary?.warningCount);
+
+  return makeStage({
+    id: 'cl1-replay',
+    label: 'CL1 Replay',
+    status: stageStatus({
+      present,
+      pass: replayReady,
+      warn: warnings > 0,
+    }),
+    message: !present
+      ? 'CL1 replay validator has not run.'
+      : replayReady
+        ? `CL1 snapshot replay-ready. Warnings=${warnings}.`
+        : `CL1 replay blocked with ${number(replay?.summary?.blockingIssueCount)} issue(s).`,
+    details: {
+      replayReady,
+      blockingIssueCount: number(replay?.summary?.blockingIssueCount),
+      warningCount: warnings,
+      componentCount: number(replay?.countSummary?.componentCount),
+      acceptedConnectionCount: number(replay?.countSummary?.acceptedConnectionCount),
+    },
+  });
+}
+
+function safetySummary({ cl1RoutePackage, cl1Snapshot, cl1ReplayValidation }) {
+  const pkgContract = cl1RoutePackage?.routeContract || {};
+  const snapshot = cl1Snapshot || {};
+  const replay = cl1ReplayValidation || {};
+
+  return {
+    pcfGenerated: snapshot.pcfGenerated === true || pkgContract.uxmlEmitsPcfDirectly === true || replay.pcfGenerated === true,
+    mastersResolved: snapshot.mastersResolved === true || replay.mastersResolved === true,
+    coordinatesMutated: snapshot.coordinatesMutated === true || pkgContract.uxmlMutatesCoordinates === true || replay.coordinatesMutated === true,
+    fixesApplied: snapshot.fixesApplied === true || pkgContract.uxmlAppliesFixes === true || replay.fixesApplied === true,
+  };
+}
+
+export function buildUxmlCl1WorkbenchSummary({
+  topologyDecision = null,
+  routeHandoff = null,
+  cl1RoutePackage = null,
+  cl1Snapshot = null,
+  cl1ReplayValidation = null,
+} = {}) {
+  const stages = {
+    decisionGate: decisionStage(topologyDecision),
+    routeHandoff: routeHandoffStage(routeHandoff),
+    cl1Package: cl1PackageStage(cl1RoutePackage),
+    cl1Snapshot: snapshotStage(cl1Snapshot),
+    cl1Replay: replayStage(cl1ReplayValidation),
+  };
+
+  const blockedCount = countBlocked(stages);
+  const warningCount = countWarn(stages);
+  const notRunCount = countNotRun(stages);
+  const safety = safetySummary({
+    cl1RoutePackage,
+    cl1Snapshot,
+    cl1ReplayValidation,
+  });
+
+  const unsafe =
+    safety.pcfGenerated ||
+    safety.mastersResolved ||
+    safety.coordinatesMutated ||
+    safety.fixesApplied;
+
+  const overallStatus =
+    blockedCount > 0 || unsafe
+      ? UXML_CL1_WORKBENCH_STATUS.BLOCKED
+      : warningCount > 0 || notRunCount > 0
+        ? UXML_CL1_WORKBENCH_STATUS.WARN
+        : UXML_CL1_WORKBENCH_STATUS.PASS;
+
+  return {
+    schema: UXML_CL1_WORKBENCH_SUMMARY_SCHEMA,
+    overallStatus,
+    readyForRouteConsumption: overallStatus === UXML_CL1_WORKBENCH_STATUS.PASS,
+    blockedCount,
+    warningCount,
+    notRunCount,
+    stages,
+    safety,
+    counts: {
+      componentCount: number(cl1RoutePackage?.entityCounts?.componentCount),
+      anchorCount: number(cl1RoutePackage?.entityCounts?.anchorCount),
+      portCount: number(cl1RoutePackage?.entityCounts?.portCount),
+      segmentCount: number(cl1RoutePackage?.entityCounts?.segmentCount),
+      acceptedConnectionCount: number(cl1RoutePackage?.topologyCounts?.acceptedConnectionCount),
+      manualReviewCount: number(cl1RoutePackage?.topologyCounts?.manualReviewCount),
+      rejectedCount: number(cl1RoutePackage?.topologyCounts?.rejectedCount),
+      unresolvedCount: number(cl1RoutePackage?.topologyCounts?.unresolvedCount),
+    },
+  };
+}
+
+export function summarizeUxmlCl1WorkbenchSummary(summary) {
+  if (!summary) return 'CL1 workbench summary was not built.';
+
+  return `CL1 workbench ${summary.overallStatus}. Blocks=${summary.blockedCount}, Warnings=${summary.warningCount}, NotRun=${summary.notRunCount}, Components=${summary.counts?.componentCount || 0}, Accepted=${summary.counts?.acceptedConnectionCount || 0}.`;
+}
+
+export const createUxmlCl1WorkbenchSummary = buildUxmlCl1WorkbenchSummary;
+```
+
+---
+
+# File 2
+
+```text
+viewer/tests/uxml-cl1-workbench-summary.test.js
+```
+
+```js
+import { describe, expect, it } from 'vitest';
+
+import {
+  UXML_CL1_WORKBENCH_STATUS,
+  buildUxmlCl1WorkbenchSummary,
+  createUxmlCl1WorkbenchSummary,
+  summarizeUxmlCl1WorkbenchSummary,
+} from '../uxml/UxmlCl1WorkbenchSummary.js';
+
+function topologyDecision(overrides = {}) {
+  return {
+    outputBridgeReady: true,
+    exportAllowed: true,
+    summary: {
+      acceptedConnectionCount: 5,
+      manualReviewCount: 0,
+      rejectedCount: 0,
+      unresolvedCount: 0,
+    },
+    ...overrides,
+  };
+}
+
+function routeHandoff(overrides = {}) {
+  return {
+    policy: {
+      allowed: true,
+      targetRoute: 'DIAGNOSTICS_ONLY',
+      targetRouteLabel: 'Diagnostics-only route',
+      masterOwner: 'NONE',
+      ...overrides,
+    },
+  };
+}
+
+function cl1Package(overrides = {}) {
+  return {
+    allowed: true,
+    packageId: 'cl1-12345678',
+    targetRoute: 'DIAGNOSTICS_ONLY',
+    entityCounts: {
+      componentCount: 10,
+      anchorCount: 20,
+      portCount: 20,
+      segmentCount: 9,
+    },
+    topologyCounts: {
+      acceptedConnectionCount: 5,
+      manualReviewCount: 0,
+      rejectedCount: 0,
+      unresolvedCount: 0,
+    },
+    routeContract: {
+      uxmlEmitsPcfDirectly: false,
+      uxmlMutatesCoordinates: false,
+      uxmlAppliesFixes: false,
+    },
+    ...overrides,
+  };
+}
+
+function snapshot(overrides = {}) {
+  return {
+    debugOnly: true,
+    snapshotId: 'cl1snap-12345678',
+    packageId: 'cl1-12345678',
+    pcfGenerated: false,
+    mastersResolved: false,
+    coordinatesMutated: false,
+    fixesApplied: false,
+    ...overrides,
+  };
+}
+
+function replay(overrides = {}) {
+  return {
+    replayReady: true,
+    summary: {
+      blockingIssueCount: 0,
+      warningCount: 0,
+    },
+    countSummary: {
+      componentCount: 10,
+      acceptedConnectionCount: 5,
+    },
+    pcfGenerated: false,
+    mastersResolved: false,
+    coordinatesMutated: false,
+    fixesApplied: false,
+    ...overrides,
+  };
+}
+
+describe('UxmlCl1WorkbenchSummary CL1-E', () => {
+  it('returns PASS when all CL1 stages are green', () => {
+    const summary = buildUxmlCl1WorkbenchSummary({
+      topologyDecision: topologyDecision(),
+      routeHandoff: routeHandoff(),
+      cl1RoutePackage: cl1Package(),
+      cl1Snapshot: snapshot(),
+      cl1ReplayValidation: replay(),
+    });
+
+    expect(summary.schema).toBe('uxml-cl1-workbench-summary/v1');
+    expect(summary.overallStatus).toBe(UXML_CL1_WORKBENCH_STATUS.PASS);
+    expect(summary.readyForRouteConsumption).toBe(true);
+    expect(summary.blockedCount).toBe(0);
+    expect(summary.warningCount).toBe(0);
+    expect(summary.notRunCount).toBe(0);
+    expect(summary.counts.componentCount).toBe(10);
+    expect(summary.counts.acceptedConnectionCount).toBe(5);
+  });
+
+  it('returns WARN when some stages have not run', () => {
+    const summary = buildUxmlCl1WorkbenchSummary({
+      topologyDecision: topologyDecision(),
+      routeHandoff: null,
+      cl1RoutePackage: null,
+      cl1Snapshot: null,
+      cl1ReplayValidation: null,
+    });
+
+    expect(summary.overallStatus).toBe(UXML_CL1_WORKBENCH_STATUS.WARN);
+    expect(summary.readyForRouteConsumption).toBe(false);
+    expect(summary.notRunCount).toBeGreaterThan(0);
+    expect(summary.stages.routeHandoff.status).toBe(UXML_CL1_WORKBENCH_STATUS.NOT_RUN);
+  });
+
+  it('returns WARN when manual review exists but bridge is ready', () => {
+    const summary = buildUxmlCl1WorkbenchSummary({
+      topologyDecision: topologyDecision({
+        exportAllowed: false,
+        summary: {
+          acceptedConnectionCount: 5,
+          manualReviewCount: 1,
+          rejectedCount: 0,
+          unresolvedCount: 0,
+        },
+      }),
+      routeHandoff: routeHandoff(),
+      cl1RoutePackage: cl1Package({
+        topologyCounts: {
+          acceptedConnectionCount: 5,
+          manualReviewCount: 1,
+          rejectedCount: 0,
+          unresolvedCount: 0,
+        },
+      }),
+      cl1Snapshot: snapshot(),
+      cl1ReplayValidation: replay(),
+    });
+
+    expect(summary.overallStatus).toBe(UXML_CL1_WORKBENCH_STATUS.WARN);
+    expect(summary.stages.decisionGate.status).toBe(UXML_CL1_WORKBENCH_STATUS.WARN);
+    expect(summary.counts.manualReviewCount).toBe(1);
+  });
+
+  it('returns BLOCKED when decision output bridge is not ready', () => {
+    const summary = buildUxmlCl1WorkbenchSummary({
+      topologyDecision: topologyDecision({
+        outputBridgeReady: false,
+        exportAllowed: false,
+      }),
+      routeHandoff: routeHandoff(),
+      cl1RoutePackage: cl1Package(),
+      cl1Snapshot: snapshot(),
+      cl1ReplayValidation: replay(),
+    });
+
+    expect(summary.overallStatus).toBe(UXML_CL1_WORKBENCH_STATUS.BLOCKED);
+    expect(summary.readyForRouteConsumption).toBe(false);
+    expect(summary.stages.decisionGate.status).toBe(UXML_CL1_WORKBENCH_STATUS.BLOCKED);
+  });
+
+  it('returns BLOCKED when route handoff is blocked', () => {
+    const summary = buildUxmlCl1WorkbenchSummary({
+      topologyDecision: topologyDecision(),
+      routeHandoff: {
+        policy: {
+          allowed: false,
+          targetRoute: 'DIAGNOSTICS_ONLY',
+          targetRouteLabel: 'Diagnostics-only route',
+          blockedReason: 'Blocked by test.',
+        },
+      },
+      cl1RoutePackage: cl1Package(),
+      cl1Snapshot: snapshot(),
+      cl1ReplayValidation: replay(),
+    });
+
+    expect(summary.overallStatus).toBe(UXML_CL1_WORKBENCH_STATUS.BLOCKED);
+    expect(summary.stages.routeHandoff.status).toBe(UXML_CL1_WORKBENCH_STATUS.BLOCKED);
+  });
+
+  it('returns BLOCKED when replay validator blocks', () => {
+    const summary = buildUxmlCl1WorkbenchSummary({
+      topologyDecision: topologyDecision(),
+      routeHandoff: routeHandoff(),
+      cl1RoutePackage: cl1Package(),
+      cl1Snapshot: snapshot(),
+      cl1ReplayValidation: replay({
+        replayReady: false,
+        summary: {
+          blockingIssueCount: 1,
+          warningCount: 0,
+        },
+      }),
+    });
+
+    expect(summary.overallStatus).toBe(UXML_CL1_WORKBENCH_STATUS.BLOCKED);
+    expect(summary.stages.cl1Replay.status).toBe(UXML_CL1_WORKBENCH_STATUS.BLOCKED);
+  });
+
+  it('returns BLOCKED when any safety flag is unsafe', () => {
+    const summary = buildUxmlCl1WorkbenchSummary({
+      topologyDecision: topologyDecision(),
+      routeHandoff: routeHandoff(),
+      cl1RoutePackage: cl1Package(),
+      cl1Snapshot: snapshot({
+        pcfGenerated: true,
+      }),
+      cl1ReplayValidation: replay(),
+    });
+
+    expect(summary.overallStatus).toBe(UXML_CL1_WORKBENCH_STATUS.BLOCKED);
+    expect(summary.safety.pcfGenerated).toBe(true);
+  });
+
+  it('summarizes compact QA status', () => {
+    const summary = buildUxmlCl1WorkbenchSummary({
+      topologyDecision: topologyDecision(),
+      routeHandoff: routeHandoff(),
+      cl1RoutePackage: cl1Package(),
+      cl1Snapshot: snapshot(),
+      cl1ReplayValidation: replay(),
+    });
+
+    const text = summarizeUxmlCl1WorkbenchSummary(summary);
+
+    expect(text).toContain('CL1 workbench PASS');
+    expect(text).toContain('Components=10');
+    expect(text).toContain('Accepted=5');
+  });
+
+  it('provides alias export', () => {
+    const summary = createUxmlCl1WorkbenchSummary({
+      topologyDecision: topologyDecision(),
+      routeHandoff: routeHandoff(),
+      cl1RoutePackage: cl1Package(),
+      cl1Snapshot: snapshot(),
+      cl1ReplayValidation: replay(),
+    });
+
+    expect(summary.schema).toBe('uxml-cl1-workbench-summary/v1');
+  });
+});
+```
+
+---
+
+# Patch — Universal XML Converter tab
+
+```text
+viewer/tabs/universal-xml-converter-tab.js
+```
+
+## 1. Import summary helpers
+
+```js
+import {
+  buildUxmlCl1WorkbenchSummary,
+  summarizeUxmlCl1WorkbenchSummary,
+} from '../uxml/UxmlCl1WorkbenchSummary.js';
+```
+
+## 2. Add state
+
+In initial state:
+
+```js
+cl1WorkbenchSummary: null,
+```
+
+Inside `pipeline`:
+
+```js
+cl1WorkbenchSummary: null,
+```
+
+Inside reports:
+
+```js
+'cl1-summary': null,
+```
+
+## 3. Add stage after `cl1-replay`
+
+```js
+{
+  id: 'cl1-summary',
+  title: '14. CL1 QA Summary',
+  description: 'One-screen status summary for decision, route handoff, CL1 package, snapshot and replay validation.',
+},
+```
+
+Then renumber later stages:
+
+```text
+15. Route Targets
+16. Masters by Target Route
+```
+
+## 4. Add action after `run-cl1-replay`
+
+```js
+if (action === 'run-cl1-summary') {
+  if (!state.pipeline.cl1ReplayValidation) runPipelineAction(state, 'run-cl1-replay');
+
+  const cl1WorkbenchSummary = buildUxmlCl1WorkbenchSummary({
+    topologyDecision: state.pipeline.topologyDecision,
+    routeHandoff: state.pipeline.routeHandoff,
+    cl1RoutePackage: state.pipeline.cl1RoutePackage,
+    cl1Snapshot: state.pipeline.cl1Snapshot,
+    cl1ReplayValidation: state.pipeline.cl1ReplayValidation,
+  });
+
+  state.pipeline.cl1WorkbenchSummary = cl1WorkbenchSummary;
+  state.cl1WorkbenchSummary = cl1WorkbenchSummary;
+  state.reports['cl1-summary'] = stageReport('cl1-summary', cl1WorkbenchSummary);
+
+  state.status = {
+    kind: cl1WorkbenchSummary.overallStatus === 'PASS'
+      ? 'ok'
+      : cl1WorkbenchSummary.overallStatus === 'WARN'
+        ? 'warn'
+        : 'error',
+    message: summarizeUxmlCl1WorkbenchSummary(cl1WorkbenchSummary),
+  };
+
+  return cl1WorkbenchSummary;
+}
+```
+
+## 5. Update full pipeline
+
+After:
+
+```js
+runPipelineAction(state, 'run-cl1-replay');
+```
+
+add:
+
+```js
+runPipelineAction(state, 'run-cl1-summary');
+```
+
+## 6. Add button mapping
+
+```js
+'cl1-summary': {
+  label: 'Build CL1 QA summary',
+  action: 'run-cl1-summary',
+},
+```
+
+## 7. Add panel
+
+```js
+if (panel === 'cl1-summary') {
+  const summary = state.pipeline.cl1WorkbenchSummary;
+
+  const statusStyle = summary?.overallStatus === 'PASS'
+    ? 'color:#7ddc9a;font-weight:800;'
+    : summary?.overallStatus === 'WARN'
+      ? 'color:#facc15;font-weight:800;'
+      : 'color:#fb7185;font-weight:800;';
+
+  const renderStage = stage => `
+    <div class="uxml-master-card">
+      <h4>${escapeHtml(stage.label)}</h4>
+      <div><b>Status:</b> ${escapeHtml(stage.status)}</div>
+      <div style="font-size:11px;color:#9aa9bd;margin-top:6px;">${escapeHtml(stage.message)}</div>
+    </div>
+  `;
+
+  return `
+    <section class="uxml-panel-section">
+      <h3>CL1 QA Summary</h3>
+      <p>
+        One-screen status for Decision Gate, Route Handoff, CL1 Package, Snapshot and Replay Validation.
+        This is read-only QA status.
+      </p>
+
+      ${summary ? `
+        <div class="uxml-kv-grid">
+          <div><b>Overall status</b><span style="${statusStyle}">${escapeHtml(summary.overallStatus)}</span></div>
+          <div><b>Ready for route consumption</b><span>${summary.readyForRouteConsumption ? 'YES' : 'NO'}</span></div>
+          <div><b>Blocked / warning / not-run</b><span>${safeCount(summary.blockedCount)} / ${safeCount(summary.warningCount)} / ${safeCount(summary.notRunCount)}</span></div>
+          <div><b>Components</b><span>${safeCount(summary.counts?.componentCount)}</span></div>
+          <div><b>Anchors</b><span>${safeCount(summary.counts?.anchorCount)}</span></div>
+          <div><b>Ports</b><span>${safeCount(summary.counts?.portCount)}</span></div>
+          <div><b>Segments</b><span>${safeCount(summary.counts?.segmentCount)}</span></div>
+          <div><b>Accepted topology</b><span>${safeCount(summary.counts?.acceptedConnectionCount)}</span></div>
+          <div><b>Manual / rejected / unresolved</b><span>${safeCount(summary.counts?.manualReviewCount)} / ${safeCount(summary.counts?.rejectedCount)} / ${safeCount(summary.counts?.unresolvedCount)}</span></div>
+        </div>
+
+        <div class="uxml-master-placeholder-grid" style="margin-top:12px;">
+          ${Object.values(summary.stages).map(renderStage).join('')}
+        </div>
+
+        <div class="uxml-placeholder" style="margin-top:12px;">
+          <b>Safety summary:</b><br>
+          PCF generated: ${summary.safety?.pcfGenerated ? 'YES' : 'NO'}<br>
+          Masters resolved: ${summary.safety?.mastersResolved ? 'YES' : 'NO'}<br>
+          Coordinates mutated: ${summary.safety?.coordinatesMutated ? 'YES' : 'NO'}<br>
+          Fixes applied: ${summary.safety?.fixesApplied ? 'YES' : 'NO'}
+        </div>
+      ` : `
+        <div class="uxml-placeholder">Run CL1 replay validator, then build CL1 QA summary.</div>
+      `}
+    </section>
+  `;
+}
+```
+
+---
+
+# Test additions
+
+In:
+
+```text
+viewer/tests/universal-xml-converter-tab.test.js
+```
+
+Add:
+
+```js
+it('exposes CL1 QA summary stage after replay validator', () => {
+  const stageIds = PIPELINE_STAGES.map(stage => stage.id);
+
+  expect(stageIds).toContain('cl1-replay');
+  expect(stageIds).toContain('cl1-summary');
+
+  expect(stageIds.indexOf('cl1-summary')).toBeGreaterThan(stageIds.indexOf('cl1-replay'));
+});
+
+it('keeps CL1 QA summary wording read-only and separate from PCF export', () => {
+  const html = renderUniversalXmlConverterTab();
+
+  expect(html).toContain('CL1 QA Summary');
+  expect(html).toContain('One-screen status');
+  expect(html).toContain('read-only QA status');
+  expect(html).not.toContain('Masters deferred');
+});
+```
+
+---
+
+# Certification update
+
+Add module:
+
+```js
+'viewer/uxml/UxmlCl1WorkbenchSummary.js',
+```
+
+Add test:
+
+```js
+'viewer/tests/uxml-cl1-workbench-summary.test.js',
+```
+
+Add export marker:
+
+```js
+{
+  file: 'viewer/uxml/UxmlCl1WorkbenchSummary.js',
+  markers: [
+    'buildUxmlCl1WorkbenchSummary',
+    'summarizeUxmlCl1WorkbenchSummary',
+    'createUxmlCl1WorkbenchSummary',
+  ],
+},
+```
+
+Add workflow test:
+
+```bash
+viewer/tests/uxml-cl1-workbench-summary.test.js
+```
+
+---
+
+# Required verification
+
+```bash
+npx vitest run \
+  viewer/tests/uxml-cl1-route-package.test.js \
+  viewer/tests/uxml-cl1-package-snapshot.test.js \
+  viewer/tests/uxml-cl1-snapshot-replay-validator.test.js \
+  viewer/tests/uxml-cl1-workbench-summary.test.js \
+  viewer/tests/universal-xml-converter-tab.test.js
+```
+
+Then:
+
+```bash
+node tools/uxml-certification.mjs
+```
+
+---
+
+# CL1-E hard pass gate
+
+```text
+cl1WorkbenchSummaryModuleExists = true
+cl1WorkbenchSummaryTestExists = true
+cl1SummaryStageVisible = true
+cl1SummaryActionExists = true
+fullPipelineRunsCl1Summary = true
+
+decisionGateStatusIncluded = true
+routeHandoffStatusIncluded = true
+cl1PackageStatusIncluded = true
+cl1SnapshotStatusIncluded = true
+cl1ReplayStatusIncluded = true
+
+overallStatusPassWarnBlocked = true
+safetySummaryIncluded = true
+oneScreenQaPanelRenders = true
+
+readOnlyQaStatus = true
+pcfGenerated = false
+mastersResolved = false
+coordinatesMutated = false
+fixesApplied = false
+
+xmlInputMapperTouched = false
+uxmlNormalizerTouched = false
+uxmlProfileDetectorTouched = false
+pcfWriterTouched = false
+masterMappersTouched = false
+rvmJsonPcfBridgeTouched = false
+topologyBuildersTouched = false
+```
+
+Next after CL1-E:
+
+```text
+CL1-F — CL1 End-to-End Workbench Smoke Test
+```
+
+That should run the whole CL1 chain in one test: RouteHandoff → CL1 Package → Snapshot → Replay → QA Summary, using a small fixture.
+------------------------
+
+Next for CL1:
+
+```text
+CL1-F — CL1 End-to-End Workbench Smoke Test
+```
+
+This is a **test-only certification agent**. It should prove the whole CL1 chain works together, without adding new runtime features.
+
+```text
+DecisionGate
+  ↓
+RouteHandoffPolicy
+  ↓
+CL1 Route Package
+  ↓
+CL1 Snapshot
+  ↓
+CL1 Replay Validator
+  ↓
+CL1 QA Summary
+```
+
+Also, for your earlier JSON → PCF concern: this CL1-F test is still **standalone UXML workbench validation**. The JSON/RVM → PCF route must remain separately tested in the existing Extract PCF tab flow:
+
+```text
+JSON/RVM rows
+  ↓
+Topology mode = UXML topology
+  ↓
+UXML topology generation only
+  ↓
+push topology evidence back to legacy rows/readinessGate
+  ↓
+existing master resolution
+  ↓
+existing PCF generator
+```
+
+Do not let CL1 become a PCF writer.
+
+---
+
+# CL1-F Agent Prompt
+
+```text
+You are CL1-F Agent for PCF_GLB_Viewer_Conv.
+
+Task:
+Add a CL1 end-to-end workbench smoke test.
+
+Purpose:
+Prove the full CL1 chain works together:
+1. Route handoff policy
+2. CL1 route package
+3. CL1 snapshot
+4. CL1 replay validator
+5. CL1 QA summary
+
+Add:
+- viewer/tests/uxml-cl1-workbench-e2e.test.js
+
+Patch:
+- tools/uxml-certification.mjs
+- .github/workflows/uxml-certification.yml
+
+Do not touch:
+- Universal XML tab runtime
+- XML/InputXML mapper files
+- UxmlNormalizer.js
+- UxmlProfileDetector.js
+- PCF writer/emitter
+- master mapper files
+- RVM/JSON → PCF bridge modules
+- topology builders
+
+Important:
+This is a test-only smoke certification.
+It must not generate PCF.
+It must not resolve masters.
+It must not mutate coordinates.
+It must not apply topology fixes.
+```
+
+---
+
+# File
+
+```text
+viewer/tests/uxml-cl1-workbench-e2e.test.js
+```
+
+```js
+import { describe, expect, it } from 'vitest';
+
+import {
+  UXML_ROUTE_TARGETS,
+  evaluateUxmlRouteHandoffPolicy,
+} from '../uxml/UxmlRouteHandoffPolicy.js';
+
+import {
+  createUxmlCl1RoutePackage,
+} from '../uxml/UxmlCl1RoutePackage.js';
+
+import {
+  buildUxmlCl1PackageSnapshot,
+  serializeUxmlCl1PackageSnapshot,
+} from '../uxml/UxmlCl1PackageSnapshot.js';
+
+import {
+  validateUxmlCl1SnapshotReplay,
+} from '../uxml/UxmlCl1SnapshotReplayValidator.js';
+
+import {
+  UXML_CL1_WORKBENCH_STATUS,
+  buildUxmlCl1WorkbenchSummary,
+} from '../uxml/UxmlCl1WorkbenchSummary.js';
+
+function uxmlFixture() {
+  return {
+    schema: 'uxml/v1',
+    sources: [
+      {
+        id: 'SRC-1',
+        format: 'UXML',
+        name: 'cl1-e2e-fixture.xml',
+      },
+    ],
+    pipelines: [
+      {
+        id: 'PL-1',
+        pipelineRef: '/CL1-E2E',
+        lineNo: 'L-CL1-E2E',
+      },
+    ],
+    components: [
+      {
+        id: 'PIPE-1',
+        type: 'PIPE',
+        normalizedType: 'PIPE',
+        pipelineRef: '/CL1-E2E',
+        refNo: 'REF-P1',
+        seqNo: '10',
+      },
+      {
+        id: 'VALVE-1',
+        type: 'VALVE',
+        normalizedType: 'VALVE',
+        pipelineRef: '/CL1-E2E',
+        refNo: 'REF-V1',
+        seqNo: '20',
+      },
+      {
+        id: 'PIPE-2',
+        type: 'PIPE',
+        normalizedType: 'PIPE',
+        pipelineRef: '/CL1-E2E',
+        refNo: 'REF-P2',
+        seqNo: '30',
+      },
+    ],
+    anchors: [
+      { id: 'A-PIPE-1-EP1', componentId: 'PIPE-1', role: 'EP1', point: { x: 0, y: 0, z: 0 } },
+      { id: 'A-PIPE-1-EP2', componentId: 'PIPE-1', role: 'EP2', point: { x: 1000, y: 0, z: 0 } },
+      { id: 'A-VALVE-1-EP1', componentId: 'VALVE-1', role: 'EP1', point: { x: 1000, y: 0, z: 0 } },
+      { id: 'A-VALVE-1-EP2', componentId: 'VALVE-1', role: 'EP2', point: { x: 1200, y: 0, z: 0 } },
+      { id: 'A-PIPE-2-EP1', componentId: 'PIPE-2', role: 'EP1', point: { x: 1200, y: 0, z: 0 } },
+      { id: 'A-PIPE-2-EP2', componentId: 'PIPE-2', role: 'EP2', point: { x: 2200, y: 0, z: 0 } },
+    ],
+    ports: [
+      { id: 'P-PIPE-1-1', componentId: 'PIPE-1', anchorId: 'A-PIPE-1-EP1', role: 'PIPE_END_1' },
+      { id: 'P-PIPE-1-2', componentId: 'PIPE-1', anchorId: 'A-PIPE-1-EP2', role: 'PIPE_END_2' },
+      { id: 'P-VALVE-1-1', componentId: 'VALVE-1', anchorId: 'A-VALVE-1-EP1', role: 'VALVE_END_1' },
+      { id: 'P-VALVE-1-2', componentId: 'VALVE-1', anchorId: 'A-VALVE-1-EP2', role: 'VALVE_END_2' },
+      { id: 'P-PIPE-2-1', componentId: 'PIPE-2', anchorId: 'A-PIPE-2-EP1', role: 'PIPE_END_1' },
+      { id: 'P-PIPE-2-2', componentId: 'PIPE-2', anchorId: 'A-PIPE-2-EP2', role: 'PIPE_END_2' },
+    ],
+    segments: [
+      { id: 'S-PIPE-1', componentId: 'PIPE-1', startAnchorId: 'A-PIPE-1-EP1', endAnchorId: 'A-PIPE-1-EP2' },
+      { id: 'S-VALVE-1', componentId: 'VALVE-1', startAnchorId: 'A-VALVE-1-EP1', endAnchorId: 'A-VALVE-1-EP2' },
+      { id: 'S-PIPE-2', componentId: 'PIPE-2', startAnchorId: 'A-PIPE-2-EP1', endAnchorId: 'A-PIPE-2-EP2' },
+    ],
+    supports: [],
+    mappings: [],
+    diagnostics: [],
+    lossContract: [],
+  };
+}
+
+function topologyDecisionFixture() {
+  return {
+    schema: 'uxml-topology-decision-gate/v1',
+    outputBridgeReady: true,
+    exportAllowed: true,
+    summary: {
+      acceptedConnectionCount: 2,
+      agreementAcceptedCount: 2,
+      universalOnlyAcceptedCount: 0,
+      rayPromotionAcceptedCount: 0,
+      faceProximityAcceptedCount: 0,
+      manualReviewCount: 0,
+      rejectedCount: 0,
+      unresolvedCount: 0,
+      diagnosticCount: 0,
+    },
+    acceptedConnections: [
+      {
+        id: 'TD-ACCEPT-001',
+        source: 'UNIVERSAL_RAY_AGREEMENT',
+        decision: 'ACCEPT',
+        confidence: 'HIGH',
+        sourceComponentId: 'PIPE-1',
+        targetComponentId: 'VALVE-1',
+        exportReady: true,
+      },
+      {
+        id: 'TD-ACCEPT-002',
+        source: 'UNIVERSAL_RAY_AGREEMENT',
+        decision: 'ACCEPT',
+        confidence: 'HIGH',
+        sourceComponentId: 'VALVE-1',
+        targetComponentId: 'PIPE-2',
+        exportReady: true,
+      },
+    ],
+  };
+}
+
+function acceptedTopologyHandoffFixture() {
+  return {
+    schema: 'rvm-pcf-accepted-topology-handoff/v1',
+    handoffConnections: [
+      {
+        id: 'H-001',
+        sourceComponentId: 'PIPE-1',
+        targetComponentId: 'VALVE-1',
+      },
+      {
+        id: 'H-002',
+        sourceComponentId: 'VALVE-1',
+        targetComponentId: 'PIPE-2',
+      },
+    ],
+    byComponentId: {
+      'PIPE-1': [{ id: 'H-001' }],
+      'VALVE-1': [{ id: 'H-001' }, { id: 'H-002' }],
+      'PIPE-2': [{ id: 'H-002' }],
+    },
+    summary: {
+      handoffConnectionCount: 2,
+      annotatedRowCount: 3,
+      totalRowCount: 3,
+      pipelineCount: 1,
+      coordinatesMutated: false,
+      legacyRoutingContinues: true,
+      mastersDeferredToLegacyRoute: true,
+      pcfEmitterDeferredToLegacyRoute: true,
+    },
+  };
+}
+
+describe('CL1 workbench E2E smoke', () => {
+  it('runs RouteHandoff → CL1 Package → Snapshot → Replay → QA Summary', () => {
+    const uxml = uxmlFixture();
+    const topologyDecision = topologyDecisionFixture();
+    const acceptedTopologyHandoff = acceptedTopologyHandoffFixture();
+
+    const beforeUxml = JSON.stringify(uxml);
+    const beforeDecision = JSON.stringify(topologyDecision);
+    const beforeHandoff = JSON.stringify(acceptedTopologyHandoff);
+
+    const routeHandoff = evaluateUxmlRouteHandoffPolicy({
+      targetRoute: UXML_ROUTE_TARGETS.EXTRACT_PCF_LEGACY,
+      uxml,
+      topologyDecision,
+      acceptedTopologyHandoff,
+      diagnostics: uxml.diagnostics,
+      lossContract: uxml.lossContract,
+      allowPartialExport: false,
+    });
+
+    expect(routeHandoff.allowed).toBe(true);
+    expect(routeHandoff.targetRoute).toBe(UXML_ROUTE_TARGETS.EXTRACT_PCF_LEGACY);
+    expect(routeHandoff.masterOwner).toBe('LEGACY_PCF_ROUTE');
+    expect(routeHandoff.routeContract.uxmlEmitsPcfDirectly).toBe(false);
+    expect(routeHandoff.routeContract.uxmlMutatesCoordinates).toBe(false);
+    expect(routeHandoff.routeContract.uxmlAppliesFixes).toBe(false);
+
+    const cl1Package = createUxmlCl1RoutePackage({
+      targetRoute: UXML_ROUTE_TARGETS.EXTRACT_PCF_LEGACY,
+      uxml,
+      topologyDecision,
+      acceptedTopologyHandoff,
+      diagnostics: uxml.diagnostics,
+      lossContract: uxml.lossContract,
+      allowPartialExport: false,
+      sourceInfo: {
+        sourceFile: 'cl1-e2e-fixture.xml',
+        selectedSourceType: 'UXML',
+        detectedSourceType: 'UXML',
+        profile: 'UXML',
+      },
+    });
+
+    expect(cl1Package.allowed).toBe(true);
+    expect(cl1Package.packageId).toMatch(/^cl1-/);
+    expect(cl1Package.entityCounts.componentCount).toBe(3);
+    expect(cl1Package.entityCounts.anchorCount).toBe(6);
+    expect(cl1Package.entityCounts.portCount).toBe(6);
+    expect(cl1Package.entityCounts.segmentCount).toBe(3);
+    expect(cl1Package.topologyCounts.acceptedConnectionCount).toBe(2);
+    expect(cl1Package.handoffSummary.handoffConnectionCount).toBe(2);
+
+    const snapshot = buildUxmlCl1PackageSnapshot(cl1Package, {
+      includePayload: false,
+      includeDiagnostics: true,
+      includeLossContract: true,
+    });
+
+    expect(snapshot.schema).toBe('uxml-cl1-package-snapshot/v1');
+    expect(snapshot.snapshotId).toMatch(/^cl1snap-/);
+    expect(snapshot.debugOnly).toBe(true);
+    expect(snapshot.pcfGenerated).toBe(false);
+    expect(snapshot.mastersResolved).toBe(false);
+    expect(snapshot.coordinatesMutated).toBe(false);
+    expect(snapshot.fixesApplied).toBe(false);
+    expect(snapshot.payloadIncluded).toBe(false);
+
+    const snapshotText = serializeUxmlCl1PackageSnapshot(snapshot);
+    const replay = validateUxmlCl1SnapshotReplay(snapshotText);
+
+    expect(replay.schema).toBe('uxml-cl1-snapshot-replay-validator/v1');
+    expect(replay.replayReady).toBe(true);
+    expect(replay.summary.blockingIssueCount).toBe(0);
+    expect(replay.countSummary.componentCount).toBe(3);
+    expect(replay.countSummary.acceptedConnectionCount).toBe(2);
+
+    const qaSummary = buildUxmlCl1WorkbenchSummary({
+      topologyDecision,
+      routeHandoff,
+      cl1RoutePackage: cl1Package,
+      cl1Snapshot: snapshot,
+      cl1ReplayValidation: replay,
+    });
+
+    expect(qaSummary.schema).toBe('uxml-cl1-workbench-summary/v1');
+    expect(qaSummary.overallStatus).toBe(UXML_CL1_WORKBENCH_STATUS.PASS);
+    expect(qaSummary.readyForRouteConsumption).toBe(true);
+    expect(qaSummary.blockedCount).toBe(0);
+    expect(qaSummary.warningCount).toBe(0);
+    expect(qaSummary.notRunCount).toBe(0);
+
+    expect(qaSummary.stages.decisionGate.status).toBe('PASS');
+    expect(qaSummary.stages.routeHandoff.status).toBe('PASS');
+    expect(qaSummary.stages.cl1Package.status).toBe('PASS');
+    expect(qaSummary.stages.cl1Snapshot.status).toBe('PASS');
+    expect(qaSummary.stages.cl1Replay.status).toBe('PASS');
+
+    expect(qaSummary.safety.pcfGenerated).toBe(false);
+    expect(qaSummary.safety.mastersResolved).toBe(false);
+    expect(qaSummary.safety.coordinatesMutated).toBe(false);
+    expect(qaSummary.safety.fixesApplied).toBe(false);
+
+    expect(JSON.stringify(uxml)).toBe(beforeUxml);
+    expect(JSON.stringify(topologyDecision)).toBe(beforeDecision);
+    expect(JSON.stringify(acceptedTopologyHandoff)).toBe(beforeHandoff);
+  });
+
+  it('turns unsafe snapshot into BLOCKED QA summary', () => {
+    const uxml = uxmlFixture();
+    const topologyDecision = topologyDecisionFixture();
+    const acceptedTopologyHandoff = acceptedTopologyHandoffFixture();
+
+    const routeHandoff = evaluateUxmlRouteHandoffPolicy({
+      targetRoute: UXML_ROUTE_TARGETS.EXTRACT_PCF_LEGACY,
+      uxml,
+      topologyDecision,
+      acceptedTopologyHandoff,
+      allowPartialExport: false,
+    });
+
+    const cl1Package = createUxmlCl1RoutePackage({
+      targetRoute: UXML_ROUTE_TARGETS.EXTRACT_PCF_LEGACY,
+      uxml,
+      topologyDecision,
+      acceptedTopologyHandoff,
+      allowPartialExport: false,
+    });
+
+    const snapshot = buildUxmlCl1PackageSnapshot(cl1Package);
+    snapshot.pcfGenerated = true;
+
+    const replay = validateUxmlCl1SnapshotReplay(snapshot);
+
+    expect(replay.replayReady).toBe(false);
+
+    const qaSummary = buildUxmlCl1WorkbenchSummary({
+      topologyDecision,
+      routeHandoff,
+      cl1RoutePackage: cl1Package,
+      cl1Snapshot: snapshot,
+      cl1ReplayValidation: replay,
+    });
+
+    expect(qaSummary.overallStatus).toBe(UXML_CL1_WORKBENCH_STATUS.BLOCKED);
+    expect(qaSummary.readyForRouteConsumption).toBe(false);
+    expect(qaSummary.safety.pcfGenerated).toBe(true);
+    expect(qaSummary.stages.cl1Replay.status).toBe('BLOCKED');
+  });
+});
+```
+
+---
+
+# Certification update
+
+Add test:
+
+```js
+'viewer/tests/uxml-cl1-workbench-e2e.test.js',
+```
+
+No new module for CL1-F.
+
+Add workflow test:
+
+```bash
+viewer/tests/uxml-cl1-workbench-e2e.test.js
+```
+
+---
+
+# Required verification
+
+```bash
+npx vitest run \
+  viewer/tests/uxml-route-handoff-policy.test.js \
+  viewer/tests/uxml-cl1-route-package.test.js \
+  viewer/tests/uxml-cl1-package-snapshot.test.js \
+  viewer/tests/uxml-cl1-snapshot-replay-validator.test.js \
+  viewer/tests/uxml-cl1-workbench-summary.test.js \
+  viewer/tests/uxml-cl1-workbench-e2e.test.js
+```
+
+Then:
+
+```bash
+node tools/uxml-certification.mjs
+```
+
+---
+
+# CL1-F hard pass gate
+
+```text
+cl1WorkbenchE2eTestExists = true
+
+routeHandoffRuns = true
+cl1PackageRuns = true
+cl1SnapshotRuns = true
+cl1ReplayRuns = true
+cl1QaSummaryRuns = true
+
+overallStatusPassForGreenFlow = true
+overallStatusBlockedForUnsafeSnapshot = true
+
+legacyPcfRoutePreservesLegacyMasterOwner = true
+uxmlEmitsPcfDirectly = false
+pcfGenerated = false
+mastersResolved = false
+coordinatesMutated = false
+fixesApplied = false
+
+inputsNotMutated = true
+
+xmlInputMapperTouched = false
+uxmlNormalizerTouched = false
+uxmlProfileDetectorTouched = false
+pcfWriterTouched = false
+masterMappersTouched = false
+rvmJsonPcfBridgeTouched = false
+topologyBuildersTouched = false
+```
+
+Next after CL1-F should not be another CL1 internal layer. Next should be:
+
+```text
+RJP-1 — JSON/RVM → PCF UXML Topology Roundtrip Contract Test
+```
+
+That will directly validate your key requirement:
+
+```text
+Topology mode = UXML topology
+  → only topology built through UXML
+  → topology evidence returns to JSON/RVM → PCF route
+  → existing master resolution continues
+  → existing PCF generation/export remains the owner
+```
+
+
+----------------------------
+
+
+

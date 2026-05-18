@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D Viewer — Canvas & Geometry Theme Analysis</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --page-bg:    #070c14;
+  --card-bg:    #0c1220;
+  --card-bg2:   #0f1728;
+  --card-bdr:   rgba(255,255,255,0.07);
+  --text:       #b8cce0;
+  --text-dim:   #4e6a84;
+  --text-hi:    #dceeff;
+  --mono:       'Consolas','Courier New',monospace;
+  --accent:     #4a9eff;
+  --pass:       #4ade80; --pass-bg: rgba(74,222,128,0.1);
+  --warn:       #f0c840; --warn-bg: rgba(240,200,64,0.1);
+  --fail:       #f07070; --fail-bg: rgba(240,112,112,0.1);
+  --info:       #60b8ff; --info-bg: rgba(96,184,255,0.1);
+  --font: 'Inter', system-ui, sans-serif;
+  --r: 8px;
+}
+*,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { font-family: var(--font); font-size: 12px; background: var(--page-bg); color: var(--text); min-height: 100vh; }
+
+/* ── Page header ───────────────────────────────── */
+#page-header {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(7,12,20,0.92); backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--card-bdr);
+  padding: 12px 40px;
+  display: flex; align-items: center; gap: 20px;
+}
+.ph-title { font-size: 13px; font-weight: 700; color: var(--text-hi); letter-spacing: 0.01em; }
+.ph-sub   { font-size: 10px; color: var(--text-dim); margin-top: 1px; }
+.ph-pills { display: flex; gap: 6px; margin-left: auto; }
+.pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 9px; border-radius: 999px;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
+  border: 1px solid;
+}
+.pill-blue { background: var(--info-bg); border-color: rgba(96,184,255,0.3); color: var(--info); }
+.pill-rec  { background: rgba(74,222,128,0.1); border-color: rgba(74,222,128,0.3); color: var(--pass); }
+.pill-opt  { background: rgba(74,158,255,0.1); border-color: rgba(74,158,255,0.25); color: #7ab8ff; }
+
+/* ── Content ───────────────────────────────────── */
+#content { max-width: 1280px; margin: 0 auto; padding: 40px; display: flex; flex-direction: column; gap: 48px; }
+
+/* ── Section ───────────────────────────────────── */
+.section-title {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-dim); margin-bottom: 16px; display: flex; align-items: center; gap: 10px;
+}
+.section-title::after { content:''; flex:1; height:1px; background:var(--card-bdr); }
+
+/* ── Cards ─────────────────────────────────────── */
+.card {
+  background: var(--card-bg); border: 1px solid var(--card-bdr);
+  border-radius: var(--r); padding: 20px; overflow: hidden;
+}
+.card-title {
+  font-size: 11px; font-weight: 700; color: var(--text-hi);
+  margin-bottom: 4px; display: flex; align-items: center; gap: 8px;
+}
+.card-desc { font-size: 11px; color: var(--text-dim); line-height: 1.5; margin-bottom: 16px; }
+.badge {
+  display: inline-flex; align-items: center; padding: 2px 7px;
+  border-radius: 999px; font-size: 9px; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; border: 1px solid;
+}
+.badge-rec  { background: var(--pass-bg); border-color: rgba(74,222,128,0.35); color: var(--pass); }
+.badge-opt  { background: var(--info-bg); border-color: rgba(96,184,255,0.3); color: var(--info); }
+.badge-curr { background: rgba(255,255,255,0.04); border-color: var(--card-bdr); color: var(--text-dim); }
+.badge-warn { background: var(--warn-bg); border-color: rgba(240,200,64,0.3); color: var(--warn); }
+
+/* ── Mini viewer ────────────────────────────────── */
+.mini-viewer-group { display: flex; gap: 16px; }
+.mini-viewer-wrap  { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.mini-viewer-label { font-size: 9px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-dim); }
+.mini-viewer {
+  border-radius: 5px; overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.1);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+.mini-ribbon {
+  height: 22px; display: flex; align-items: center; gap: 3px; padding: 0 7px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.m-btn {
+  width: 26px; height: 13px; border-radius: 3px;
+  border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.06);
+}
+.m-btn.act { border-color: rgba(74,158,255,0.5); }
+.m-sep { width: 1px; height: 12px; background: rgba(255,255,255,0.08); margin: 0 2px; }
+.mini-body { display: flex; }
+.mini-left  { width: 20px; flex-shrink: 0; border-right: 1px solid rgba(255,255,255,0.05); }
+.mini-right { width: 52px; flex-shrink: 0; border-left: 1px solid rgba(255,255,255,0.05); display: flex; flex-direction: column; }
+.mini-right-tab { height: 16px; border-bottom: 1px solid rgba(255,255,255,0.05); padding: 0 4px; display: flex; align-items: center; }
+.mini-right-tab-bar { height: 8px; border-radius: 2px; background: rgba(255,255,255,0.06); width: 80%; }
+.mini-right-row { height: 10px; border-bottom: 1px solid rgba(255,255,255,0.03); margin: 0 4px; display: flex; align-items: center; gap: 2px; }
+.mini-right-dot { width: 4px; height: 4px; border-radius: 50%; }
+.mini-right-line { height: 3px; border-radius: 1px; background: rgba(255,255,255,0.05); flex: 1; }
+.mini-canvas { flex: 1; overflow: hidden; position: relative; }
+.mini-canvas svg { display: block; width: 100%; height: 130px; }
+.mini-status {
+  height: 15px; display: flex; align-items: center; padding: 0 7px; gap: 7px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.mini-chip {
+  height: 9px; border-radius: 999px; padding: 0 5px;
+  font-size: 7px; font-weight: 700; letter-spacing: 0.04em;
+  display: flex; align-items: center; text-transform: uppercase;
+  border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.04);
+}
+.mini-coords { font-family: var(--mono); font-size: 7px; opacity: 0.35; }
+.mini-note {
+  font-size: 9px; color: var(--warn); background: var(--warn-bg);
+  border: 1px solid rgba(240,200,64,0.2); border-radius: 4px;
+  padding: 4px 8px; line-height: 1.4; margin-top: 4px;
+}
+
+/* ── Two-col layout ─────────────────────────────── */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+.diff-row { display: flex; gap: 12px; align-items: flex-start; margin-top: 16px; flex-wrap: wrap; }
+.diff-item { flex: 1; min-width: 180px; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--card-bdr); background: var(--card-bg2); }
+.diff-key { font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 4px; }
+.diff-val { font-size: 11px; color: var(--text-hi); font-family: var(--mono); }
+.diff-val.mismatch { color: var(--warn); }
+
+/* ── Contrast table ─────────────────────────────── */
+.ct-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.ct-table th { text-align: left; padding: 6px 10px; font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); border-bottom: 1px solid var(--card-bdr); }
+.ct-table td { padding: 7px 10px; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }
+.ct-table tr:hover td { background: rgba(255,255,255,0.02); }
+.ct-table tr.highlight td { background: rgba(240,200,64,0.05); }
+.swatch { width: 24px; height: 24px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.15); display: inline-block; flex-shrink: 0; }
+.swatch-wrap { display: flex; align-items: center; gap: 8px; }
+.hex-tag { font-family: var(--mono); font-size: 10px; color: var(--text-dim); }
+.cr-badge { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 700; font-family: var(--mono); border: 1px solid; min-width: 46px; justify-content: center; }
+.cr-aaa  { background: rgba(74,222,128,0.12); border-color: rgba(74,222,128,0.3); color: #4ade80; }
+.cr-aa   { background: rgba(96,184,255,0.1);  border-color: rgba(96,184,255,0.25); color: #60b8ff; }
+.cr-warn { background: var(--warn-bg); border-color: rgba(240,200,64,0.3); color: var(--warn); }
+.note-tag { font-size: 9px; color: var(--warn); font-style: italic; }
+.target-range { font-size: 9px; padding: 3px 7px; background: rgba(255,255,255,0.03); border: 1px dashed rgba(255,255,255,0.12); border-radius: 4px; color: var(--text-dim); white-space: nowrap; }
+
+/* ── Palette grid ───────────────────────────────── */
+.palette-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 6px; margin-top: 12px; }
+.pal-cell { display: flex; flex-direction: column; gap: 4px; }
+.pal-swatch { height: 32px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.1); }
+.pal-type { font-size: 8px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); text-align: center; }
+.pal-hex  { font-size: 8px; font-family: var(--mono); color: var(--text-dim); text-align: center; line-height: 1.2; }
+.pal-cr   { display: flex; justify-content: center; }
+
+/* ── Token table ────────────────────────────────── */
+.tok-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.tok-table th { text-align: left; padding: 5px 8px; font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); border-bottom: 1px solid var(--card-bdr); }
+.tok-table td { padding: 5px 8px; border-bottom: 1px solid rgba(255,255,255,0.03); vertical-align: middle; font-family: var(--mono); font-size: 10px; }
+.tok-table .tok-name { color: var(--accent); font-size: 10px; }
+.tok-table .tok-val  { color: var(--text-dim); }
+.tok-table .tok-new  { color: var(--pass); }
+.tok-table .tok-diff { background: rgba(240,200,64,0.06); }
+.tok-group { font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); padding: 8px 8px 4px; display: table-row; }
+.color-dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; margin-right: 4px; vertical-align: middle; border: 1px solid rgba(255,255,255,0.12); }
+
+/* ── Changes list ───────────────────────────────── */
+.changes { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.change-item { display: flex; align-items: baseline; gap: 6px; font-size: 10px; }
+.change-item::before { content:'→'; color: var(--accent); font-weight: 700; flex-shrink: 0; }
+.change-item.new::before { content:'+'; color: var(--pass); }
+
+/* ── Impl notes ─────────────────────────────────── */
+.impl-card { padding: 14px 16px; border-radius: 6px; border: 1px solid var(--card-bdr); background: var(--card-bg2); }
+.impl-card-title { font-size: 10px; font-weight: 700; color: var(--text-hi); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+.impl-file { font-family: var(--mono); font-size: 10px; color: var(--accent); margin-bottom: 2px; }
+.impl-item { font-size: 10px; color: var(--text); padding: 2px 0; line-height: 1.45; }
+.impl-item b { color: var(--text-hi); }
+.effort-chip { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 9px; font-weight: 700; letter-spacing: 0.04em; }
+.effort-low  { background: var(--pass-bg); border: 1px solid rgba(74,222,128,0.3); color: var(--pass); }
+.effort-med  { background: var(--warn-bg); border: 1px solid rgba(240,200,64,0.3); color: var(--warn); }
+
+@media (max-width: 900px) {
+  .three-col { grid-template-columns: 1fr; }
+  .two-col   { grid-template-columns: 1fr; }
+  #content   { padding: 24px 16px; }
+}
+</style>
+</head>
+<body>
+
+<div id="page-header">
+  <div>
+    <div class="ph-title">3D Viewer — Canvas &amp; Geometry Theme Analysis</div>
+    <div class="ph-sub">PCF Viewer · RVM Viewer · Unified Token Proposal · May 2026</div>
+  </div>
+  <div class="ph-pills">
+    <span class="pill pill-blue">2 Viewers Audited</span>
+    <span class="pill pill-blue">9 Component Types</span>
+    <span class="pill pill-rec">3 Themes Proposed</span>
+  </div>
+</div>
+
+<div id="content"></div>
+
+<script>
+/* ── Utilities ─────────────────────────────────────────────── */
+function lin(c) { c/=255; return c<=0.04045 ? c/12.92 : Math.pow((c+0.055)/1.055,2.4); }
+function lum(hex) {
+  if(!hex||hex[0]!=='#') return 0;
+  const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+  return 0.2126*lin(r)+0.7152*lin(g)+0.0722*lin(b);
+}
+function cr(fg,bg) {
+  const l1=lum(fg),l2=lum(bg);
+  const hi=Math.max(l1,l2),lo=Math.min(l1,l2);
+  return ((hi+0.05)/(lo+0.05)).toFixed(1);
+}
+function crGrade(ratio) {
+  const r=parseFloat(ratio);
+  if(r>=7)  return 'aaa';
+  if(r>=4.5)return 'aa';
+  return 'warn';
+}
+function crBadge(fg,bg) {
+  const ratio=cr(fg,bg), grade=crGrade(ratio);
+  return `<span class="cr-badge cr-${grade}">${ratio}:1</span>`;
+}
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+/* ── Theme Data ─────────────────────────────────────────────── */
+const GEO_TYPES = ['pipe','flange','valve','tee','elbow','reducer','support','anci','unknown'];
+const GEO_LABELS= ['PIPE','FLANGE','VALVE','TEE','ELBOW','REDUCER','SUPPORT','ANCI','UNKN'];
+
+const THEMES = {
+  pcf_cur: {
+    name:'PCF Viewer',sub:'Current — NavisDark',badge:'curr',
+    canvas:'#08111c',grid_a:'#1e3050',grid_b:'#162540',
+    shell:'#151b28',ribbon:'#1a2236',panel:'#141c2b',status:'#111826',
+    bdr:'rgba(255,255,255,0.09)',accent:'#3b82f6',txt:'#dce8f4',
+    geo:{pipe:'#66d9ff',flange:'#ffb25c',valve:'#72e39a',tee:'#ffe07a',
+         elbow:'#d0a8ff',reducer:'#ff9dc7',support:'#8af58d',anci:'#ff7878',unknown:'#d6e2ee'}
+  },
+  rvm_cur: {
+    name:'RVM Viewer',sub:'Current — Steel Grey',badge:'curr',
+    canvas:'#0d0e11',grid_a:'#252830',grid_b:'#1c1e24',
+    shell:'#1a1c21',ribbon:'#22242a',panel:'#1e2026',status:'#171b22',
+    bdr:'#333',accent:'#4a9eff',txt:'#d4d4d4',
+    note:'Geometry from GLB materials — not component-typed',
+    geo:{pipe:'#7a8fa8',flange:'#5a6e82',valve:'#5e7566',tee:'#7a8a7e',
+         elbow:'#6a7896',reducer:'#6e7880',support:'#5a7460',anci:'#a06060',unknown:'#8090a0'}
+  },
+  a: {
+    name:'A — NavisDark Unified',
+    desc:'Extend PCF\'s navy chrome to RVM. Single token file for both. Calibrated geometry palette.',
+    badge:'rec',
+    canvas:'#08111c',grid_a:'#1e3050',grid_b:'#162540',
+    shell:'#151b28',ribbon:'#1a2236',panel:'#141c2b',status:'#111826',
+    bdr:'rgba(255,255,255,0.09)',accent:'#4a9eff',txt:'#dce8f4',
+    geo:{pipe:'#66d9ff',flange:'#ffb25c',valve:'#72e39a',tee:'#e0c058',
+         elbow:'#d0a8ff',reducer:'#ff9dc7',support:'#60c864',anci:'#ff7070',unknown:'#94a8bc'},
+    changes:[
+      'Unify canvas bg: RVM #0d0e11 → #08111c',
+      'Unify chrome: RVM grey → PCF navy (#151b28)',
+      'Adopt shared accent #4a9eff (vs PCF #3b82f6, RVM #4a9eff)',
+      'Dim TEE: #ffe07a → #e0c058  (14.7:1 → 11.2:1)',
+      'Dim SUPPORT: #8af58d → #60c864  (14.2:1 → 10.2:1)',
+      'Dim UNKNOWN: #d6e2ee → #94a8bc  (14.5:1 → 8.5:1)',
+    ]
+  },
+  b: {
+    name:'B — Steel Neutral',
+    desc:'Cool neutral grey, less blue tint. Works well in bright office/site environments.',
+    badge:'opt',
+    canvas:'#0c0f14',grid_a:'#222832',grid_b:'#181c24',
+    shell:'#12161e',ribbon:'#181d27',panel:'#101418',status:'#0c0f14',
+    bdr:'rgba(255,255,255,0.08)',accent:'#5a9eff',txt:'#c8d8e8',
+    geo:{pipe:'#72c4de',flange:'#c8904a',valve:'#54b472',tee:'#c0aa40',
+         elbow:'#9880d8',reducer:'#c074a0',support:'#54be5c',anci:'#cc5454',unknown:'#8090a0'},
+    changes:[
+      'New neutral chrome — no navy tint',
+      'Cooler, desaturated geometry palette',
+      'All CR values calibrated to 7–12:1 range',
+      'Shared token system with Theme A (same var names)',
+    ]
+  },
+  c: {
+    name:'C — DrawLight',
+    desc:'Engineering drawing / print style. Extend PCF\'s existing DrawLight to RVM. For QC review and reporting.',
+    badge:'opt',
+    canvas:'#f4f7fb',grid_a:'#bcc9d6',grid_b:'#dfe7ef',
+    shell:'#edf2f7',ribbon:'#ffffff',panel:'#f0f4f8',status:'#e8eef5',
+    bdr:'#c8d4e0',accent:'#1a5fa3',txt:'#1e2838',
+    geo:{pipe:'#0c4f8a',flange:'#b6631c',valve:'#1d7d4d',tee:'#a88416',
+         elbow:'#6d4aa6',reducer:'#b74d7d',support:'#2e6e58',anci:'#bb2f2f',unknown:'#5f6f7f'},
+    changes:[
+      'PCF DrawLight already exists — extend to RVM',
+      'Dark saturated geometry on white canvas',
+      'High contrast for print / PDF export',
+      'Toggle-able at runtime via themePreset config',
+    ]
+  }
+};
+
+/* ── Mini Viewport SVG ─────────────────────────────────────── */
+function viewportSVG(t, h=130) {
+  const g = t.geo, bg=t.canvas, ga=t.grid_a, gb=t.grid_b;
+  const isLight = lum(bg) > 0.3;
+  const shine = isLight ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.18)';
+  return `<svg viewBox="0 0 280 ${h}" xmlns="http://www.w3.org/2000/svg">
+  <rect width="280" height="${h}" fill="${bg}"/>
+  <!-- grid -->
+  <line x1="0" y1="32" x2="280" y2="32" stroke="${gb}" stroke-width="0.5"/>
+  <line x1="0" y1="65" x2="280" y2="65" stroke="${ga}" stroke-width="0.7"/>
+  <line x1="0" y1="98" x2="280" y2="98" stroke="${gb}" stroke-width="0.5"/>
+  <line x1="70"  y1="0" x2="70"  y2="${h}" stroke="${gb}" stroke-width="0.5"/>
+  <line x1="140" y1="0" x2="140" y2="${h}" stroke="${ga}" stroke-width="0.7"/>
+  <line x1="210" y1="0" x2="210" y2="${h}" stroke="${gb}" stroke-width="0.5"/>
+  <!-- REDUCER left end -->
+  <path d="M 11,73 L 11,67 L 22,65 L 22,75 Z" fill="${g.reducer}"/>
+  <!-- main PIPE left -->
+  <rect x="22"  y="65" width="70" height="10" rx="5" fill="${g.pipe}"/>
+  <rect x="22"  y="65" width="70" height="3"  rx="1.5" fill="${shine}"/>
+  <!-- FLANGE 1 -->
+  <rect x="36" y="61" width="5" height="18" rx="2.5" fill="${g.flange}"/>
+  <!-- TEE body -->
+  <rect x="88" y="62" width="14" height="18" rx="3" fill="${g.tee}"/>
+  <!-- branch pipe up -->
+  <rect x="92.5" y="12" width="5.5" height="52" rx="2.5" fill="${g.pipe}" opacity="0.88"/>
+  <rect x="92.5" y="12" width="5.5" height="3"  rx="1.5" fill="${shine}"/>
+  <!-- FLANGE at branch top -->
+  <rect x="89" y="10" width="12" height="5"  rx="2" fill="${g.flange}" opacity="0.9"/>
+  <!-- ELBOW at branch top -->
+  <path d="M 95.5 14 Q 95.5 4 107 4" stroke="${g.elbow}" stroke-width="5.5" fill="none" stroke-linecap="round"/>
+  <!-- horiz branch after elbow -->
+  <rect x="106" y="1.5" width="38" height="5" rx="2.5" fill="${g.pipe}" opacity="0.82"/>
+  <!-- FLANGE between TEE and valve -->
+  <rect x="102" y="61" width="5" height="18" rx="2.5" fill="${g.flange}"/>
+  <!-- VALVE body -->
+  <rect x="107" y="62" width="38" height="16" rx="3" fill="${g.valve}"/>
+  <rect x="107" y="62" width="38" height="5"  rx="2" fill="${shine}"/>
+  <!-- valve stem -->
+  <rect x="122" y="46" width="6" height="18" rx="2" fill="${g.valve}"/>
+  <rect x="112" y="42" width="26" height="6" rx="3" fill="${g.valve}" opacity="0.85"/>
+  <!-- FLANGE after valve -->
+  <rect x="145" y="61" width="5" height="18" rx="2.5" fill="${g.flange}"/>
+  <!-- main PIPE right -->
+  <rect x="150" y="65" width="78" height="10" rx="5" fill="${g.pipe}"/>
+  <rect x="150" y="65" width="78" height="3"  rx="1.5" fill="${shine}"/>
+  <!-- FLANGE 4 -->
+  <rect x="198" y="61" width="5" height="18" rx="2.5" fill="${g.flange}"/>
+  <!-- ELBOW right end -->
+  <path d="M 228 70 Q 243 70 243 55" stroke="${g.elbow}" stroke-width="10" fill="none" stroke-linecap="round"/>
+  <path d="M 228 70 Q 243 70 243 55" stroke="${shine}" stroke-width="10" fill="none" stroke-linecap="round"/>
+  <!-- vertical pipe up -->
+  <rect x="238" y="28" width="10" height="28" rx="5" fill="${g.pipe}" opacity="0.86"/>
+  <!-- ANCI diamond marker -->
+  <polygon points="163,63 168,68 163,73 158,68" fill="${g.anci}" opacity="0.94"/>
+  <!-- SUPPORT 1 -->
+  <rect x="29" y="75" width="3" height="16" fill="${g.support}" opacity="0.88"/>
+  <rect x="26" y="89" width="9" height="3" rx="1" fill="${g.support}" opacity="0.72"/>
+  <!-- SUPPORT 2 -->
+  <rect x="185" y="75" width="3" height="16" fill="${g.support}" opacity="0.88"/>
+  <rect x="182" y="89" width="9" height="3" rx="1" fill="${g.support}" opacity="0.72"/>
+  <!-- UNKNOWN end cap -->
+  <rect x="8"  y="67" width="13" height="6" rx="3" fill="${g.unknown}" opacity="0.72"/>
+</svg>`;
+}
+
+/* ── Mini Viewer HTML ──────────────────────────────────────── */
+function miniViewer(t, label, showNote) {
+  const isLight = lum(t.canvas) > 0.3;
+  const txtCol = t.txt;
+  const chipStyle = `border-color:${t.accent}44;color:${t.accent};background:${t.accent}18;`;
+  const rgtRows = GEO_TYPES.slice(0,6).map((k,i) =>
+    `<div class="mini-right-row">
+      <div class="mini-right-dot" style="background:${t.geo[k]};opacity:0.9"></div>
+      <div class="mini-right-line"></div>
+    </div>`).join('');
+  return `
+  <div class="mini-viewer-wrap">
+    <div class="mini-viewer-label">${esc(label)}</div>
+    <div class="mini-viewer">
+      <div class="mini-ribbon" style="background:${t.ribbon};border-bottom-color:${t.bdr}">
+        <div class="m-btn act" style="background:${t.accent};border-color:${t.accent}"></div>
+        <div class="m-btn"></div><div class="m-btn"></div><div class="m-btn"></div>
+        <div class="m-sep"></div>
+        <div class="m-btn"></div><div class="m-btn"></div>
+      </div>
+      <div class="mini-body">
+        <div class="mini-left" style="background:${t.panel}"></div>
+        <div class="mini-canvas">${viewportSVG(t)}</div>
+        <div class="mini-right" style="background:${t.panel}">
+          <div class="mini-right-tab"><div class="mini-right-tab-bar" style="background:${t.accent}30"></div></div>
+          ${rgtRows}
+        </div>
+      </div>
+      <div class="mini-status" style="background:${t.status}">
+        <div class="mini-chip" style="${chipStyle}">Orbit</div>
+        <span class="mini-coords" style="color:${txtCol}">X: 4521 Y: 890 Z: 234</span>
+      </div>
+    </div>
+    ${showNote&&t.note ? `<div class="mini-note">⚠ ${esc(t.note)}</div>` : ''}
+  </div>`;
+}
+
+/* ── Palette Grid ──────────────────────────────────────────── */
+function paletteGrid(t) {
+  return `<div class="palette-grid">${GEO_TYPES.map((k,i) => {
+    const ratio = cr(t.geo[k], t.canvas);
+    const grade = crGrade(ratio);
+    return `<div class="pal-cell">
+      <div class="pal-swatch" style="background:${t.geo[k]}"></div>
+      <div class="pal-type">${GEO_LABELS[i]}</div>
+      <div class="pal-hex">${t.geo[k]}</div>
+      <div class="pal-cr"><span class="cr-badge cr-${grade}" style="font-size:7px;padding:1px 4px">${ratio}:1</span></div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+/* ── Render ────────────────────────────────────────────────── */
+function renderCurrentState() {
+  const p = THEMES.pcf_cur, r = THEMES.rvm_cur;
+  const diffs = [
+    {k:'Canvas BG',    pv:p.canvas,    rv:r.canvas,    diff:true},
+    {k:'Shell BG',     pv:p.shell,     rv:r.shell,     diff:true},
+    {k:'Ribbon BG',    pv:p.ribbon,    rv:r.ribbon,    diff:true},
+    {k:'Accent',       pv:p.accent,    rv:r.accent,    diff:true},
+    {k:'Border style', pv:'rgba based',rv:'#hex based', diff:true},
+    {k:'Geo colors',   pv:'Component-typed THEME_PALETTES', rv:'GLB-baked materials', diff:true},
+  ];
+  return `
+  <div class="section-title">Current State — Theme Divergence</div>
+  <div class="card">
+    <div class="card-title">PCF 3D Viewer vs RVM 3D Viewer <span class="badge badge-curr">Existing</span></div>
+    <div class="card-desc">Two independent colour systems have accumulated. Switching between tabs creates visual dissonance and there is no shared token vocabulary.</div>
+    <div class="mini-viewer-group">
+      ${miniViewer(p, 'PCF Viewer  (viewer3d-tab.js + viewer3d.css)', false)}
+      ${miniViewer(r, 'RVM Viewer  (viewer3d-rvm-tab.js + viewer3d-rvm-tab.css)', true)}
+    </div>
+    <div class="diff-row">
+      ${diffs.map(d=>`<div class="diff-item">
+        <div class="diff-key">${esc(d.k)}</div>
+        <div class="diff-val${d.diff?' mismatch':''}">${esc(d.pv)}</div>
+        <div style="font-size:9px;color:var(--text-dim);margin-top:2px">RVM: ${esc(d.rv)}</div>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+function renderContrastAudit() {
+  const p = THEMES.pcf_cur, r = THEMES.rvm_cur;
+  const rows = GEO_TYPES.map((k,i)=>{
+    const crP = cr(p.geo[k], p.canvas);
+    const crR = cr(r.geo[k], r.canvas);
+    const rP = parseFloat(crP), rR = parseFloat(crR);
+    const tooHigh = rP > 13.5;
+    const note = tooHigh ? '⚠ Overly bright — may dominate dense scenes'
+                 : rP < 8 ? '↓ Lowest in palette — consider boosting'
+                 : '';
+    return `<tr class="${tooHigh?'highlight':''}">
+      <td><span style="font-size:10px;font-weight:600;color:var(--text-hi)">${GEO_LABELS[i]}</span></td>
+      <td><div class="swatch-wrap"><span class="swatch" style="background:${p.geo[k]}"></span><span class="hex-tag">${p.geo[k]}</span></div></td>
+      <td>${crBadge(p.geo[k],p.canvas)}</td>
+      <td>${crBadge(p.geo[k],r.canvas)}</td>
+      <td><span class="cr-badge cr-${crGrade(crP)}">${crGrade(crP).toUpperCase()}</span></td>
+      <td style="font-size:9px;color:${tooHigh?'var(--warn)':'var(--text-dim)'};">${note}</td>
+    </tr>`;
+  });
+  return `
+  <div class="section-title">Geometry Colour Contrast Audit</div>
+  <div class="card">
+    <div class="card-title">NavisDark Palette — all 9 component types</div>
+    <div class="card-desc">Contrast ratios computed against each canvas background. WCAG AAA ≥ 7:1 · AA ≥ 4.5:1. <b>Target range for balanced visual hierarchy: 7–12:1</b> — values above 13:1 cause one type to visually dominate.</div>
+    <table class="ct-table">
+      <thead><tr>
+        <th>Type</th><th>NavisDark colour</th>
+        <th>CR on PCF canvas<br><span style="font-weight:400;color:var(--text-dim)">#08111c</span></th>
+        <th>CR on RVM canvas<br><span style="font-weight:400;color:var(--text-dim)">#0d0e11</span></th>
+        <th>WCAG</th><th>Harmony note</th>
+      </tr></thead>
+      <tbody>${rows.join('')}</tbody>
+      <tfoot><tr>
+        <td colspan="2" style="padding-top:10px;font-size:9px;color:var(--text-dim)">Target balance range</td>
+        <td colspan="4"><span class="target-range">7:1 – 12:1 — max variance ~5:1 across palette</span></td>
+      </tr></tfoot>
+    </table>
+    <div style="margin-top:12px;font-size:10px;color:var(--text-dim);line-height:1.6">
+      <b style="color:var(--warn)">Key finding:</b> TEE (14.7), SUPPORT (14.2) and UNKNOWN (14.5) are 2× brighter than ANCI (7.5). This creates false visual hierarchy — large support/tee clusters appear to "float" above smaller components. Both canvas backgrounds are so dark that RVM and PCF produce nearly identical ratios; the gap between the two canvases is negligible (&lt; 0.5:1).
+    </div>
+  </div>`;
+}
+
+function renderProposal(t) {
+  const changeHTML = (t.changes||[]).map(c=>`<div class="change-item">${esc(c)}</div>`).join('');
+  return `
+  <div class="card">
+    <div class="card-title">
+      ${esc(t.name)}
+      <span class="badge badge-${t.badge}">${t.badge==='rec'?'Recommended':t.badge==='opt'?'Option':'Current'}</span>
+    </div>
+    <div class="card-desc">${esc(t.desc)}</div>
+    <div class="mini-viewer-group">
+      ${miniViewer(t, 'PCF Viewer', false)}
+      ${miniViewer(t, 'RVM Viewer', false)}
+    </div>
+    <div style="margin-top:14px">
+      <div style="font-size:9px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-dim);margin-bottom:6px">Geometry palette — all contrast ratios on ${t.canvas}</div>
+      ${paletteGrid(t)}
+    </div>
+    ${changeHTML ? `<div class="changes" style="margin-top:14px">
+      <div style="font-size:9px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-dim);margin-bottom:4px">Changes from current</div>
+      ${changeHTML}</div>` : ''}
+  </div>`;
+}
+
+function renderProposals() {
+  return `
+  <div class="section-title">Unified Theme Proposals — shared by both viewers</div>
+  <div class="three-col">
+    ${renderProposal(THEMES.a)}
+    ${renderProposal(THEMES.b)}
+    ${renderProposal(THEMES.c)}
+  </div>`;
+}
+
+function renderTokens() {
+  const p = THEMES.pcf_cur, r = THEMES.rvm_cur, u = THEMES.a;
+  const rows = [
+    {group:'Canvas'},
+    {tok:'--vc-canvas-bg',   pv:p.canvas,  rv:r.canvas,  uv:u.canvas},
+    {tok:'--vc-grid-major',  pv:p.grid_a,  rv:r.grid_a,  uv:u.grid_a},
+    {tok:'--vc-grid-minor',  pv:p.grid_b,  rv:r.grid_b,  uv:u.grid_b},
+    {group:'Chrome'},
+    {tok:'--vc-shell-bg',    pv:p.shell,   rv:r.shell,   uv:u.shell},
+    {tok:'--vc-ribbon-bg',   pv:p.ribbon,  rv:r.ribbon,  uv:u.ribbon},
+    {tok:'--vc-panel-bg',    pv:p.panel,   rv:r.panel,   uv:u.panel},
+    {tok:'--vc-status-bg',   pv:p.status,  rv:r.status,  uv:u.status},
+    {tok:'--vc-border',      pv:p.bdr,     rv:r.bdr,     uv:u.bdr},
+    {group:'Accent & Text'},
+    {tok:'--vc-accent',      pv:p.accent,  rv:r.accent,  uv:u.accent},
+    {tok:'--vc-text',        pv:p.txt,     rv:r.txt,     uv:u.txt},
+    {group:'Geometry'},
+    ...GEO_TYPES.map((k,i)=>({tok:`--vg-${k}`, pv:p.geo[k], rv:'(GLB-baked)', uv:u.geo[k]})),
+  ];
+  const rowsHTML = rows.map(d=>{
+    if(d.group) return `<tr><td colspan="4" style="padding:10px 8px 3px;font-size:9px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:var(--text-dim)">${esc(d.group)}</td></tr>`;
+    const diff = d.pv !== d.rv;
+    const isColor = d.pv && d.pv[0]==='#';
+    const dot = isColor ? `<span class="color-dot" style="background:${d.uv}"></span>` : '';
+    return `<tr class="${diff?'tok-diff':''}">
+      <td class="tok-name">${esc(d.tok)}</td>
+      <td class="tok-val">${dot}${esc(d.pv)}</td>
+      <td class="tok-val" style="${diff?'color:var(--warn)':''}">${esc(d.rv)}</td>
+      <td class="tok-new">${isColor?`<span class="color-dot" style="background:${d.uv}"></span>`:''}${esc(d.uv)}</td>
+    </tr>`;
+  }).join('');
+  return `
+  <div class="section-title">Proposed Shared Token Reference — Theme A (NavisDark Unified)</div>
+  <div class="card">
+    <div class="card-title">shared-viewer-tokens.css</div>
+    <div class="card-desc">Single token file consumed by both <code style="font-family:var(--mono);color:var(--accent)">viewer3d.css</code> and <code style="font-family:var(--mono);color:var(--accent)">viewer3d-rvm-tab.css</code>. Highlighted rows show current divergence between the two viewers.</div>
+    <table class="tok-table">
+      <thead><tr><th>Token</th><th>PCF current</th><th>RVM current</th><th>Proposed unified</th></tr></thead>
+      <tbody>${rowsHTML}</tbody>
+    </table>
+  </div>`;
+}
+
+function renderImpl() {
+  return `
+  <div class="section-title">Implementation Notes</div>
+  <div class="three-col">
+    <div class="impl-card">
+      <div class="impl-card-title">Priority 1 — Chrome Unification <span class="effort-chip effort-low">~2 h</span></div>
+      <div class="impl-file">viewer/styles/shared-viewer-tokens.css  (new)</div>
+      <div class="impl-item">• Add <b>12 CSS custom properties</b> for canvas, chrome, accent, text.</div>
+      <div class="impl-file" style="margin-top:8px">viewer/styles/viewer3d.css</div>
+      <div class="impl-item">• Replace hard-coded hex values with <b>var(--vc-*)</b> tokens.</div>
+      <div class="impl-file" style="margin-top:8px">viewer/tabs/viewer3d-rvm-tab.css</div>
+      <div class="impl-item">• Replace <b>--geo-*</b> vars with <b>--vc-*</b> tokens and remove divergent values.</div>
+      <div class="impl-item" style="margin-top:6px;color:var(--pass)">✓ Zero JS changes. CSS-only. Can be verified by eye immediately.</div>
+    </div>
+    <div class="impl-card">
+      <div class="impl-card-title">Priority 2 — Geometry Calibration <span class="effort-chip effort-low">~1 h</span></div>
+      <div class="impl-file">viewer/viewer-3d-defaults.js  →  THEME_PALETTES</div>
+      <div class="impl-item">• Dim <b>TEE</b>: #ffe07a → #e0c058</div>
+      <div class="impl-item">• Dim <b>SUPPORT</b>: #8af58d → #60c864</div>
+      <div class="impl-item">• Dim <b>UNKNOWN</b>: #d6e2ee → #94a8bc</div>
+      <div class="impl-item" style="margin-top:6px">All values still pass WCAG AAA (≥ 7:1). Brings palette max-variance from 7.2 down to <b>~4.5</b> — better visual harmony in dense isometric views.</div>
+    </div>
+    <div class="impl-card">
+      <div class="impl-card-title">Priority 3 — RVM Component Typing <span class="effort-chip effort-med">~1 day</span></div>
+      <div class="impl-file">viewer/rvm-viewer/RvmViewer3D.js</div>
+      <div class="impl-item">• On model load, traverse scene graph and map <b>userData.type</b> to <b>--vg-*</b> tokens.</div>
+      <div class="impl-item">• Fallback: keep GLB baked materials as-is.</div>
+      <div class="impl-item" style="margin-top:6px">Allows RVM viewer to show the same component colour vocabulary as PCF viewer when a palette is active. Controlled by a <b>useComponentColors</b> config flag.</div>
+    </div>
+  </div>`;
+}
+
+document.getElementById('content').innerHTML = `
+  ${renderCurrentState()}
+  ${renderContrastAudit()}
+  ${renderProposals()}
+  ${renderTokens()}
+  ${renderImpl()}
+`;
+</script>
+</body>
+</html>

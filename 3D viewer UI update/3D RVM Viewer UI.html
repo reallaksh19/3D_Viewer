@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>3D RVM Viewer — Engineering</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.1/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.1/examples/jsm/"}}</script>
+<style>
+/* ── Shared tokens (Theme A — NavisDark Unified) ────────── */
+:root{
+  --bg:#151b28;--canvas-bg:#08111c;
+  --ribbon-bg:#1a2236;--panel-bg:#141c2b;--rpanel-bg:#1a1f2e;--status-bg:#111826;
+  --bdr:rgba(255,255,255,0.09);--bdr2:rgba(255,255,255,0.06);
+  --text:#dce8f4;--dim:#8da2bc;--muted:#4f6079;
+  --accent:#4a9eff;--accent-bg:rgba(74,158,255,0.16);--accent-bg2:rgba(74,158,255,0.3);
+  --pass:#4ade80;--warn:#f0c840;--fail:#f87171;--info:#60b8ff;
+  --sev-hi:#f87171;--sev-md:#f0a040;--sev-lo:#4ade80;--sev-inf:#60b8ff;
+  --font:'Inter',system-ui,sans-serif;--mono:'Consolas','Courier New',monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;font-family:var(--font);font-size:12px;color:var(--text);background:var(--bg)}
+svg{display:block;pointer-events:none}
+button{font-family:var(--font)}
+
+/* ── Shell ──────────────────────────────────────────────── */
+#rvm-root{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:var(--bg)}
+
+/* ── Ribbon ─────────────────────────────────────────────── */
+#rvm-ribbon{display:flex;align-items:center;gap:4px;padding:5px 8px;background:var(--ribbon-bg);border-bottom:1px solid var(--bdr);flex-shrink:0;min-height:44px;flex-wrap:nowrap;overflow-x:auto}
+#rvm-ribbon::-webkit-scrollbar{height:3px}
+#rvm-ribbon::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}
+
+/* File/action buttons */
+.rv-btn{display:inline-flex;align-items:center;gap:5px;padding:5px 9px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);border-radius:5px;color:#c5dcf5;font-size:11px;font-weight:600;cursor:pointer;transition:background .13s,border-color .13s,color .13s;white-space:nowrap;flex-shrink:0}
+.rv-btn svg{width:14px;height:14px;flex-shrink:0}
+.rv-btn:hover{background:var(--accent-bg);border-color:rgba(96,165,250,.45);color:#fff}
+.rv-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.rv-btn.primary:hover{background:#2563eb}
+.rv-btn.assisted{border-color:rgba(74,222,128,.45);color:#86efac}
+
+/* Nav tool buttons (compact) */
+.rt-btn{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:46px;height:36px;border-radius:5px;border:1px solid transparent;background:transparent;color:#8da2bc;cursor:pointer;flex-shrink:0;transition:background .13s,color .13s,border-color .13s}
+.rt-btn svg{width:15px;height:15px}
+.rt-btn span{font-size:8px;font-weight:600;white-space:nowrap;line-height:1}
+.rt-btn:hover{background:var(--accent-bg);color:#d7eaff;border-color:rgba(96,165,250,.4)}
+.rt-btn.active{background:var(--accent-bg2);color:#f0f8ff;border-color:rgba(96,165,250,.65);box-shadow:inset 0 0 0 1px rgba(174,214,255,.2)}
+.rt-btn.iso{color:#b9d6fb;border-color:rgba(126,182,246,.32);background:rgba(19,58,106,.16)}
+.rt-btn.iso:hover{background:rgba(74,158,255,.22)}
+.rt-btn.sec{color:#b9d6fb;border-color:rgba(126,182,246,.35);background:rgba(19,58,106,.18)}
+.rt-btn.sec svg{width:17px;height:17px}
+
+.rv-sep{width:1px;height:28px;background:rgba(255,255,255,.1);flex-shrink:0;margin:0 2px}
+
+/* Search bar */
+#rvm-search-wrap{flex:1;min-width:120px;max-width:240px;position:relative}
+#rvm-search-wrap svg{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:13px;height:13px;color:var(--dim);pointer-events:none}
+#rvm-search-input{width:100%;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);border-radius:5px;color:var(--text);font-size:11px;padding:5px 8px 5px 26px;outline:none;font-family:var(--font)}
+#rvm-search-input:focus{border-color:var(--accent)}
+
+/* ── Capability Banner ──────────────────────────────────── */
+#cap-banner{padding:3px 12px;font-size:10.5px;background:#1e2430;border-bottom:1px solid var(--bdr2);color:var(--muted);display:flex;align-items:center;gap:8px;flex-shrink:0}
+#cap-banner .cap-mode{font-weight:700;color:var(--dim)}
+#cap-banner.assisted .cap-mode{color:var(--pass)}
+#cap-banner .cap-dot{width:6px;height:6px;border-radius:50%;background:var(--muted);flex-shrink:0}
+#cap-banner.assisted .cap-dot{background:var(--pass)}
+
+/* ── Status Strip ───────────────────────────────────────── */
+#status-strip{display:flex;align-items:center;gap:5px;padding:4px 10px;background:#171e2c;border-bottom:1px solid var(--bdr2);flex-shrink:0;overflow-x:auto;min-height:26px}
+#status-strip::-webkit-scrollbar{height:3px}
+.ss-chip{display:inline-flex;align-items:center;min-height:16px;padding:1px 7px;border:1px solid rgba(116,139,171,.25);border-radius:999px;background:rgba(38,45,56,.7);color:#9fb0c8;font-size:10px;font-weight:600;letter-spacing:.01em;white-space:nowrap}
+.ss-chip.active{color:#d9e7ff;border-color:rgba(74,158,255,.4);background:rgba(74,158,255,.14)}
+.ss-chip.warn{color:#ffd59a;border-color:rgba(240,160,64,.55);background:rgba(240,160,64,.14)}
+.ss-sep{width:1px;height:12px;background:rgba(255,255,255,.08);flex-shrink:0}
+
+/* ── Body ───────────────────────────────────────────────── */
+#rvm-body{display:flex;flex:1;min-height:0;overflow:hidden}
+
+/* ── Left Panel (Hierarchy) ─────────────────────────────── */
+#rvm-left{width:230px;min-width:160px;max-width:320px;flex-shrink:0;background:var(--panel-bg);border-right:1px solid var(--bdr);display:flex;flex-direction:column;overflow:hidden}
+.rp-header{display:flex;align-items:center;justify-content:space-between;gap:4px;padding:6px 8px;border-bottom:1px solid var(--bdr2);flex-shrink:0;background:rgba(0,0,0,.12)}
+.rp-header-title{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+.tree-controls{display:flex;gap:3px}
+.tc-btn{background:#1e2a3a;border:1px solid rgba(255,255,255,.12);border-radius:3px;color:#9ab8d8;font-size:10px;padding:2px 6px;cursor:pointer;transition:background .12s;line-height:1.4}
+.tc-btn:hover{background:var(--accent-bg);color:var(--accent)}
+
+/* Tree */
+#rvm-tree-scroll{flex:1;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(129,177,230,.35) transparent}
+.rvm-tree{list-style:none;padding:3px 0;font-size:11px}
+.rvm-tree .rti{padding:3px 8px;cursor:pointer;display:flex;align-items:center;gap:4px;border-radius:3px;color:#b0c8e0;transition:background .1s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;user-select:none}
+.rvm-tree .rti:hover{background:rgba(59,130,246,.1);color:#d7eaff}
+.rvm-tree .rti.selected{background:rgba(59,130,246,.2);color:#e8f3ff}
+.rvm-tree .rti.indented{padding-left:22px}
+.rvm-tree .rti.indented2{padding-left:36px}
+.rti-toggle{width:12px;height:12px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:9px;flex-shrink:0;transition:transform .13s}
+.rti-toggle.open{transform:rotate(90deg)}
+.rti-toggle.leaf{opacity:0}
+.rti-cb{width:12px;height:12px;accent-color:var(--accent);cursor:pointer;flex-shrink:0}
+.rti-icon{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.rti-name{flex:1;overflow:hidden;text-overflow:ellipsis}
+.rti-count{font-size:9px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:0 4px;color:var(--muted);flex-shrink:0}
+.rti-children{display:none}
+.rti-children.open{display:block}
+
+/* Search section */
+.rp-search-bar{padding:5px 7px;border-top:1px solid var(--bdr2);border-bottom:1px solid var(--bdr2);display:flex;align-items:center;gap:4px;background:rgba(0,0,0,.08);flex-shrink:0;margin-top:auto}
+.rp-search-bar svg{width:12px;height:12px;color:var(--dim);flex-shrink:0}
+.rp-search-bar input{flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:3px;color:var(--text);font-size:10.5px;padding:3px 6px;outline:none;font-family:var(--font)}
+.rp-search-bar input:focus{border-color:var(--accent)}
+#rvm-search-results-section{flex-shrink:0;max-height:140px;overflow-y:auto;border-top:1px solid var(--bdr2)}
+
+/* ── Viewport ───────────────────────────────────────────── */
+#rvm-viewport{flex:1;position:relative;overflow:hidden;background:radial-gradient(ellipse at 50% 30%,#1e2a40 0%,#111724 60%,var(--canvas-bg) 100%)}
+#rvm-canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#rvm-viewport.m-orbit{cursor:grab}
+#rvm-viewport.m-orbit:active{cursor:grabbing}
+#rvm-viewport.m-pan{cursor:all-scroll}
+#rvm-viewport.m-select{cursor:default}
+#rvm-viewport.m-measure{cursor:crosshair}
+
+/* Drop hint */
+#rvm-hint{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;z-index:2;gap:10px}
+#rvm-hint svg{width:52px;height:52px;color:#1e2d42}
+.hint-t{font-size:13px;color:#253553}
+.hint-s{font-size:10px;color:#1e2d42}
+
+/* ViewCube */
+#vc-wrap{position:absolute;top:14px;right:14px;width:88px;user-select:none;z-index:10}
+#vc-scene{width:88px;height:88px;perspective:220px;cursor:pointer}
+#vc{width:64px;height:64px;position:relative;transform-style:preserve-3d;margin:10px auto 5px;transition:transform .04s linear}
+.vcf{position:absolute;width:64px;height:64px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;border:1px solid rgba(96,165,250,.3);border-radius:3px;cursor:pointer;transition:border-color .14s,filter .14s;backface-visibility:visible}
+.vcf:hover{border-color:rgba(96,165,250,.85);filter:brightness(1.3)}
+.vcf.top   {background:rgba(37,51,78,.9);color:#93c5fd;transform:rotateX(90deg)  translateZ(32px)}
+.vcf.bot   {background:rgba(20,30,50,.9);color:#475569;transform:rotateX(-90deg) translateZ(32px)}
+.vcf.front {background:rgba(29,42,65,.9);color:#bdd9f8;transform:translateZ(32px)}
+.vcf.back  {background:rgba(24,36,57,.9);color:#475569;transform:rotateY(180deg) translateZ(32px)}
+.vcf.right {background:rgba(26,40,62,.9);color:#93c5fd;transform:rotateY(90deg)  translateZ(32px)}
+.vcf.left  {background:rgba(22,34,54,.9);color:#475569;transform:rotateY(-90deg) translateZ(32px)}
+#vc-compass{width:80px;height:14px;margin:0 auto;display:flex;align-items:center;justify-content:space-around;font-size:8px;font-weight:700;color:var(--dim);background:rgba(15,23,37,.7);border:1px solid var(--bdr);border-radius:4px}
+#vc-compass .hi{color:var(--accent)}
+
+/* Axis gizmo */
+#rvm-axis{position:absolute;bottom:44px;right:14px;width:64px;height:64px;z-index:10;pointer-events:none}
+
+/* Coord readout */
+#rvm-coord{position:absolute;bottom:10px;left:12px;background:rgba(10,16,28,.78);border:1px solid rgba(255,255,255,.1);border-radius:5px;padding:4px 9px;font-family:var(--mono);font-size:10.5px;color:#93c5fd;display:flex;gap:10px;pointer-events:none;z-index:10;backdrop-filter:blur(4px)}
+.co{display:flex;gap:3px;align-items:center}
+.co-l{color:var(--muted);font-size:9px;font-weight:700}
+
+/* Section Box Panel */
+#sec-panel{position:absolute;top:60px;left:12px;width:236px;background:rgba(12,20,34,.96);border:1px solid rgba(74,158,255,.25);border-radius:10px;padding:14px 15px;z-index:20;display:none;box-shadow:0 10px 32px rgba(0,0,0,.5)}
+#sec-panel.show{display:block}
+.sp-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.sp-title{font-size:12px;font-weight:700;color:#7ab3ff;display:flex;align-items:center;gap:5px}
+.sp-close{background:none;border:none;color:var(--dim);cursor:pointer;font-size:16px;padding:0;line-height:1}
+.sp-row{margin-bottom:7px;font-size:10.5px}
+.sp-row label{display:flex;justify-content:space-between;color:#9db7d8;margin-bottom:2px}
+.sp-row label span{color:var(--text);font-family:var(--mono)}
+.sp-row input[type=range]{width:100%;accent-color:var(--accent)}
+.sp-reset{margin-top:10px;width:100%;padding:6px;background:#1a3a5c;border:1px solid var(--accent);border-radius:5px;color:#7ab3ff;cursor:pointer;font-size:10.5px;font-family:var(--font);transition:background .13s}
+.sp-reset:hover{background:#1e4a72}
+
+/* Context menu */
+#rvm-ctx{position:absolute;background:#0d1628;border:1px solid rgba(96,165,250,.3);border-radius:7px;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:100;min-width:180px;padding:4px 0;display:none;backdrop-filter:blur(8px)}
+#rvm-ctx.show{display:block}
+.rci{display:flex;align-items:center;gap:8px;padding:6px 13px;font-size:11px;color:#c5dcf5;cursor:pointer;transition:background .1s}
+.rci:hover{background:var(--accent-bg);color:#fff}
+.rci svg{width:13px;height:13px;color:var(--dim);flex-shrink:0}
+.rci:hover svg{color:var(--accent)}
+.rci.danger:hover{background:rgba(248,113,113,.14);color:#fca5a5}
+.rc-sep{height:1px;background:var(--bdr);margin:3px 10px}
+
+/* Keyboard help */
+#rvm-kbd{position:absolute;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:200;display:none;backdrop-filter:blur(3px)}
+#rvm-kbd.show{display:flex}
+.kh{background:#0d1628;border:1px solid rgba(96,165,250,.25);border-radius:10px;padding:18px 22px;width:420px;max-width:90vw}
+.kh-t{font-size:13px;font-weight:700;color:var(--accent);margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+.kh-x{background:none;border:none;color:var(--dim);cursor:pointer;font-size:18px;padding:0}
+.kh-g{display:grid;grid-template-columns:1fr 1fr;gap:5px 18px}
+.kh-r{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim)}
+.kh-k{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:20px;padding:0 5px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.18);border-bottom:2px solid rgba(255,255,255,.24);border-radius:3px;font-family:var(--mono);font-size:10px;font-weight:700;color:var(--text);flex-shrink:0}
+#help-btn{position:absolute;bottom:44px;right:88px;width:26px;height:26px;border-radius:50%;background:rgba(10,16,28,.7);border:1px solid var(--bdr);color:var(--dim);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;cursor:pointer;z-index:10;font-family:var(--font)}
+#help-btn:hover{background:var(--accent-bg);color:var(--accent)}
+
+/* ── Right Panel ────────────────────────────────────────── */
+#rvm-right{width:252px;min-width:160px;max-width:540px;flex-shrink:0;background:var(--rpanel-bg);border-left:1px solid var(--bdr);display:flex;flex-direction:column;overflow:hidden;position:relative}
+#rvm-right-resize{position:absolute;left:0;top:0;bottom:0;width:5px;cursor:col-resize;z-index:10;transition:background .14s}
+#rvm-right-resize:hover,#rvm-right-resize.drag{background:rgba(74,158,255,.35)}
+
+/* Attributes */
+.rvm-attr-filter{padding:5px 7px;border-bottom:1px solid var(--bdr2);display:flex;align-items:center;gap:4px;background:rgba(0,0,0,.08);flex-shrink:0}
+.rvm-attr-filter svg{width:12px;height:12px;color:var(--dim);flex-shrink:0}
+.rvm-attr-filter input{flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:3px;color:var(--text);font-size:10.5px;padding:3px 6px;outline:none;font-family:var(--font)}
+.rvm-attr-filter input:focus{border-color:var(--accent)}
+#attr-body{flex:0 1 auto;overflow-y:auto;min-height:80px;max-height:240px;scrollbar-width:thin;scrollbar-color:rgba(129,177,230,.35) transparent}
+.attr-name-row{padding:7px 10px 4px;border-bottom:1px solid var(--bdr2);background:rgba(0,0,0,.1);flex-shrink:0}
+.attr-obj-name{font-size:12px;font-weight:700;color:#e8f3ff}
+.attr-obj-type{font-size:9px;color:var(--dim);margin-top:1px;font-family:var(--mono)}
+.attr-empty{padding:14px 10px;font-size:11px;color:var(--muted);text-align:center;font-style:italic}
+table.attr-table{width:100%;border-collapse:collapse;font-size:10.5px}
+table.attr-table td{padding:3px 10px;border-bottom:1px solid rgba(255,255,255,.03);vertical-align:top}
+table.attr-table td:first-child{color:var(--dim);white-space:nowrap;width:38%;font-size:10px;font-weight:500}
+table.attr-table td:last-child{color:var(--text);word-break:break-word;font-family:var(--mono);font-size:10px}
+table.attr-table tr:hover td{background:rgba(255,255,255,.02)}
+
+/* Tags */
+.rvm-tag-section{flex:1;display:flex;flex-direction:column;border-top:1px solid var(--bdr);overflow:hidden;min-height:0}
+.rvm-tag-actions-bar{display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding:6px 8px;border-bottom:1px solid var(--bdr2);background:rgba(0,0,0,.1);flex-shrink:0}
+.rvm-tag-title{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#d9e7ff;flex:1}
+.rvm-tag-sev-filter{background:#0f1726;border:1px solid rgba(255,255,255,.18);border-radius:4px;color:var(--text);font-size:10px;padding:2px 5px;outline:none;font-family:var(--font)}
+#tag-list{flex:1;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(129,177,230,.35) transparent;padding:3px 0}
+.tag-item{display:flex;align-items:flex-start;gap:5px;padding:6px 10px;border-bottom:1px solid rgba(255,255,255,.03);cursor:pointer;transition:background .1s;border-left:3px solid transparent}
+.tag-item:hover{background:rgba(255,255,255,.03)}
+.tag-item.sev-hi{border-left-color:var(--sev-hi)}
+.tag-item.sev-md{border-left-color:var(--sev-md)}
+.tag-item.sev-lo{border-left-color:var(--sev-lo)}
+.tag-item.sev-inf{border-left-color:var(--sev-inf)}
+.tag-body{flex:1;min-width:0}
+.tag-text{font-size:11px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tag-meta{font-size:9px;color:var(--dim);margin-top:2px;display:flex;gap:6px}
+.tag-sev-badge{font-size:8.5px;font-weight:700;padding:1px 5px;border-radius:3px;text-transform:uppercase}
+.sev-hi .tag-sev-badge{background:rgba(248,113,113,.15);color:var(--sev-hi)}
+.sev-md .tag-sev-badge{background:rgba(240,160,64,.15);color:var(--sev-md)}
+.sev-lo .tag-sev-badge{background:rgba(74,222,128,.12);color:var(--sev-lo)}
+.sev-inf .tag-sev-badge{background:rgba(96,184,255,.12);color:var(--sev-inf)}
+.tag-actions{display:flex;gap:2px;flex-shrink:0}
+.tag-act-btn{background:none;border:none;color:var(--dim);cursor:pointer;padding:2px 5px;border-radius:3px;font-size:10px;transition:color .1s,background .1s}
+.tag-act-btn:hover{color:var(--accent);background:var(--accent-bg)}
+.tag-act-btn.del:hover{color:var(--fail);background:rgba(248,113,113,.12)}
+#add-tag-btn{display:flex;align-items:center;justify-content:center;gap:5px;margin:6px 8px;padding:6px;border:1px dashed rgba(255,255,255,.15);border-radius:5px;background:transparent;color:var(--dim);cursor:pointer;font-size:11px;font-family:var(--font);transition:background .12s,color .12s,border-color .12s;flex-shrink:0}
+#add-tag-btn:hover{background:var(--accent-bg);color:var(--accent);border-color:rgba(74,158,255,.4)}
+
+/* ── Tag Modal ──────────────────────────────────────────── */
+#tag-modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:300;display:none;backdrop-filter:blur(4px)}
+#tag-modal.show{display:flex}
+.tm-card{background:#0f1c2e;border:1px solid rgba(74,158,255,.28);border-radius:10px;padding:18px 20px;width:360px;max-width:90vw;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+.tm-title{font-size:13px;font-weight:700;color:#d9e7ff;margin-bottom:14px}
+.tm-row{display:flex;flex-direction:column;gap:4px;margin-bottom:10px;font-size:11px;color:#9fb0d8}
+.tm-row input,.tm-row select{background:#131922;border:1px solid rgba(255,255,255,.16);border-radius:5px;color:#dbe6ff;font-size:11px;padding:7px 9px;outline:none;font-family:var(--font)}
+.tm-row input:focus,.tm-row select:focus{border-color:var(--accent)}
+.tm-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.tm-btn{padding:6px 14px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:var(--font);transition:background .13s}
+.tm-btn.cancel{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.15);color:var(--dim)}
+.tm-btn.cancel:hover{background:rgba(255,255,255,.12)}
+.tm-btn.create{background:var(--accent);border-color:var(--accent);color:#fff}
+.tm-btn.create:hover{background:#2563eb}
+
+/* ── Status Bar ─────────────────────────────────────────── */
+#rvm-statusbar{display:flex;align-items:center;height:27px;background:var(--status-bg);border-top:1px solid var(--bdr);flex-shrink:0}
+.sb{display:flex;align-items:center;gap:5px;padding:0 10px;height:100%;border-right:1px solid var(--bdr2);font-size:10.5px;flex-shrink:0}
+.sb:last-child{border-right:none;margin-left:auto}
+.mode-chip{display:inline-flex;align-items:center;gap:3px;background:var(--accent-bg);border:1px solid rgba(96,165,250,.3);border-radius:999px;padding:1px 8px;font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--accent)}
+.sc-coords{font-family:var(--mono);font-size:10px;color:var(--dim);display:flex;gap:8px}
+.sc-cp{display:flex;gap:3px}
+.sc-ax{color:#4a6a8a;font-weight:700;font-size:9px}
+.sc-v{color:#7ab8ff;min-width:38px}
+#rvm-sb-msg{font-size:10.5px;color:var(--dim);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* scrollbars */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(129,177,230,.32);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:rgba(129,177,230,.52)}
+</style>
+</head>
+<body>
+<div id="rvm-root">
+
+<!-- ██ RIBBON ██████████████████████████████████████████████ -->
+<div id="rvm-ribbon">
+  <!-- File ops -->
+  <label class="rv-btn primary" title="Load RVM/JSON/GLB dataset">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><rect x="4" y="16" width="16" height="4" rx="1.5"/></svg>
+    Import Dataset
+    <input type="file" id="rvm-file-input" multiple accept=".json,.rvm,.rev,.glb,.gltf,.txt" style="display:none">
+  </label>
+  <label class="rv-btn" title="Append STP support members">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 15 21 21 3 21 3 15"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    Append STP
+    <input type="file" id="rvm-stp-input" accept=".stp,.step" style="display:none">
+  </label>
+  <button class="rv-btn" id="rv-settings" title="Interchange mapping settings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    Settings
+  </button>
+  <div class="rv-sep"></div>
+
+  <!-- Nav tools -->
+  <button class="rt-btn" id="rt-select" data-mode="select" title="Select [S]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/></svg><span>Select</span></button>
+  <button class="rt-btn active" id="rt-orbit" data-mode="orbit" title="Orbit [O]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg><span>Orbit</span></button>
+  <button class="rt-btn" id="rt-pan" data-mode="pan" title="Pan [P]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9V5h4"/><path d="m5 5 14 14"/><path d="M19 10v9h-9"/></svg><span>Pan</span></button>
+  <button class="rt-btn" id="rt-bsel" title="Box Select"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="13" height="13" rx="1" stroke-dasharray="3 2"/><path d="m13 13 8 8"/></svg><span>Box Sel</span></button>
+  <button class="rt-btn" id="rt-measure" data-mode="measure" title="Measure [M]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="8" rx="2"/><path d="M6 8v4M10 8v4M14 8v4M18 8v4"/></svg><span>Measure</span></button>
+  <button class="rt-btn" id="rt-zoom" title="Box Zoom [W]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="12" height="12" rx="1" stroke-dasharray="3 2"/><circle cx="17" cy="17" r="3"/><path d="m21 21-2.15-2.15"/></svg><span>Zoom</span></button>
+  <div class="rv-sep"></div>
+  <button class="rt-btn" id="rt-fitall" title="Fit All [F]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9V5h4"/><path d="M19 9V5h-4"/><path d="M5 15v4h4"/><path d="M19 15v4h-4"/></svg><span>Fit All</span></button>
+  <button class="rt-btn" id="rt-fitsel" title="Fit Selection [Shift+F]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9V5h4"/><path d="M19 9V5h-4"/><path d="M5 15v4h4"/><path d="M19 15v4h-4"/><circle cx="12" cy="12" r="3"/></svg><span>Fit Sel</span></button>
+  <button class="rt-btn" id="rt-proj" title="Toggle Projection [V]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v18H3z"/><path d="m3 3 18 18"/><path d="m21 3-18 18"/></svg><span>Ortho</span></button>
+  <div class="rv-sep"></div>
+  <button class="rt-btn iso" id="rt-nw" title="Iso NW [7]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 19 7.5v8L12 20.5 5 16.5v-8Z" fill="currentColor" fill-opacity=".1"/><path d="M12 3.5v8"/><path d="M5 8.5 12 12l7-4.5"/><path d="M12 12v8.5"/><circle cx="7" cy="7" r="1.5" fill="currentColor"/></svg><span>NW</span></button>
+  <button class="rt-btn iso" id="rt-ne" title="Iso NE [9]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 19 7.5v8L12 20.5 5 16.5v-8Z" fill="currentColor" fill-opacity=".1"/><path d="M12 3.5v8"/><path d="M5 8.5 12 12l7-4.5"/><path d="M12 12v8.5"/><circle cx="17" cy="7" r="1.5" fill="currentColor"/></svg><span>NE</span></button>
+  <button class="rt-btn iso" id="rt-se" title="Iso SE [3]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 19 7.5v8L12 20.5 5 16.5v-8Z" fill="currentColor" fill-opacity=".1"/><path d="M12 3.5v8"/><path d="M5 8.5 12 12l7-4.5"/><path d="M12 12v8.5"/><circle cx="17" cy="17" r="1.5" fill="currentColor"/></svg><span>SE</span></button>
+  <button class="rt-btn iso" id="rt-top" title="Top View"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="9" rx="9" ry="3"/><path d="M3 9v6a9 3 0 0 0 18 0V9"/></svg><span>Top</span></button>
+  <div class="rv-sep"></div>
+  <button class="rt-btn sec" id="rt-secbox" title="Section Box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor" fill-opacity=".14"/><path d="M4 10h16M10 4v16"/></svg><span>Sec Box</span></button>
+  <button class="rt-btn sec" id="rt-secoff" title="Section Off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg><span>Sec Off</span></button>
+  <div class="rv-sep"></div>
+
+  <!-- Search -->
+  <div id="rvm-search-wrap">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input type="search" id="rvm-search-input" placeholder="Search objects…" autocomplete="off">
+  </div>
+  <div class="rv-sep"></div>
+
+  <!-- Actions -->
+  <button class="rv-btn" id="rv-extract" title="Extract PCF from loaded JSON bundle">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+    Extract PCF
+  </button>
+  <button class="rv-btn" id="rv-help" title="Keyboard shortcuts [?]" style="width:32px;justify-content:center;padding:5px">?</button>
+</div>
+
+<!-- Capability Banner -->
+<div id="cap-banner">
+  <div class="cap-dot"></div>
+  <span class="cap-mode">Static mode</span>
+  <span style="color:var(--muted)">— pre-converted bundles only · no live conversion</span>
+</div>
+
+<!-- Status Strip -->
+<div id="status-strip">
+  <span class="ss-chip active" id="ss-model">No model loaded</span>
+  <span class="ss-sep"></span>
+  <span class="ss-chip" id="ss-nodes">0 nodes</span>
+  <span class="ss-chip" id="ss-tri">0 triangles</span>
+  <span class="ss-chip" id="ss-sel">0 selected</span>
+  <span class="ss-sep"></span>
+  <span class="ss-chip warn" id="ss-tags">3 review tags</span>
+</div>
+
+<!-- ██ BODY █████████████████████████████████████████████ -->
+<div id="rvm-body">
+
+  <!-- Left: Hierarchy -->
+  <aside id="rvm-left">
+    <div class="rp-header">
+      <span class="rp-header-title">Hierarchy</span>
+      <div class="tree-controls">
+        <button class="tc-btn" id="tc-all"   title="Check all">✓</button>
+        <button class="tc-btn" id="tc-none"  title="Uncheck all">✗</button>
+        <button class="tc-btn" id="tc-exp"   title="Expand all">⊞</button>
+        <button class="tc-btn" id="tc-col"   title="Collapse all">⊟</button>
+      </div>
+    </div>
+    <div id="rvm-tree-scroll">
+      <ul class="rvm-tree" id="rvm-tree-root" role="tree"></ul>
+    </div>
+    <div class="rp-search-bar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input type="text" id="tree-filter" placeholder="Filter hierarchy…">
+    </div>
+    <div id="rvm-search-results-section">
+      <div class="rp-header" style="padding:4px 8px"><span class="rp-header-title">Search Results</span><span id="search-count" style="font-size:9px;color:var(--muted)"></span></div>
+      <ul class="rvm-tree" id="rvm-search-list" role="list"></ul>
+    </div>
+  </aside>
+
+  <!-- Canvas -->
+  <div id="rvm-viewport" class="m-orbit">
+    <canvas id="rvm-canvas"></canvas>
+
+    <!-- ViewCube -->
+    <div id="vc-wrap">
+      <div id="vc-scene">
+        <div id="vc">
+          <div class="vcf top"  data-snap="top">Top</div>
+          <div class="vcf bot"  data-snap="bottom">Bot</div>
+          <div class="vcf front"data-snap="front">Front</div>
+          <div class="vcf back" data-snap="back">Back</div>
+          <div class="vcf right"data-snap="right">Right</div>
+          <div class="vcf left" data-snap="left">Left</div>
+        </div>
+      </div>
+      <div id="vc-compass"><span>N</span><span class="hi">E</span><span>S</span><span>W</span></div>
+    </div>
+
+    <!-- Axis Gizmo -->
+    <svg id="rvm-axis" viewBox="-48 -48 96 96">
+      <line id="rax-x" x1="0" y1="0" x2="30" y2="-10" stroke="#ff5555" stroke-width="2.5" stroke-linecap="round"/>
+      <text id="rax-xl" x="35" y="-7" font-size="9" fill="#ff5555" font-family="Inter,sans-serif" font-weight="700" text-anchor="middle">X</text>
+      <line id="rax-y" x1="0" y1="0" x2="-10" y2="-30" stroke="#55cc55" stroke-width="2.5" stroke-linecap="round"/>
+      <text id="rax-yl" x="-10" y="-34" font-size="9" fill="#55cc55" font-family="Inter,sans-serif" font-weight="700" text-anchor="middle">Y</text>
+      <line id="rax-z" x1="0" y1="0" x2="-26" y2="-10" stroke="#5599ff" stroke-width="2.5" stroke-linecap="round"/>
+      <text id="rax-zl" x="-32" y="-7" font-size="9" fill="#5599ff" font-family="Inter,sans-serif" font-weight="700" text-anchor="middle">Z</text>
+      <circle cx="0" cy="0" r="3" fill="rgba(255,255,255,0.25)"/>
+    </svg>
+
+    <!-- Coord readout -->
+    <div id="rvm-coord">
+      <div class="co"><span class="co-l">X</span><span id="rcx" style="min-width:42px;color:#7ab8ff">—</span></div>
+      <div class="co"><span class="co-l">Y</span><span id="rcy" style="min-width:42px;color:#7ab8ff">—</span></div>
+      <div class="co"><span class="co-l">Z</span><span id="rcz" style="min-width:42px;color:#7ab8ff">—</span></div>
+    </div>
+
+    <!-- Drop hint -->
+    <div id="rvm-hint">
+      <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="8" y="14" width="32" height="26" rx="2"/><path d="M4 18h40M16 8h16M24 14V8"/></svg>
+      <div class="hint-t">Load an RVM / GLB dataset to begin</div>
+      <div class="hint-s">Import Dataset → .json bundle · .glb · .rvm</div>
+    </div>
+
+    <!-- Section Box Panel -->
+    <div id="sec-panel">
+      <div class="sp-head">
+        <div class="sp-title">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 4v16"/></svg>
+          Section Box
+        </div>
+        <button class="sp-close" id="sp-close">×</button>
+      </div>
+      <div class="sp-row"><label>Min X <span id="lbl-xmin">0</span></label><input type="range" id="rx-min" min="0" max="100" value="0"></div>
+      <div class="sp-row"><label>Max X <span id="lbl-xmax">100</span></label><input type="range" id="rx-max" min="0" max="100" value="100"></div>
+      <div class="sp-row"><label>Min Y <span id="lbl-ymin">0</span></label><input type="range" id="ry-min" min="0" max="100" value="0"></div>
+      <div class="sp-row"><label>Max Y <span id="lbl-ymax">100</span></label><input type="range" id="ry-max" min="0" max="100" value="100"></div>
+      <div class="sp-row"><label>Min Z <span id="lbl-zmin">0</span></label><input type="range" id="rz-min" min="0" max="100" value="0"></div>
+      <div class="sp-row"><label>Max Z <span id="lbl-zmax">100</span></label><input type="range" id="rz-max" min="0" max="100" value="100"></div>
+      <button class="sp-reset" id="sp-reset">Reset to Model Bounds</button>
+    </div>
+
+    <!-- Context Menu -->
+    <div id="rvm-ctx">
+      <div class="rci" data-a="fitsel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 9V5h4"/><path d="M19 9V5h-4"/><path d="M5 15v4h4"/><path d="M19 15v4h-4"/><circle cx="12" cy="12" r="3"/></svg>Fit to Selection</div>
+      <div class="rci" data-a="isolate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" opacity=".3"/></svg>Isolate</div>
+      <div class="rci danger" data-a="hide"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><line x1="1" y1="1" x2="23" y2="23"/></svg>Hide</div>
+      <div class="rci" data-a="showall"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Show All</div>
+      <div class="rc-sep"></div>
+      <div class="rci" data-a="tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Add Review Tag</div>
+      <div class="rci" data-a="attrs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>View Attributes</div>
+      <div class="rci" data-a="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy Coordinates</div>
+    </div>
+
+    <!-- Keyboard Help -->
+    <div id="rvm-kbd">
+      <div class="kh">
+        <div class="kh-t">Keyboard Shortcuts <button class="kh-x" id="kh-close">×</button></div>
+        <div class="kh-g">
+          <div class="kh-r"><span class="kh-k">O</span><span>Orbit mode</span></div>
+          <div class="kh-r"><span class="kh-k">S</span><span>Select mode</span></div>
+          <div class="kh-r"><span class="kh-k">P</span><span>Pan mode</span></div>
+          <div class="kh-r"><span class="kh-k">M</span><span>Measure</span></div>
+          <div class="kh-r"><span class="kh-k">F</span><span>Fit All</span></div>
+          <div class="kh-r"><span class="kh-k">⇧F</span><span>Fit Selection</span></div>
+          <div class="kh-r"><span class="kh-k">Esc</span><span>Cancel / Clear</span></div>
+          <div class="kh-r"><span class="kh-k">7</span><span>Iso NW</span></div>
+          <div class="kh-r"><span class="kh-k">9</span><span>Iso NE</span></div>
+          <div class="kh-r"><span class="kh-k">3</span><span>Iso SE</span></div>
+          <div class="kh-r"><span class="kh-k">T</span><span>Add tag at selection</span></div>
+          <div class="kh-r"><span class="kh-k">?</span><span>This help</span></div>
+        </div>
+      </div>
+    </div>
+
+    <button id="help-btn">?</button>
+  </div>
+
+  <!-- Right Panel: Attributes + Tags -->
+  <aside id="rvm-right">
+    <div id="rvm-right-resize"></div>
+
+    <!-- Attributes -->
+    <div class="rp-header">
+      <span class="rp-header-title">Attributes</span>
+    </div>
+    <div class="rvm-attr-filter">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input type="text" id="attr-filter" placeholder="Filter attributes…">
+    </div>
+    <div id="attr-body">
+      <div class="attr-empty" id="attr-empty">Select an object to view attributes</div>
+      <div id="attr-name-row" class="attr-name-row" style="display:none">
+        <div class="attr-obj-name" id="attr-obj-name">—</div>
+        <div class="attr-obj-type" id="attr-obj-type">—</div>
+      </div>
+      <table class="attr-table" id="attr-table" style="display:none"><tbody id="attr-tbody"></tbody></table>
+    </div>
+
+    <!-- Tags -->
+    <div class="rvm-tag-section">
+      <div class="rvm-tag-actions-bar">
+        <span class="rvm-tag-title">Review Tags</span>
+        <select class="rvm-tag-sev-filter" id="tag-sev-filter">
+          <option value="all">All</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+          <option value="info">Info</option>
+        </select>
+        <button class="rv-btn" id="tag-import-btn" style="font-size:10px;padding:3px 7px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><polyline points="21 15 21 21 3 21 3 15"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Import XML
+        </button>
+        <button class="rv-btn" id="tag-export-btn" style="font-size:10px;padding:3px 7px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><polyline points="21 15 21 21 3 21 3 15"/><polyline points="7 9 12 4 17 9"/><line x1="12" y1="4" x2="12" y2="15"/></svg>
+          Export XML
+        </button>
+      </div>
+      <div id="tag-list"></div>
+      <button id="add-tag-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
+        Add Review Tag
+      </button>
+    </div>
+  </aside>
+
+</div><!-- /body -->
+
+<!-- ██ STATUS BAR ████████████████████████████████████████ -->
+<div id="rvm-statusbar">
+  <div class="sb" style="gap:6px;padding:0 10px">
+    <span style="font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">RVM</span>
+    <span class="mode-chip" id="rvm-mode-chip">Orbit</span>
+  </div>
+  <div class="sb">
+    <div class="sc-coords">
+      <div class="sc-cp"><span class="sc-ax">X</span><span class="sc-v" id="rsx">—</span></div>
+      <div class="sc-cp"><span class="sc-ax">Y</span><span class="sc-v" id="rsy">—</span></div>
+      <div class="sc-cp"><span class="sc-ax">Z</span><span class="sc-v" id="rsz">—</span></div>
+    </div>
+  </div>
+  <div class="sb">
+    <span style="font-size:10px;color:var(--dim)"><span style="color:var(--accent);font-weight:600" id="rvm-sel-count">0</span> selected</span>
+  </div>
+  <div class="sb" style="flex:1"><span id="rvm-sb-msg">Load a dataset to begin</span></div>
+  <div class="sb"><span style="font-family:var(--mono);font-size:9.5px;color:var(--muted)" id="rvm-fps">—fps</span></div>
+</div>
+
+</div><!-- /rvm-root -->
+
+<!-- Tag Modal -->
+<div id="tag-modal">
+  <div class="tm-card">
+    <div class="tm-title">Create Review Tag</div>
+    <div class="tm-row">Tag ID <input id="tm-id" type="text" placeholder="TAG-…"></div>
+    <div class="tm-row">Title <input id="tm-text" type="text" placeholder="Describe the issue…"></div>
+    <div class="tm-row">Severity
+      <select id="tm-sev">
+        <option value="info">Info</option>
+        <option value="low">Low</option>
+        <option value="medium" selected>Medium</option>
+        <option value="high">High</option>
+      </select>
+    </div>
+    <div class="tm-row">Target <input id="tm-target" type="text" readonly placeholder="(click object to set)"></div>
+    <div class="tm-actions">
+      <button class="tm-btn cancel" id="tm-cancel">Cancel</button>
+      <button class="tm-btn create" id="tm-create">Create Tag</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="rvm-scene.js"></script>
+</body>
+</html>

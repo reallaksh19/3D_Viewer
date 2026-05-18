@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>3D Viewer — Engineering</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.1/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.1/examples/jsm/"}}</script>
+<style>
+/* ── Variables ──────────────────────────────────────────── */
+:root{
+  --bg:#151b28;--canvas-bg:#08111c;--ribbon-bg:linear-gradient(180deg,#1f2a40 0%,#182236 100%);
+  --panel-bg:#141c2b;--rpanel-bg:#1a1f2e;--status-bg:#111826;
+  --bdr:rgba(255,255,255,0.09);--bdr2:rgba(255,255,255,0.06);
+  --text:#dce8f4;--dim:#8da2bc;--muted:#4f6079;
+  --accent:#4a9eff;--accent-bg:rgba(74,158,255,0.18);--accent-bg2:rgba(74,158,255,0.32);
+  --pass:#4ade80;--warn:#f0c840;--fail:#f87171;
+  --pipe:#66d9ff;--flange:#ffb25c;--valve:#72e39a;--tee:#ffe07a;
+  --elbow:#d0a8ff;--reducer:#ff9dc7;--support:#60c864;--anci:#ff7070;
+  --font:'Inter',system-ui,sans-serif; --mono:'Consolas','Courier New',monospace;
+  --r:5px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;font-family:var(--font);font-size:12px;color:var(--text);background:var(--bg)}
+svg{display:block;pointer-events:none}
+
+/* ── Shell ──────────────────────────────────────────────── */
+#vr{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:var(--bg);color:var(--text)}
+
+/* ── Ribbon ─────────────────────────────────────────────── */
+#ribbon{display:flex;align-items:stretch;gap:0;padding:0 6px;background:var(--ribbon-bg);border-bottom:1px solid var(--bdr);min-height:58px;overflow-x:auto;overflow-y:hidden;flex-shrink:0}
+#ribbon::-webkit-scrollbar{height:4px}
+#ribbon::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.15);border-radius:2px}
+.rg{display:flex;flex-direction:column;gap:2px;padding:11px 6px 4px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(8,14,24,0.3);flex-shrink:0;position:relative;margin:3px 2px}
+.rg-label{font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#a8c8eb;position:absolute;top:2px;left:7px;background:#1b2538;border:1px solid rgba(255,255,255,0.14);border-radius:999px;padding:1px 6px}
+.rg-btns{display:flex;align-items:center;gap:3px}
+.rb{width:52px;height:37px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-radius:5px;border:1px solid transparent;background:transparent;color:#8da2bc;cursor:pointer;flex-shrink:0;transition:background .14s,color .14s,border-color .14s;font-family:var(--font);outline:none}
+.rb svg{width:16px;height:16px}
+.rb-l{font-size:8.5px;font-weight:600;white-space:nowrap;line-height:1}
+.rb:hover{background:var(--accent-bg);color:#d7eaff;border-color:rgba(96,165,250,.42)}
+.rb.active,.rb[data-active]{background:var(--accent-bg2);color:#f0f8ff;border-color:rgba(96,165,250,.68);box-shadow:inset 0 0 0 1px rgba(174,214,255,.2)}
+.rb.iso{color:#b9d6fb;border-color:rgba(126,182,246,.35);background:rgba(19,58,106,.18)}
+.rb.iso:hover{background:rgba(74,158,255,.25)}
+.rb.sec{color:#b9d6fb;border-color:rgba(126,182,246,.38);background:rgba(19,58,106,.2)}
+.rb.sec svg{width:18px;height:18px;stroke-width:2.4}
+
+/* Ribbon right utility */
+#ribbon-right{display:flex;align-items:center;gap:5px;margin-left:auto;padding:4px 5px;flex-shrink:0}
+.import-grp{display:flex;align-items:center;gap:4px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.06);border-radius:6px;padding:4px 10px}
+.import-lbl{font-size:8.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#4f6079;margin-right:3px}
+.imp-btn{padding:4px 9px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:var(--font);transition:background .14s}
+.imp-btn.p{background:var(--accent);color:#fff;border-color:var(--accent)}
+.imp-btn.p:hover{background:#2563eb}
+.imp-btn.s{background:rgba(255,255,255,.08);color:#c5dcf5;border-color:rgba(255,255,255,.18)}
+.imp-btn.s:hover{background:rgba(255,255,255,.15);color:#fff}
+.collapse-btn{width:26px;height:22px;display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,.2);border-radius:5px;background:rgba(255,255,255,.07);color:#c5dcf5;cursor:pointer;transition:background .14s}
+.collapse-btn:hover{background:rgba(137,193,255,.22);color:#fff}
+.collapse-btn svg{width:13px;height:13px;transition:transform .15s}
+.collapse-btn.closed svg{transform:rotate(180deg)}
+
+/* ── Body ───────────────────────────────────────────────── */
+#body{display:flex;flex:1;min-height:0;overflow:hidden}
+
+/* ── Left Panel ─────────────────────────────────────────── */
+#lpanel{width:128px;min-width:128px;flex-shrink:0;background:var(--panel-bg);border-right:1px solid var(--bdr);display:flex;flex-direction:column;overflow:hidden;transition:width .2s,min-width .2s}
+#lpanel.closed{width:34px;min-width:34px}
+.lp-toggle{width:100%;height:27px;display:flex;align-items:center;justify-content:center;border:none;border-bottom:1px solid var(--bdr);background:rgba(13,21,33,.92);color:var(--dim);cursor:pointer;transition:background .14s;flex-shrink:0}
+.lp-toggle:hover{background:var(--accent-bg);color:#e8f3ff}
+.lp-toggle svg{width:13px;height:13px;transition:transform .2s}
+.lp-toggle.closed svg{transform:rotate(180deg)}
+.lp-body{flex:1;overflow-y:auto;overflow-x:hidden;padding:8px 6px 12px;display:flex;flex-direction:column;gap:8px;scrollbar-width:thin;scrollbar-color:rgba(129,177,230,.4) transparent}
+#lpanel.closed .lp-body{display:none}
+.lp-grp{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:7px;padding:7px;display:flex;flex-direction:column;gap:5px}
+.lp-grp-t{font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#88b2da}
+.lp-label{display:flex;flex-direction:column;gap:3px;font-size:10px;color:#c1d8ed}
+.lp-cb{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:#c1d8ed}
+.lp-cb input[type=checkbox]{width:12px;height:12px;accent-color:var(--accent);cursor:pointer}
+.lp-label select,.lp-label input[type=number]{background:#0f1726;border:1px solid rgba(255,255,255,.2);border-radius:3px;color:var(--text);font-size:10px;padding:2px 5px;min-height:20px;outline:none;font-family:var(--font)}
+.lp-range{width:100%;accent-color:#4e9eff;background:transparent;margin:0}
+.lp-range-val{font-size:9px;color:var(--dim);text-align:right;margin-top:1px}
+.vis-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;display:inline-block}
+
+/* ── Canvas ─────────────────────────────────────────────── */
+#cvs-wrap{flex:1;position:relative;overflow:hidden;background:radial-gradient(ellipse at 50% 30%,#1e2a40 0%,#111724 60%,var(--canvas-bg) 100%)}
+#cvs-wrap.m-orbit{cursor:grab}
+#cvs-wrap.m-orbit:active{cursor:grabbing}
+#cvs-wrap.m-pan{cursor:all-scroll}
+#cvs-wrap.m-select{cursor:default}
+#cvs-wrap.m-measure{cursor:crosshair}
+#cvs-wrap.m-zoom{cursor:zoom-in}
+#viewer-canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+/* ViewCube */
+#vc-wrap{position:absolute;top:14px;right:14px;width:88px;user-select:none;z-index:10}
+#vc-scene{width:88px;height:88px;perspective:220px;cursor:pointer}
+#vc{width:64px;height:64px;position:relative;transform-style:preserve-3d;margin:10px auto 5px;transition:transform .04s linear}
+.vc-f{position:absolute;width:64px;height:64px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;border:1px solid rgba(96,165,250,.32);border-radius:3px;cursor:pointer;transition:border-color .15s,filter .15s;backface-visibility:visible}
+.vc-f:hover{border-color:rgba(96,165,250,.85);filter:brightness(1.3)}
+.vc-top   {background:rgba(37,51,78,.92); color:#93c5fd;transform:rotateX(90deg)  translateZ(32px)}
+.vc-bot   {background:rgba(20,30,50,.92); color:#475569;transform:rotateX(-90deg) translateZ(32px)}
+.vc-front {background:rgba(29,42,65,.92); color:#bdd9f8;transform:translateZ(32px)}
+.vc-back  {background:rgba(24,36,57,.92); color:#475569;transform:rotateY(180deg) translateZ(32px)}
+.vc-right {background:rgba(26,40,62,.92); color:#93c5fd;transform:rotateY(90deg)  translateZ(32px)}
+.vc-left  {background:rgba(22,34,54,.92); color:#475569;transform:rotateY(-90deg) translateZ(32px)}
+#vc-compass{width:80px;height:15px;margin:0 auto;display:flex;align-items:center;justify-content:space-around;font-size:8.5px;font-weight:700;color:var(--dim);background:rgba(15,23,37,.7);border:1px solid var(--bdr);border-radius:4px}
+#vc-compass span.hi{color:var(--accent)}
+
+/* Axis Gizmo */
+#axis-gizmo{position:absolute;bottom:44px;right:14px;width:64px;height:64px;z-index:10;pointer-events:none}
+
+/* Coordinate readout */
+#coord{position:absolute;bottom:10px;left:12px;background:rgba(10,16,28,.78);border:1px solid rgba(255,255,255,.1);border-radius:5px;padding:5px 10px;font-family:var(--mono);font-size:10.5px;color:#93c5fd;display:flex;gap:10px;pointer-events:none;z-index:10;backdrop-filter:blur(4px)}
+.co{display:flex;gap:3px;align-items:center}
+.co-lbl{color:var(--muted);font-size:9px;font-weight:700}
+.co-val{min-width:42px;color:#7ab8ff}
+
+/* Context menu */
+#ctx{position:absolute;background:#0d1628;border:1px solid rgba(96,165,250,.32);border-radius:7px;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:100;min-width:184px;padding:4px 0;display:none;backdrop-filter:blur(8px)}
+#ctx.show{display:block}
+.ci{display:flex;align-items:center;gap:8px;padding:6px 13px;font-size:11px;color:#c5dcf5;cursor:pointer;transition:background .1s}
+.ci:hover{background:var(--accent-bg);color:#fff}
+.ci svg{width:13px;height:13px;color:var(--dim);flex-shrink:0}
+.ci:hover svg{color:var(--accent)}
+.ci.danger:hover{background:rgba(248,113,113,.14);color:#fca5a5}
+.ci-kbd{margin-left:auto;font-size:9.5px;font-family:var(--mono);color:var(--muted);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:3px;padding:1px 5px}
+.c-sep{height:1px;background:var(--bdr);margin:3px 10px}
+.c-sec{font-size:8.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);padding:5px 13px 2px}
+
+/* Canvas drop hint */
+#hint{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;z-index:2;gap:10px}
+#hint svg{width:48px;height:48px;color:#1e2d42}
+#hint-t{font-size:13px;color:#253553}
+#hint-s{font-size:10px;color:#1e2d42}
+
+/* Selection HUD */
+#sel-hud{position:absolute;bottom:10px;right:106px;background:rgba(10,16,28,.88);border:1px solid rgba(96,165,250,.38);border-radius:7px;padding:10px 13px;min-width:196px;z-index:15;pointer-events:none;backdrop-filter:blur(4px);display:none}
+#sel-hud.show{display:block}
+.sh-type{font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:5px}
+.sh-name{font-size:12px;font-weight:600;color:#e8f3ff;margin-bottom:7px}
+.sh-row{display:flex;justify-content:space-between;font-size:10px;color:var(--dim);padding:1px 0}
+.sh-row strong{color:var(--text);font-weight:500}
+
+/* Help button */
+#help-btn{position:absolute;bottom:44px;right:88px;width:26px;height:26px;border-radius:50%;background:rgba(10,16,28,.7);border:1px solid var(--bdr);color:var(--dim);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;cursor:pointer;z-index:10;transition:background .14s;font-family:var(--font)}
+#help-btn:hover{background:var(--accent-bg);color:var(--accent)}
+
+/* Keyboard help overlay */
+#kbd-help{position:absolute;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:200;display:none;backdrop-filter:blur(3px)}
+#kbd-help.show{display:flex}
+.kh-panel{background:#0d1628;border:1px solid rgba(96,165,250,.28);border-radius:10px;padding:20px 24px;width:460px;max-width:90vw}
+.kh-title{font-size:13px;font-weight:700;color:var(--accent);margin-bottom:14px;display:flex;justify-content:space-between;align-items:center}
+.kh-close{background:none;border:none;color:var(--dim);cursor:pointer;font-size:18px;padding:0;font-family:var(--font)}
+.kh-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px 20px}
+.kh-row{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--dim)}
+.kh-key{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:20px;padding:0 5px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.18);border-bottom:2px solid rgba(255,255,255,.24);border-radius:3px;font-family:var(--mono);font-size:10px;font-weight:700;color:var(--text);flex-shrink:0}
+
+/* ── Right Panel ────────────────────────────────────────── */
+#rpanel{width:280px;min-width:240px;flex-shrink:0;background:var(--rpanel-bg);border-left:1px solid var(--bdr);display:flex;flex-direction:column;overflow:hidden}
+#rpanel.closed{width:0;min-width:0}
+.rp-tabs{display:flex;border-bottom:1px solid var(--bdr);background:#141920;flex-shrink:0}
+.rp-tab{flex:1;padding:7px 4px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);background:transparent;border:none;cursor:pointer;border-bottom:2px solid transparent;transition:color .14s,border-color .14s;font-family:var(--font)}
+.rp-tab:hover{color:#90c4e8}
+.rp-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.rp-content{flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:rgba(129,177,230,.35) transparent;display:none}
+.rp-content.active{display:block}
+
+/* Tree */
+.tree-search-bar{padding:7px 8px;border-bottom:1px solid var(--bdr);background:rgba(0,0,0,.15);flex-shrink:0;display:flex;align-items:center;gap:5px}
+.tree-search-bar svg{width:13px;height:13px;color:var(--dim);flex-shrink:0}
+.tree-search-bar input{flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:4px;color:var(--text);font-size:11px;padding:4px 7px;outline:none;font-family:var(--font)}
+.tree-search-bar input:focus{border-color:var(--accent)}
+.tree-body{padding:4px 0;flex:1}
+.tn{user-select:none}
+.tn-row{display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:11px;color:#b0c8e0;transition:background .1s}
+.tn-row:hover{background:rgba(59,130,246,.1);color:#d7eaff}
+.tn-row.selected{background:rgba(59,130,246,.2);color:#e8f3ff}
+.tn-toggle{width:14px;height:14px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:10px;flex-shrink:0;transition:transform .14s}
+.tn-toggle.open{transform:rotate(90deg)}
+.tn-toggle.leaf{opacity:0;pointer-events:none}
+.tn-cb{width:12px;height:12px;accent-color:var(--accent);cursor:pointer;flex-shrink:0}
+.tn-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.tn-label{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px}
+.tn-count{font-size:9px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:0 5px;color:var(--muted);flex-shrink:0}
+.tn-children{padding-left:16px;display:none}
+.tn-children.open{display:block}
+.i1{padding-left:18px}
+.i2{padding-left:32px}
+
+/* Properties panel */
+.prop-empty{padding:20px;font-size:11px;color:var(--muted);text-align:center;font-style:italic}
+.prop-hdr{padding:10px 10px 8px;border-bottom:1px solid var(--bdr);background:rgba(0,0,0,.12)}
+.prop-type-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:var(--accent-bg);border:1px solid rgba(74,158,255,.35);color:var(--accent);margin-bottom:5px}
+.prop-tag{font-size:13px;font-weight:700;color:#e8f3ff;margin-bottom:2px}
+.prop-pipeline{font-size:10px;color:var(--dim);font-family:var(--mono)}
+.prop-body{padding:8px 10px}
+.ps{margin-bottom:10px}
+.ps-title{font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:4px 0;border-bottom:1px solid var(--bdr2);margin-bottom:4px}
+.pr{display:flex;justify-content:space-between;align-items:baseline;font-size:10.5px;padding:2px 0;gap:6px}
+.pr-k{color:var(--dim);flex-shrink:0}
+.pr-v{color:var(--text);font-family:var(--mono);font-size:10px;text-align:right;word-break:break-all}
+.pr-v.p{color:var(--pass);font-weight:600}
+.pr-v.w{color:var(--warn)}
+
+/* Search panel */
+.search-top{padding:7px 8px 5px;border-bottom:1px solid var(--bdr);background:rgba(0,0,0,.12)}
+.search-top input{width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:4px;color:var(--text);font-size:11px;padding:5px 8px;outline:none;font-family:var(--font)}
+.search-top input:focus{border-color:var(--accent)}
+.search-filters{display:flex;flex-wrap:wrap;gap:4px;padding:6px 8px;border-bottom:1px solid var(--bdr2)}
+.sf{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:999px;font-size:9.5px;font-weight:600;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:var(--dim);cursor:pointer;transition:background .1s}
+.sf.on{border-color:rgba(74,158,255,.45);background:var(--accent-bg);color:var(--accent)}
+.sf .sf-dot{width:6px;height:6px;border-radius:50%}
+.search-results{padding:4px 0}
+.sr-item{display:flex;align-items:center;gap:6px;padding:5px 10px;cursor:pointer;transition:background .1s;font-size:11px;color:#b0c8e0}
+.sr-item:hover{background:rgba(59,130,246,.1);color:#d7eaff}
+.sr-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.sr-tag{flex:1;font-weight:500}
+.sr-type{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+
+/* ── Status Bar ─────────────────────────────────────────── */
+#statusbar{display:flex;align-items:center;height:27px;background:var(--status-bg);border-top:1px solid var(--bdr);flex-shrink:0}
+.sb{display:flex;align-items:center;gap:5px;padding:0 10px;height:100%;border-right:1px solid var(--bdr2);font-size:10.5px;flex-shrink:0}
+.sb:last-child{border-right:none;margin-left:auto}
+.sb-sep{margin:0 4px;width:1px;height:12px;background:var(--bdr)}
+.mode-chip{display:inline-flex;align-items:center;gap:3px;background:var(--accent-bg);border:1px solid rgba(96,165,250,.32);border-radius:999px;padding:1px 8px;font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--accent)}
+.mode-chip.measure{background:rgba(249,115,22,.14);border-color:rgba(249,115,22,.32);color:#fb923c}
+.mode-chip.select{background:rgba(74,222,128,.1);border-color:rgba(74,222,128,.28);color:#86efac}
+.sc-coords{font-family:var(--mono);font-size:10px;color:var(--dim);display:flex;gap:8px}
+.sc-cpart{display:flex;gap:3px}
+.sc-ax{color:#4a6a8a;font-weight:700;font-size:9px}
+.sc-val{color:#7ab8ff;min-width:38px}
+#sb-msg{font-size:10.5px;color:var(--dim);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#sb-fps{font-family:var(--mono);font-size:9.5px;color:var(--muted)}
+
+/* ── Tweaks Panel ───────────────────────────────────────── */
+#tweaks-panel{position:fixed;bottom:20px;right:20px;background:#0d1628;border:1px solid rgba(96,165,250,.3);border-radius:10px;padding:14px 16px;z-index:300;min-width:200px;box-shadow:0 8px 32px rgba(0,0,0,.5);display:none}
+#tweaks-panel.show{display:block}
+.tw-title{font-size:11px;font-weight:700;color:var(--accent);margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+.tw-close{background:none;border:none;color:var(--dim);cursor:pointer;font-family:var(--font)}
+.tw-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;font-size:11px;color:var(--text)}
+.tw-select{background:#0f1726;border:1px solid rgba(255,255,255,.2);border-radius:4px;color:var(--text);font-size:10px;padding:2px 6px;font-family:var(--font)}
+
+/* ── Scrollbars ─────────────────────────────────────────── */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(129,177,230,.35);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:rgba(129,177,230,.55)}
+</style>
+</head>
+<body>
+<div id="vr">
+
+<!-- ██ RIBBON ██████████████████████████████████████████████ -->
+<div id="ribbon">
+
+  <!-- Navigate -->
+  <div class="rg">
+    <span class="rg-label">Navigate</span>
+    <div class="rg-btns">
+      <button class="rb" id="rb-select" data-mode="select" title="Select [S]">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/></svg>
+        <span class="rb-l">Select</span>
+      </button>
+      <button class="rb active" id="rb-orbit" data-mode="orbit" title="Orbit [O]">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <span class="rb-l">Orbit</span>
+      </button>
+      <button class="rb" id="rb-pan" data-mode="pan" title="Pan [P]">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9V5h4"/><path d="m5 5 14 14"/><path d="M19 10v9h-9"/></svg>
+        <span class="rb-l">Pan</span>
+      </button>
+      <button class="rb" id="rb-zoom" data-mode="zoom" title="Box Zoom [W]">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="12" height="12" rx="1" stroke-dasharray="3 2"/><circle cx="17" cy="17" r="3"/><path d="m21 21-2.15-2.15"/></svg>
+        <span class="rb-l">Box Zoom</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- View -->
+  <div class="rg">
+    <span class="rg-label">View</span>
+    <div class="rg-btns">
+      <button class="rb" id="rb-fitall" title="Fit All [F]">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9V5h4"/><path d="M19 9V5h-4"/><path d="M5 15v4h4"/><path d="M19 15v4h-4"/></svg>
+        <span class="rb-l">Fit All</span>
+      </button>
+      <button class="rb" id="rb-fitsel" title="Fit Selection [Shift+F]">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9V5h4"/><path d="M19 9V5h-4"/><path d="M5 15v4h4"/><path d="M19 15v4h-4"/><circle cx="12" cy="12" r="3"/></svg>
+        <span class="rb-l">Fit Sel</span>
+      </button>
+      <button class="rb" id="rb-home" title="Home View [H]">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <span class="rb-l">Home</span>
+      </button>
+      <button class="rb" id="rb-proj" title="Toggle Projection [V]">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v18H3z"/><path d="m3 3 18 18"/><path d="m21 3-18 18"/></svg>
+        <span class="rb-l">Ortho</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Isometric -->
+  <div class="rg">
+    <span class="rg-label">Isometric</span>
+    <div class="rg-btns">
+      <button class="rb iso" id="rb-nw" title="Iso NW [7]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 19 7.5v8L12 20.5 5 16.5v-8Z" fill="currentColor" fill-opacity=".1"/><path d="M12 3.5v8"/><path d="M5 8.5 12 12l7-4.5"/><path d="M12 12v8.5"/><circle cx="7" cy="7" r="1.5" fill="currentColor"/></svg><span class="rb-l">NW</span></button>
+      <button class="rb iso" id="rb-ne" title="Iso NE [9]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 19 7.5v8L12 20.5 5 16.5v-8Z" fill="currentColor" fill-opacity=".1"/><path d="M12 3.5v8"/><path d="M5 8.5 12 12l7-4.5"/><path d="M12 12v8.5"/><circle cx="17" cy="7" r="1.5" fill="currentColor"/></svg><span class="rb-l">NE</span></button>
+      <button class="rb iso" id="rb-sw" title="Iso SW [1]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 19 7.5v8L12 20.5 5 16.5v-8Z" fill="currentColor" fill-opacity=".1"/><path d="M12 3.5v8"/><path d="M5 8.5 12 12l7-4.5"/><path d="M12 12v8.5"/><circle cx="7" cy="17" r="1.5" fill="currentColor"/></svg><span class="rb-l">SW</span></button>
+      <button class="rb iso" id="rb-se" title="Iso SE [3]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 19 7.5v8L12 20.5 5 16.5v-8Z" fill="currentColor" fill-opacity=".1"/><path d="M12 3.5v8"/><path d="M5 8.5 12 12l7-4.5"/><path d="M12 12v8.5"/><circle cx="17" cy="17" r="1.5" fill="currentColor"/></svg><span class="rb-l">SE</span></button>
+      <button class="rb iso" id="rb-top" title="Top [Num7]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="9" rx="9" ry="3"/><path d="M3 9v6a9 3 0 0 0 18 0V9"/></svg><span class="rb-l">Top</span></button>
+      <button class="rb iso" id="rb-front" title="Front [Num1]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8M8 12h8"/></svg><span class="rb-l">Front</span></button>
+    </div>
+  </div>
+
+  <!-- Section -->
+  <div class="rg">
+    <span class="rg-label">Section</span>
+    <div class="rg-btns">
+      <button class="rb sec" id="rb-secbox" title="Section Box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor" fill-opacity=".15"/><path d="M4 10h16M10 4v16"/></svg>
+        <span class="rb-l">Box</span>
+      </button>
+      <button class="rb sec" id="rb-secplane" title="Section Plane">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 14h18"/><path d="M12 4v8"/><path d="m8.5 8.5 3.5-4 3.5 4"/></svg>
+        <span class="rb-l">Plane</span>
+      </button>
+      <button class="rb sec" id="rb-secoff" title="Section Off">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+        <span class="rb-l">Off</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Visibility -->
+  <div class="rg">
+    <span class="rg-label">Visibility</span>
+    <div class="rg-btns">
+      <button class="rb" id="rb-isolate" title="Isolate Selected [I]">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" opacity=".4"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/></svg>
+        <span class="rb-l">Isolate</span>
+      </button>
+      <button class="rb" id="rb-hide" title="Hide [Del]">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+        <span class="rb-l">Hide</span>
+      </button>
+      <button class="rb" id="rb-showall" title="Show All">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        <span class="rb-l">Show All</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Tools -->
+  <div class="rg">
+    <span class="rg-label">Tools</span>
+    <div class="rg-btns">
+      <button class="rb" id="rb-measure" data-mode="measure" title="Measure [M]">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="8" rx="2"/><path d="M6 8v4M10 8v4M14 8v4M18 8v4"/></svg>
+        <span class="rb-l">Measure</span>
+      </button>
+      <button class="rb" id="rb-note" title="Annotate [N]">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span class="rb-l">Note</span>
+      </button>
+      <button class="rb" id="rb-shot" title="Screenshot">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        <span class="rb-l">Shot</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Right -->
+  <div id="ribbon-right">
+    <div class="import-grp">
+      <span class="import-lbl">Import</span>
+      <button class="imp-btn p">PCF</button>
+      <button class="imp-btn s">STP</button>
+      <button class="imp-btn s">DB/XML</button>
+    </div>
+    <button class="rb" id="rb-config" title="Config" style="width:40px">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+    <button class="collapse-btn" id="rb-collapse" title="Collapse ribbon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- ██ BODY ████████████████████████████████████████████████ -->
+<div id="body">
+
+  <!-- Left Panel -->
+  <aside id="lpanel">
+    <button class="lp-toggle" id="lp-toggle">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>
+    </button>
+    <div class="lp-body">
+      <div style="font-size:9.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#9ec0e1;padding:2px 0 4px">Settings</div>
+
+      <div class="lp-grp">
+        <div class="lp-grp-t">Graphics</div>
+        <label class="lp-cb"><input type="checkbox" id="lp-heatmap"> Heatmap</label>
+        <label class="lp-label">Metric <select id="lp-hm-metric"><option>T1</option><option>T2</option><option>P1</option></select></label>
+        <label class="lp-label">Steps <input type="number" value="5" min="2" max="12" id="lp-hm-steps"></label>
+        <label class="lp-cb"><input type="checkbox" checked id="lp-nodes"> Node IDs</label>
+        <label class="lp-cb"><input type="checkbox" checked id="lp-lineno"> Line No.</label>
+        <label class="lp-cb"><input type="checkbox" id="lp-length"> Length</label>
+        <label class="lp-label">Overlay Scale<input class="lp-range" type="range" min="20" max="300" step="5" value="100" id="lp-ov-scale"><span class="lp-range-val" id="lp-ov-val">1.00×</span></label>
+      </div>
+
+      <div class="lp-grp">
+        <div class="lp-grp-t">Visibility</div>
+        <label class="lp-cb"><input type="checkbox" checked class="vis-cb" data-type="PIPE"><span class="vis-dot" style="background:var(--pipe)"></span> Pipe</label>
+        <label class="lp-cb"><input type="checkbox" checked class="vis-cb" data-type="FLANGE"><span class="vis-dot" style="background:var(--flange)"></span> Flange</label>
+        <label class="lp-cb"><input type="checkbox" checked class="vis-cb" data-type="VALVE"><span class="vis-dot" style="background:var(--valve)"></span> Valve</label>
+        <label class="lp-cb"><input type="checkbox" checked class="vis-cb" data-type="TEE"><span class="vis-dot" style="background:var(--tee)"></span> Tee</label>
+        <label class="lp-cb"><input type="checkbox" checked class="vis-cb" data-type="ELBOW"><span class="vis-dot" style="background:var(--elbow)"></span> Elbow</label>
+        <label class="lp-cb"><input type="checkbox" checked class="vis-cb" data-type="REDUCER"><span class="vis-dot" style="background:var(--reducer)"></span> Reducer</label>
+        <label class="lp-cb"><input type="checkbox" checked class="vis-cb" data-type="SUPPORT"><span class="vis-dot" style="background:var(--support)"></span> Support</label>
+        <label class="lp-cb"><input type="checkbox" checked class="vis-cb" data-type="ANCI"><span class="vis-dot" style="background:var(--anci)"></span> Anci</label>
+      </div>
+
+      <div class="lp-grp">
+        <div class="lp-grp-t">Clip / Plane</div>
+        <label class="lp-label">Mode <select id="lp-clip-mode"><option value="OFF">Off</option><option value="BOX">Box</option><option value="PLANE">Plane Up</option></select></label>
+        <label class="lp-label">Pad <input class="lp-range" type="range" min="-1000" max="1000" step="50" value="0" id="lp-box-pad"><span class="lp-range-val" id="lp-bp-val">0</span></label>
+        <label class="lp-label">Offset <input class="lp-range" type="range" min="-2500" max="2500" step="50" value="0" id="lp-plane-off"><span class="lp-range-val" id="lp-po-val">0</span></label>
+      </div>
+
+      <div class="lp-grp">
+        <div class="lp-grp-t">View</div>
+        <label class="lp-label">Axis <select id="lp-axis"><option value="Z" selected>Z-up</option><option value="Y">Y-up</option></select></label>
+        <label class="lp-label">Theme <select id="lp-theme"><option value="NavisDark" selected>Dark (Navy)</option><option value="HighContrast">High Contrast</option><option value="DrawLight">Light</option></select></label>
+        <label class="lp-label">Support Scale<input class="lp-range" type="range" min="50" max="400" step="10" value="200" id="lp-sup-scale"><span class="lp-range-val" id="lp-ss-val">2.00×</span></label>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Canvas -->
+  <div id="cvs-wrap" class="m-orbit">
+    <canvas id="viewer-canvas"></canvas>
+
+    <!-- ViewCube -->
+    <div id="vc-wrap">
+      <div id="vc-scene">
+        <div id="vc">
+          <div class="vc-f vc-top"  data-snap="top">Top</div>
+          <div class="vc-f vc-bot"  data-snap="bottom">Bot</div>
+          <div class="vc-f vc-front"data-snap="front">Front</div>
+          <div class="vc-f vc-back" data-snap="back">Back</div>
+          <div class="vc-f vc-right"data-snap="right">Right</div>
+          <div class="vc-f vc-left" data-snap="left">Left</div>
+        </div>
+      </div>
+      <div id="vc-compass"><span>N</span><span class="hi">E</span><span>S</span><span>W</span></div>
+    </div>
+
+    <!-- Axis Gizmo -->
+    <svg id="axis-gizmo" viewBox="-48 -48 96 96">
+      <line id="ax-x" x1="0" y1="0" x2="30" y2="-10" stroke="#ff5555" stroke-width="2.5" stroke-linecap="round"/>
+      <text id="ax-xl" x="35" y="-8" font-size="9" fill="#ff5555" font-family="Inter,sans-serif" font-weight="700" text-anchor="middle">X</text>
+      <line id="ax-y" x1="0" y1="0" x2="-10" y2="-30" stroke="#55cc55" stroke-width="2.5" stroke-linecap="round"/>
+      <text id="ax-yl" x="-10" y="-34" font-size="9" fill="#55cc55" font-family="Inter,sans-serif" font-weight="700" text-anchor="middle">Y</text>
+      <line id="ax-z" x1="0" y1="0" x2="-26" y2="-10" stroke="#5599ff" stroke-width="2.5" stroke-linecap="round"/>
+      <text id="ax-zl" x="-32" y="-8" font-size="9" fill="#5599ff" font-family="Inter,sans-serif" font-weight="700" text-anchor="middle">Z</text>
+      <circle cx="0" cy="0" r="3" fill="rgba(255,255,255,0.3)"/>
+    </svg>
+
+    <!-- Coord readout -->
+    <div id="coord">
+      <div class="co"><span class="co-lbl">X</span><span class="co-val" id="cx">—</span></div>
+      <div class="co"><span class="co-lbl">Y</span><span class="co-val" id="cy">—</span></div>
+      <div class="co"><span class="co-lbl">Z</span><span class="co-val" id="cz">—</span></div>
+    </div>
+
+    <!-- Drop hint -->
+    <div id="hint">
+      <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 40h32M12 20h24M24 8v24M14 26l10 10 10-10"/></svg>
+      <div id="hint-t">Load a PCF file to render the model</div>
+      <div id="hint-s">Import → PCF  ·  or drag &amp; drop a .pcf file</div>
+    </div>
+
+    <!-- Selection HUD -->
+    <div id="sel-hud">
+      <div class="sh-type" id="sh-type">PIPE</div>
+      <div class="sh-name" id="sh-name">PIPE-001</div>
+      <div class="sh-row"><span class="pr-k">Length</span><strong id="sh-len">—</strong></div>
+      <div class="sh-row"><span class="pr-k">OD</span><strong id="sh-od">—</strong></div>
+      <div class="sh-row"><span class="pr-k">Line</span><strong id="sh-line">—</strong></div>
+    </div>
+
+    <!-- Help button -->
+    <button id="help-btn" title="Keyboard shortcuts [?]">?</button>
+
+    <!-- Context menu -->
+    <div id="ctx">
+      <div class="c-sec">Selection</div>
+      <div class="ci" data-action="fit-sel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 9V5h4"/><path d="M19 9V5h-4"/><path d="M5 15v4h4"/><path d="M19 15v4h-4"/><circle cx="12" cy="12" r="3"/></svg>Fit to Selection<span class="ci-kbd">Shift+F</span></div>
+      <div class="ci" data-action="isolate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" opacity=".35"/></svg>Isolate Selected<span class="ci-kbd">I</span></div>
+      <div class="ci danger" data-action="hide"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><line x1="1" y1="1" x2="23" y2="23"/></svg>Hide Selected<span class="ci-kbd">Del</span></div>
+      <div class="ci" data-action="show-all"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Show All Hidden</div>
+      <div class="c-sep"></div>
+      <div class="ci" data-action="select-all-type"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Select All of Type</div>
+      <div class="ci" data-action="deselect"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>Clear Selection<span class="ci-kbd">Esc</span></div>
+      <div class="c-sep"></div>
+      <div class="ci" data-action="properties"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>Properties<span class="ci-kbd">Enter</span></div>
+      <div class="ci" data-action="copy-coords"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy Coordinates</div>
+    </div>
+
+    <!-- Keyboard Help -->
+    <div id="kbd-help">
+      <div class="kh-panel">
+        <div class="kh-title">Keyboard Shortcuts <button class="kh-close" id="kh-close">×</button></div>
+        <div class="kh-grid">
+          <div class="kh-row"><span class="kh-key">O</span><span>Orbit mode</span></div>
+          <div class="kh-row"><span class="kh-key">S</span><span>Select mode</span></div>
+          <div class="kh-row"><span class="kh-key">P</span><span>Pan mode</span></div>
+          <div class="kh-row"><span class="kh-key">M</span><span>Measure mode</span></div>
+          <div class="kh-row"><span class="kh-key">F</span><span>Fit All</span></div>
+          <div class="kh-row"><span class="kh-key">⇧F</span><span>Fit Selection</span></div>
+          <div class="kh-row"><span class="kh-key">H</span><span>Home view</span></div>
+          <div class="kh-row"><span class="kh-key">G</span><span>Toggle Grid</span></div>
+          <div class="kh-row"><span class="kh-key">I</span><span>Isolate</span></div>
+          <div class="kh-row"><span class="kh-key">Del</span><span>Hide selected</span></div>
+          <div class="kh-row"><span class="kh-key">Esc</span><span>Clear / Exit</span></div>
+          <div class="kh-row"><span class="kh-key">7</span><span>Iso NW</span></div>
+          <div class="kh-row"><span class="kh-key">9</span><span>Iso NE</span></div>
+          <div class="kh-row"><span class="kh-key">1</span><span>Iso SW</span></div>
+          <div class="kh-row"><span class="kh-key">3</span><span>Iso SE</span></div>
+          <div class="kh-row"><span class="kh-key">?</span><span>This help</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right Panel -->
+  <aside id="rpanel">
+    <div class="rp-tabs">
+      <button class="rp-tab active" data-panel="tree">Hierarchy</button>
+      <button class="rp-tab" data-panel="props">Properties</button>
+      <button class="rp-tab" data-panel="search">Search</button>
+    </div>
+
+    <!-- Tree -->
+    <div class="rp-content active" id="panel-tree" style="display:flex;flex-direction:column;overflow:hidden;height:100%">
+      <div class="tree-search-bar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" id="tree-search" placeholder="Filter components…">
+      </div>
+      <div id="tree-root" class="tree-body" style="overflow-y:auto;flex:1"></div>
+    </div>
+
+    <!-- Props -->
+    <div class="rp-content" id="panel-props">
+      <div class="prop-empty" id="props-empty">Select a component to view properties</div>
+      <div id="props-content" style="display:none">
+        <div class="prop-hdr">
+          <div class="prop-type-badge" id="prop-type-badge">PIPE</div>
+          <div class="prop-tag" id="prop-tag">—</div>
+          <div class="prop-pipeline" id="prop-pipeline">—</div>
+        </div>
+        <div class="prop-body">
+          <div class="ps">
+            <div class="ps-title">Geometry</div>
+            <div class="pr"><span class="pr-k">From</span><span class="pr-v" id="pr-from">—</span></div>
+            <div class="pr"><span class="pr-k">To</span><span class="pr-v" id="pr-to">—</span></div>
+            <div class="pr"><span class="pr-k">Length</span><span class="pr-v" id="pr-len">—</span></div>
+            <div class="pr"><span class="pr-k">OD</span><span class="pr-v" id="pr-od">—</span></div>
+            <div class="pr"><span class="pr-k">WT</span><span class="pr-v" id="pr-wt">—</span></div>
+          </div>
+          <div class="ps">
+            <div class="ps-title">Process</div>
+            <div class="pr"><span class="pr-k">T1</span><span class="pr-v p" id="pr-t1">—</span></div>
+            <div class="pr"><span class="pr-k">T2</span><span class="pr-v" id="pr-t2">—</span></div>
+            <div class="pr"><span class="pr-k">P1</span><span class="pr-v" id="pr-p1">—</span></div>
+          </div>
+          <div class="ps">
+            <div class="ps-title">Material</div>
+            <div class="pr"><span class="pr-k">Spec</span><span class="pr-v" id="pr-spec">—</span></div>
+            <div class="pr"><span class="pr-k">Skey</span><span class="pr-v" id="pr-skey">—</span></div>
+          </div>
+          <div class="ps">
+            <div class="ps-title">Position</div>
+            <div class="pr"><span class="pr-k">X</span><span class="pr-v" id="pr-x">—</span></div>
+            <div class="pr"><span class="pr-k">Y</span><span class="pr-v" id="pr-y">—</span></div>
+            <div class="pr"><span class="pr-k">Z</span><span class="pr-v" id="pr-z">—</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Search -->
+    <div class="rp-content" id="panel-search">
+      <div class="search-top"><input type="text" id="search-input" placeholder="Search by tag, type, line…"></div>
+      <div class="search-filters" id="search-filters"></div>
+      <div id="search-results" class="search-results"></div>
+    </div>
+  </aside>
+
+</div><!-- /body -->
+
+<!-- ██ STATUS BAR █████████████████████████████████████████ -->
+<div id="statusbar">
+  <div class="sb">
+    <span class="mode-chip" id="mode-chip">Orbit</span>
+  </div>
+  <div class="sb">
+    <div class="sc-coords">
+      <div class="sc-cpart"><span class="sc-ax">X</span><span class="sc-val" id="sx">—</span></div>
+      <div class="sc-cpart"><span class="sc-ax">Y</span><span class="sc-val" id="sy">—</span></div>
+      <div class="sc-cpart"><span class="sc-ax">Z</span><span class="sc-val" id="sz">—</span></div>
+    </div>
+  </div>
+  <div class="sb">
+    <span style="color:var(--dim);font-size:10px"><span style="color:var(--accent);font-weight:600" id="sel-count">0</span> selected</span>
+    <span class="sb-sep"></span>
+    <span style="color:var(--dim);font-size:10px"><span style="color:var(--text)" id="comp-count">0</span> components</span>
+  </div>
+  <div class="sb" style="flex:1"><span id="sb-msg">Load a PCF file to render the model</span></div>
+  <div class="sb">
+    <span id="sb-fps" style="color:var(--muted);font-family:var(--mono);font-size:9.5px">—fps · —K tri</span>
+  </div>
+</div>
+
+</div><!-- /vr -->
+
+<script type="module" src="viewer-scene.js"></script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+Wave 9 — Hardening and Usability
+
+Goal:
+Add master import/export, valve ambiguity resolution, deterministic output, multi-PCF downloads, and validation register.
+
+Primary files:
+- viewer/rvm-pcf-extract/RvmExtractHardening.js
+- viewer/rvm-pcf-extract/RvmFinal2dCsvBuilder.js
+- viewer/tabs/rvm-json-pcf-extract-tab.js
+- viewer/tabs/rvm-json-pcf-extract-tab.css
+
+No npm dependency:
+No ZIP library is added.
+
+Deterministic row order:
+Sort by:
+1. pipelineRef
+2. sourcePath
+3. type
+4. sourceCanonicalId / id / name
+5. previous rowNo
+
+Then reassign rowNo.
+CA98 remains if present; else rowNo * 10.
+
+Master import/export:
+Export:
+{
+  schema: "rvm-json-pcf-extract-masters/v1",
+  exportedAt,
+  masters
+}
+
+Import:
+Accept either:
+- { masters: {...} }
+- raw masters object
+
+Bad JSON creates MASTERS-IMPORT-FAILED diagnostic.
+
+Valve ambiguity resolver:
+If Wave 6 finds multiple candidates:
+- Show ambiguity panel.
+- User chooses candidate dropdown.
+- Apply CA8.
+- Remove ambiguity request.
+- Clear generated PCF so user regenerates.
+
+Validation register:
+Exports CSV with:
+- severity
+- code
+- message
+- rowNo
+- type
+- name
+- pipelineRef
+- sourceCanonicalId
+
+Multiple PCF download:
+Download separate .pcf files for each pipelineRef with short delay.
+
+Validation gate:
+PASS: Masters export/import.
+PASS: Bad JSON creates diagnostic.
+PASS: Ambiguous valve candidate can be selected.
+PASS: CA8 applies after selection.
+PASS: Generated PCF clears after CA8 update.
+PASS: Multiple PCFs download separately.
+PASS: Validation Register CSV downloads.
+PASS: Row order is deterministic.
