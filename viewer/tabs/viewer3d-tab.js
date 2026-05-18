@@ -1814,9 +1814,28 @@ function _bindPcfHierarchy(container, components) {
   });
   filter?.addEventListener('input', () => {
     const term = String(filter.value || '').trim().toLowerCase();
-    tree.querySelectorAll('[data-v3d-tree-row]').forEach((row) => {
-      const matches = !term || row.textContent.toLowerCase().includes(term);
-      row.hidden = !matches && row.hasAttribute('data-component-id');
+    if (!term) {
+      tree.querySelectorAll('[data-v3d-tree-row], .v3d-tree-children').forEach((el) => {
+        el.style.display = '';
+      });
+      return;
+    }
+    // First pass: show/hide leaf component rows
+    tree.querySelectorAll('[data-component-id]').forEach((row) => {
+      const matches = row.textContent.toLowerCase().includes(term);
+      row.style.display = matches ? '' : 'none';
+    });
+    // Second pass: hide type-group rows whose every child leaf is hidden
+    tree.querySelectorAll('.v3d-tree-children').forEach((childrenEl) => {
+      const visibleLeaf = childrenEl.querySelector('[data-component-id]:not([style*="display: none"])');
+      const isTypeLevel = childrenEl.previousElementSibling?.matches('[data-v3d-tree-row]:not([data-component-id])');
+      if (isTypeLevel) {
+        const groupRow = childrenEl.previousElementSibling;
+        const anyVisible = !!childrenEl.querySelector('[data-component-id]')
+          && !![...childrenEl.querySelectorAll('[data-component-id]')].some(r => r.style.display !== 'none');
+        groupRow.style.display = anyVisible ? '' : 'none';
+        childrenEl.style.display = anyVisible ? '' : 'none';
+      }
     });
   });
 }

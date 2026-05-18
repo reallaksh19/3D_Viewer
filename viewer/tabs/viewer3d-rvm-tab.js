@@ -1132,19 +1132,25 @@ function _installRightPanelResizer(container) {
   });
 }
 
-// ── RVM axis gizmo (canvas-based) ────────────────────────────────────────────
+// ── RVM axis gizmo (canvas-based, enhanced) ──────────────────────────────────
+
+const _RVM_GIZMO_SIZE = 90;
 
 function _buildRvmAxisGizmo(viewport) {
-  if (viewport.querySelector('#rvm-axis-gizmo')) return;
-  const SIZE = 80;
+  if (viewport.querySelector('#rvm-axis-gizmo')) return viewport.querySelector('#rvm-axis-gizmo');
+  const dpr = window.devicePixelRatio || 1;
+  const S = _RVM_GIZMO_SIZE;
   const c = document.createElement('canvas');
   c.id = 'rvm-axis-gizmo';
-  c.width = SIZE * (window.devicePixelRatio || 1);
-  c.height = SIZE * (window.devicePixelRatio || 1);
+  c.width = S * dpr;
+  c.height = S * dpr;
   Object.assign(c.style, {
-    position: 'absolute', bottom: '12px', right: '12px',
-    width: `${SIZE}px`, height: `${SIZE}px`,
-    pointerEvents: 'none', zIndex: '30',
+    position: 'absolute',
+    top: '12px', right: '12px',   // top-right avoids selection label at bottom
+    width: `${S}px`, height: `${S}px`,
+    pointerEvents: 'none',
+    zIndex: '35',
+    borderRadius: '50%',
   });
   viewport.appendChild(c);
   return c;
@@ -1153,54 +1159,74 @@ function _buildRvmAxisGizmo(viewport) {
 function _drawRvmAxisGizmo(canvas, camera) {
   if (!canvas || !camera) return;
   const dpr = window.devicePixelRatio || 1;
-  const S = canvas.width / dpr;
-  const cx = canvas.width / 2, cy = canvas.height / 2;
-  const R = (S / 2 - 10) * dpr;
+  const W = canvas.width, H = canvas.height;
+  const cx = W / 2, cy = H / 2;
+  const R = cx - 14 * dpr;  // arrow length in canvas pixels
   const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.clearRect(0, 0, W, H);
 
-  const dir = new THREE.Vector3();
-  camera.getWorldDirection(dir);
-  const up = camera.up.clone().normalize();
-  const right = new THREE.Vector3().crossVectors(dir, up).normalize();
+  // Background disk
+  ctx.beginPath();
+  ctx.arc(cx, cy, cx - 1, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(10, 18, 32, 0.72)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(74,158,255,0.18)';
+  ctx.lineWidth = 1 * dpr;
+  ctx.stroke();
 
-  const axes = [
-    { v: new THREE.Vector3(1, 0, 0), label: 'X', pos: '#e05555', neg: '#803030' },
-    { v: new THREE.Vector3(0, 1, 0), label: 'Y', pos: '#55cc55', neg: '#306030' },
-    { v: new THREE.Vector3(0, 0, 1), label: 'Z', pos: '#4499ee', neg: '#204880' },
+  // Extract camera right & up from world matrix columns (correct orientation)
+  camera.updateMatrixWorld();
+  const me = camera.matrixWorld.elements;
+  // Column 0 = right, Column 1 = up, Column 2 = -forward
+  const camRight = new THREE.Vector3(me[0], me[1], me[2]).normalize();
+  const camUp    = new THREE.Vector3(me[4], me[5], me[6]).normalize();
+  const camFwd   = new THREE.Vector3(-me[8], -me[9], -me[10]).normalize(); // view direction
+
+  const AXES = [
+    { v: new THREE.Vector3(1, 0, 0), label: 'X', color: '#e05555', dim: '#6b2222' },
+    { v: new THREE.Vector3(0, 1, 0), label: 'Y', color: '#44cc66', dim: '#1e5c2c' },
+    { v: new THREE.Vector3(0, 0, 1), label: 'Z', color: '#4499ee', dim: '#1a3f6e' },
   ];
 
-  const projected = axes.map(({ v, label, pos, neg }) => {
-    const px = v.dot(right);
-    const py = -v.dot(up);
-    return { px, py, label, pos, neg, z: v.dot(dir) };
+  const projected = AXES.map(({ v, label, color, dim }) => {
+    const sx =  v.dot(camRight);   // screen X
+    const sy = -v.dot(camUp);      // screen Y (canvas Y flipped)
+    const depth = v.dot(camFwd);   // +ve = facing camera
+    return { sx, sy, depth, label, color, dim };
   });
 
-  // Draw back halves first (negative z = facing away)
-  const sorted = [...projected].sort((a, b) => a.z - b.z);
-  for (const a of sorted) {
-    const ex = cx + a.px * R, ey = cy + a.py * R;
-    const nx = cx - a.px * R * 0.5, ny = cy - a.py * R * 0.5;
-    ctx.strokeStyle = a.neg; ctx.lineWidth = 2 * dpr;
-    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(nx, ny); ctx.stroke();
-    if (a.z < 0) {
-      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey); ctx.strokeStyle = a.pos; ctx.stroke();
-      ctx.fillStyle = a.pos;
-      ctx.font = `bold ${10 * dpr}px sans-serif`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(a.label, ex + a.px * 10 * dpr, ey + a.py * 10 * dpr);
-    }
-  }
-  for (const a of sorted.slice().reverse()) {
-    if (a.z >= 0) {
-      const ex = cx + a.px * R, ey = cy + a.py * R;
-      ctx.strokeStyle = a.pos; ctx.lineWidth = 2.5 * dpr;
-      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey); ctx.stroke();
-      ctx.fillStyle = a.pos;
-      ctx.font = `bold ${10 * dpr}px sans-serif`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(a.label, ex + a.px * 10 * dpr, ey + a.py * 10 * dpr);
-    }
+  // Sort back-to-front so front axes draw over back axes
+  projected.sort((a, b) => a.depth - b.depth);
+
+  const _arrow = (x1, y1, x2, y2, color, lineW) => {
+    const dx = x2 - x1, dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    const ux = dx / len, uy = dy / len;
+    const hw = 4 * dpr, hl = 7 * dpr;
+    ctx.strokeStyle = color; ctx.fillStyle = color;
+    ctx.lineWidth = lineW;
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2 - ux * hl, y2 - uy * hl); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - ux * hl - uy * hw, y2 - uy * hl + ux * hw);
+    ctx.lineTo(x2 - ux * hl + uy * hw, y2 - uy * hl - ux * hw);
+    ctx.closePath(); ctx.fill();
+  };
+
+  for (const a of projected) {
+    const ex = cx + a.sx * R, ey = cy + a.sy * R;
+    const isFront = a.depth >= 0;
+    const color = isFront ? a.color : a.dim;
+    const lw = isFront ? 2.2 * dpr : 1.2 * dpr;
+    _arrow(cx, cy, ex, ey, color, lw);
+
+    // Label — offset outward beyond arrow tip
+    const labelR = R + 10 * dpr;
+    const lx = cx + a.sx * labelR, ly = cy + a.sy * labelR;
+    ctx.fillStyle = isFront ? a.color : a.dim;
+    ctx.font = `bold ${isFront ? 11 : 9}px sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(a.label, lx, ly);
   }
 }
 
