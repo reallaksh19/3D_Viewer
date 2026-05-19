@@ -138,16 +138,17 @@ function buildOletProxy(comp, color = 0x55aa55) {
 //
 // Kind resolution delegates to resolveKindPure (SupportKindResolver.js).
 // Precedence: explicit attr → kindMap (Config Tab) → DEFAULT_RULES → direction → text → 'REST'
-// LINESTOP and LIMIT intentionally absent from _VALID_KINDS: no axis-aware renderer yet (Phase 7).
 //
-// Colours:  REST=green  GUIDE=blue  ANCHOR=red  SPRING=orange
+// Colours:  REST=green  GUIDE=blue  LINESTOP/LIMIT=amber  ANCHOR=red  SPRING=orange
 
 // Per-kind hex colours
 const _KIND_COLOR = {
-  REST:   0x22c55e,   // green
-  GUIDE:  0x3b82f6,   // blue
-  ANCHOR: 0xef4444,   // red
-  SPRING: 0xf97316,   // orange
+  REST:     0x22c55e,   // green
+  GUIDE:    0x3b82f6,   // blue
+  LINESTOP: 0xf59e0b,   // amber
+  LIMIT:    0xf59e0b,   // amber (same — partial axial stop)
+  ANCHOR:   0xef4444,   // red
+  SPRING:   0xf97316,   // orange
 };
 
 /** Collect all text fields from support attributes into one uppercase string */
@@ -211,8 +212,7 @@ function _orientObjectFromY(object, direction) {
   object.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
 }
 
-// LINESTOP/LIMIT excluded: no pipe-axis-aware renderer yet (Phase 7).
-const _VALID_KINDS = new Set(['REST', 'GUIDE', 'ANCHOR', 'SPRING']);
+const _VALID_KINDS = new Set(['REST', 'GUIDE', 'LINESTOP', 'LIMIT', 'ANCHOR', 'SPRING']);
 
 /** Make one arrow cone mesh pointing along +Y (caller rotates it) */
 function _makeArrow(radius, color) {
@@ -313,6 +313,22 @@ export function buildSupportProxy(comp) {
     );
     const coilMat  = new THREE.MeshStandardMaterial({ color });
     group.add(new THREE.Mesh(coilGeo, coilMat));
+
+  } else if (kind === 'LINESTOP' || kind === 'LIMIT') {
+    // ── LINESTOP / LIMIT: two opposing arrows along pipe-run axis ────
+    // Pipe axis: prefer explicit AXIS-COSINES, then support direction, default Z.
+    // Z is the most common horizontal pipe-run direction in PCF world-space.
+    const pipeAxis = (supportAxis && Math.abs(supportAxis.y) < 0.95)
+      ? supportAxis.clone().normalize()
+      : new THREE.Vector3(0, 0, 1);
+    _addArrow(group, pipeAxis,               arrowDist, radius, color);
+    _addArrow(group, pipeAxis.clone().negate(), arrowDist, radius, color);
+
+    // LIMIT additionally shows a vertical rest arrow (partial axial + vertical load)
+    if (kind === 'LIMIT') {
+      const restColor = _KIND_COLOR.REST;
+      _addArrow(group, new THREE.Vector3(0, 1, 0), -arrowDist, radius * 0.7, restColor);
+    }
   }
 
   // ── Metadata ──────────────────────────────────────────────────────

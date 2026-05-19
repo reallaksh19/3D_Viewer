@@ -3,6 +3,7 @@ import {
   resolveKindPure,
   resolveKindFromText,
   resolveKindFromDirection,
+  resolveKindDescriptor,
   DEFAULT_RULES,
   DEFAULT_KIND_MAP,
   splitRuleTerms,
@@ -196,6 +197,44 @@ function run() {
   assert.ok(ids.includes('builtin-ca150'), 'DEFAULT_RULES has builtin-ca150');
   assert.ok(ids.includes('builtin-ca250'), 'DEFAULT_RULES has builtin-ca250');
   assert.ok(ids.includes('builtin-ca100'), 'DEFAULT_RULES has builtin-ca100');
+
+  // ── Phase 7: resolveKindDescriptor ───────────────────────────────────────────
+  // Single-kind — standard supports
+  const dRest = resolveKindDescriptor({ SKEY: 'CA150' });
+  assert.equal(dRest.primaryKind,     'REST',   'CA150 descriptor: primaryKind=REST');
+  assert.deepEqual(dRest.kinds,       ['REST'],  'CA150 descriptor: kinds=[REST]');
+  assert.equal(dRest.dofs.Fy,         true,      'CA150 descriptor: dofs.Fy');
+
+  const dGuide = resolveKindDescriptor({ CMPSUPTYPE: 'PG-5' });
+  assert.equal(dGuide.primaryKind,    'GUIDE',   'PG-5 descriptor: primaryKind=GUIDE');
+  assert.deepEqual(dGuide.kinds,      ['GUIDE'],  'PG-5 descriptor: kinds=[GUIDE]');
+  assert.equal(dGuide.dofs.Fx,        true,       'PG-5 descriptor: dofs.Fx');
+
+  const dLS = resolveKindDescriptor({ CMPSUPTYPE: 'LS-10' });
+  assert.equal(dLS.primaryKind,       'LINESTOP', 'LS-10 descriptor: primaryKind=LINESTOP');
+  assert.equal(dLS.dofs.Fz,           true,       'LS-10 descriptor: dofs.Fz');
+
+  const dAnchor = resolveKindDescriptor({ SKEY: 'CA150' }, { userRules: [{ id: 'u1', field: 'SKEY', pattern: 'CA150', match: 'equals', kind: 'ANCHOR' }] });
+  assert.equal(dAnchor.primaryKind,   'ANCHOR',   'user-rule override reflected in descriptor');
+  assert.equal(dAnchor.dofs.Mx,       true,       'ANCHOR descriptor has moment DOFs');
+
+  // Composite — CA100 = REST + GUIDE
+  const dCA100 = resolveKindDescriptor({ SKEY: 'CA100' });
+  assert.equal(dCA100.primaryKind,    'REST',              'CA100 composite: primaryKind=REST');
+  assert.deepEqual(dCA100.kinds,      ['REST', 'GUIDE'],   'CA100 composite: kinds=[REST,GUIDE]');
+  assert.equal(dCA100.dofs.Fy,        true,                'CA100 composite dofs: Fy (REST)');
+  assert.equal(dCA100.dofs.Fx,        true,                'CA100 composite dofs: Fx (GUIDE)');
+  assert.equal(dCA100.dofs.Fz,        true,                'CA100 composite dofs: Fz (GUIDE)');
+
+  // Empty attrs → empty descriptor
+  const dEmpty = resolveKindDescriptor({}, { userRules: [], kindMap: {}, defaultRules: [] });
+  assert.equal(dEmpty.primaryKind,    '',   'empty attrs: empty primaryKind');
+  assert.deepEqual(dEmpty.kinds,      [],   'empty attrs: empty kinds');
+  assert.deepEqual(dEmpty.dofs,       {},   'empty attrs: empty dofs');
+
+  // SUPPORT_KINDS includes LINESTOP and LIMIT
+  assert.ok(SUPPORT_KINDS.includes('LINESTOP'), 'SUPPORT_KINDS includes LINESTOP');
+  assert.ok(SUPPORT_KINDS.includes('LIMIT'),    'SUPPORT_KINDS includes LIMIT');
 
   console.log('[PASS] support-kind-resolver all assertions passed.');
 }
