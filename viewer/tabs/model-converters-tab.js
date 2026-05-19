@@ -291,6 +291,17 @@ const CONVERTER_DEFS = Object.freeze({
       { key: 'materialName', label: 'Material Name', type: 'text' },
     ],
   },
+  stagedjson_to_csv: {
+    id: 'stagedjson_to_csv',
+    label: 'StagedJSON -> CSV',
+    primaryAccept: '.json,.JSON',
+    primaryLabel: 'Staged JSON Input',
+    secondaryLabel: '',
+    secondaryAccept: '',
+    description: 'Export staged JSON hierarchy to a CSV table grouped by Site > Pipe/Branch > Reference No.',
+    defaults: {},
+    fields: [],
+  },
   stagedjson_to_xml: {
     id: 'stagedjson_to_xml',
     label: 'StagedJSON -> XML',
@@ -554,6 +565,7 @@ const CONVERTER_ORDER = Object.freeze([
   'json_to_xml',
   'stagedjson_to_xml',
   'stagedjson_to_inputxml',
+  'stagedjson_to_csv',
   'pdf_to_inputxml',
   'pdf_to_inputxml_cii14',
   'xml_to_cii',
@@ -1769,6 +1781,98 @@ function _buildXmlFromStagedJsonText(stagedJsonText, inputName, options) {
   };
 }
 
+function _stagedJsonExtractSiteAndPipe(branchName) {
+  // Branch name is like "/ASIM-1844-3"-S8810794-91261M7-01/B1"
+  // Pipe name is the first path segment; SITE is everything before the pipe size (digit+")
+  const pathParts = _toText(branchName).replace(/^\//, '').split('/');
+  const pipeFull = pathParts[0] || '';
+  const branchSeg = pathParts[1] || '';
+  const m = pipeFull.match(/^(.*?)(\d+".*)/);
+  const site = m ? (m[1].replace(/-$/, '') || '(no site)') : '(no site)';
+  const pipe = m ? m[2] : pipeFull;
+  return { site, pipe, branch: branchSeg, pipeFull };
+}
+
+function _stagedJsonCsvCell(v) {
+  if (v == null) return '';
+  const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+function _buildCsvFromStagedJson(stagedJsonText, _inputName) {
+  let branches;
+  try {
+    branches = JSON.parse(_toText(stagedJsonText));
+  } catch (e) {
+    throw new Error(`Staged JSON parse failed: ${_toText(e?.message || e)}`);
+  }
+  if (!Array.isArray(branches)) {
+    throw new Error('Staged JSON root must be an array of branch objects.');
+  }
+
+  const COLUMNS = [
+    'Site', 'Pipe', 'Branch', 'Branch Bore',
+    'Component Name', 'Component Type', 'Ref No',
+    'Description (DTXR)', 'Material (MTXX)',
+    'Bore A', 'Bore L',
+    'Spec (SPRE)', 'Catalogue (LSTU)',
+    'Pos X (mm)', 'Pos Y (mm)', 'Pos Z (mm)',
+  ];
+
+  const rows = [COLUMNS];
+
+  // Sort branches: site → pipe → branch
+  const sorted = [...branches].sort((a, b) => {
+    const pa = _stagedJsonExtractSiteAndPipe(a.name || '');
+    const pb = _stagedJsonExtractSiteAndPipe(b.name || '');
+    const siteComp = pa.site.localeCompare(pb.site);
+    if (siteComp !== 0) return siteComp;
+    const pipeComp = pa.pipe.localeCompare(pb.pipe);
+    if (pipeComp !== 0) return pipeComp;
+    return pa.branch.localeCompare(pb.branch);
+  });
+
+  let rowCount = 0;
+  for (const branch of sorted) {
+    const { site, pipe, branch: branchSeg } = _stagedJsonExtractSiteAndPipe(branch.name || '');
+    const branchBore = _toText(branch.bore || '');
+
+    for (const comp of (branch.children || [])) {
+      const attrs = comp.attributes || {};
+      const pos = attrs.POS || attrs.APOS || attrs.CPOS || null;
+      const posX = pos && typeof pos === 'object' ? _toText(pos.x ?? '') : '';
+      const posY = pos && typeof pos === 'object' ? _toText(pos.y ?? '') : '';
+      const posZ = pos && typeof pos === 'object' ? _toText(pos.z ?? '') : '';
+
+      rows.push([
+        site,
+        pipe,
+        branchSeg,
+        branchBore,
+        _toText(comp.name || ''),
+        _toText(comp.type || attrs.TYPE || ''),
+        _toText(attrs.REF || ''),
+        _toText(attrs.DTXR || ''),
+        _toText(attrs.MTXX || ''),
+        _toText(attrs.ABORE || ''),
+        _toText(attrs.LBORE || ''),
+        _toText(attrs.SPRE || ''),
+        _toText(attrs.LSTU || ''),
+        posX,
+        posY,
+        posZ,
+      ]);
+      rowCount++;
+    }
+  }
+
+  const csvText = rows.map((r) => r.map(_stagedJsonCsvCell).join(',')).join('\n');
+  return { csvText, rowCount, branchCount: sorted.length };
+}
+
 function _normalizePreviewPoint(value) {
   if (!value && value !== 0) return null;
   if (typeof value === 'object' && !Array.isArray(value)) return _normalizePoint(value);
@@ -2838,6 +2942,28 @@ export function renderModelConvertersTab(container) {
         } else {
           throw new Error('Select RVM primary input, or provide ATT/TXT sidecar for ATT-only XML synthesis.');
         }
+      } else if (selectedConverter === 'stagedjson_to_csv') {
+        if (!primaryFile || !primaryBytes) {
+          throw new Error('Primary staged JSON input is required for StagedJSON -> CSV export.');
+        }
+        const stagedJsonText = _decodeTextUtf8(primaryBytes);
+        const csvResult = _buildCsvFromStagedJson(stagedJsonText, primaryFile.name);
+        response = {
+          outputs: [
+            {
+              name: `${_baseNameWithoutExtension(primaryFile.name)}_staged_export.csv`,
+              text: csvResult.csvText,
+              mime: 'text/plain;charset=utf-8',
+            },
+          ],
+          logs: {
+            stdout: [
+              `Staged JSON parsed: ${csvResult.branchCount} branch(es).`,
+              `Exported ${csvResult.rowCount} component row(s) to CSV (grouped by Site > Pipe > Branch).`,
+            ],
+            stderr: [],
+          },
+        };
       } else if (selectedConverter === 'stagedjson_to_xml') {
         if (!primaryFile || !primaryBytes) {
           throw new Error('Primary staged JSON input is required for StagedJSON -> XML conversion.');
