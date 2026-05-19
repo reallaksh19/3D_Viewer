@@ -1885,13 +1885,16 @@ const STAGED_CSV_ALL_COLUMNS = Object.freeze([
 //   notContains — optional substring the cell value must NOT include
 //   result     — code(s) to emit, "+" separates multiple tokens (e.g. "G+LS")
 const STAGED_CSV_DEFAULT_SUPPORT_TYPE_RULES = Object.freeze([
-  { col: 'dtxr', contains: 'GUI',      notContains: '',    result: 'G'    },
-  { col: 'dtxr', contains: 'STOP',     notContains: '',    result: 'LS'   },
-  { col: 'dtxr', contains: 'NON GRIP', notContains: '',    result: 'G'    },
-  { col: 'dtxr', contains: 'GRIP',     notContains: 'NON', result: 'G+LS' },
-  { col: 'dtxr', contains: 'REST',     notContains: '',    result: 'R'    },
-  { col: 'dtxr', contains: 'SHOE',     notContains: '',    result: 'R'    },
-  { col: 'dtxr', contains: 'HAN',      notContains: '',    result: 'H'    },
+  { col: 'dtxr',        contains: 'GUI',      notContains: '',    result: 'G'    },
+  { col: 'dtxr',        contains: 'STOP',     notContains: '',    result: 'LS'   },
+  { col: 'dtxr',        contains: 'NON GRIP', notContains: '',    result: 'G'    },
+  { col: 'dtxr',        contains: 'GRIP',     notContains: 'NON', result: 'G+LS' },
+  { col: 'dtxr',        contains: 'REST',     notContains: '',    result: 'R'    },
+  { col: 'dtxr',        contains: 'SHOE',     notContains: '',    result: 'R'    },
+  { col: 'dtxr',        contains: 'HAN',      notContains: '',    result: 'H'    },
+  { col: 'mdssupptype', contains: 'AT',       notContains: '',    result: 'R'    },
+  { col: 'mdssupptype', contains: 'G',        notContains: '',    result: 'G'    },
+  { col: 'mdssupptype', contains: 'ST',       notContains: '',    result: 'LS'   },
 ]);
 
 function _parseSupportTypeRules(raw) {
@@ -2063,7 +2066,7 @@ function _buildCsvFromStagedJson(stagedJsonText, _inputName, columnConfigRaw, su
       : 'nopos';
     const key = rec.ref
       ? `${rec.ref}\x01${posKey}`
-      : `\x00noref_${noRefIdx++}`;
+      : (posKey !== 'nopos' ? `\x00pos_${posKey}` : `\x00noref_${noRefIdx++}`);
     if (!groups.has(key)) groups.set(key, { firstRec: rec, recs: [] });
     groups.get(key).recs.push(rec);
   }
