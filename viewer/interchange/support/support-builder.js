@@ -7,6 +7,7 @@ import { CanonicalSupport } from '../canonical/CanonicalSupport.js';
 import { FidelityClass } from '../canonical/FidelityClass.js';
 import { getSupportMappingConfig } from './support-mapping-store.js';
 import { renderTemplate, withAliasedKeys, evaluatePathExpression } from '../topo/template-evaluator.js';
+import { resolveKindPure } from '../../support/SupportKindResolver.js';
 
 function toFiniteNumber(value, fallback = null) {
   const numeric = Number(value);
@@ -166,7 +167,11 @@ export function buildSupportSpecs({
     const refNoTemplate = output?.refNoTemplate || mappingProfile?.refNoTemplate || '{{source.id || source.index}}';
     const seqNoTemplate = output?.seqNoTemplate || mappingProfile?.seqNoTemplate || '{{source.index}}';
 
-    const supportKind = renderTemplate(kindTemplate, context);
+    const supportCode = renderTemplate(kindTemplate, context);
+    const supportKind = resolveKindPure(
+      { ...raw, SKEY: supportCode },
+      { userRules: [], kindMap: {}, defaultKind: '' },
+    ) || 'REST';
     const orientation = renderTemplate(orientationTemplate, context);
     const sizeText = renderTemplate(sizeTemplate, context);
     const refNo = renderTemplate(refNoTemplate, context);
@@ -175,6 +180,7 @@ export function buildSupportSpecs({
 
     const supportSpec = {
       id: `SUPSPEC-${supportCounter}`,
+      supportCode,
       supportKind,
       anchor: {
         policy: anchorPolicy,
@@ -206,6 +212,7 @@ export function buildSupportSpecs({
       },
       normalized: {
         supportCoord: anchorPoint,
+        supportCode,
         supportKind,
         orientation,
         size: sizeText,

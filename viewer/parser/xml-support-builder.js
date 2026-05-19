@@ -15,6 +15,7 @@
  */
 
 import { debugSupport } from '../debug/support-debug.js';
+import { resolveKindPure } from '../support/SupportKindResolver.js';
 
 function _num(v, fallback = 0) {
   const n = Number(v);
@@ -71,26 +72,34 @@ function _upperText(...parts) {
     .toUpperCase();
 }
 
-function _supportKindFromText(text) {
-  const t = _upperText(text);
-
-  if (/(^|[^A-Z0-9])(RIGID\s+)?ANC(HOR)?([^A-Z0-9]|$)|\bFIXED\b/.test(t)) return 'ANC';
-  if (/\bGDE\b|\bGUI\b|\bGUIDE\b|\bSLIDE\b|\bSLID\b|\bHANGER\b/.test(t)) return 'GDE';
-  if (/\bRST\b|\bREST\b|\+Y\b|\bY\s*SUPPORT\b|\+Y\s*SUPPORT\b/.test(t)) return 'RST';
-  if (/\bSTOP\b|\bSTP\b/.test(t)) return 'STP';
-  if (/\bSPRING\b|\bSPR\b/.test(t)) return 'SPR';
-
+function _legacySupportKind(kind) {
+  const k = String(kind || '').toUpperCase().trim();
+  if (k === 'ANCHOR') return 'ANC';
+  if (k === 'GUIDE') return 'GDE';
+  if (k === 'REST') return 'RST';
+  if (k === 'LINESTOP' || k === 'LIMIT') return 'STP';
+  if (k === 'SPRING') return 'SPR';
   return 'UNK';
+}
+
+function _supportKindFromText(text) {
+  return _legacySupportKind(resolveKindPure(
+    { NAME: _upperText(text) },
+    { userRules: [], kindMap: {}, defaultKind: '' },
+  ));
 }
 
 function _supportKindFromBlock(blockCode) {
   const b = String(blockCode || '').toUpperCase().trim();
   if (!b) return 'UNK';
 
-  // Keep this mapping explicit and easy to extend.
-  if (b === 'CA100') return 'GDE';
-  if (b === 'CA150') return 'RST';
-  if (b === 'CA250') return 'RST';
+  const resolved = _legacySupportKind(resolveKindPure(
+    { SKEY: b },
+    { userRules: [], kindMap: {}, defaultKind: '' },
+  ));
+  if (resolved !== 'UNK') return resolved;
+
+  // Preserve existing catalogue mappings not yet covered by resolver defaults.
   if (b === 'CA300') return 'ANC';
   if (b === 'CA350') return 'STP';
 
@@ -198,6 +207,16 @@ function _pipeAxisFromNode(nodeId, parsed) {
   return candidates[0];
 }
 
+function _supportKindFromAxisAndPipe(axis, pipeAxis, verticalAxis = 'Y') {
+  if (!axis) return 'UNK';
+  const up = String(verticalAxis || 'Y').toUpperCase() === 'Z'
+    ? { x: 0, y: 0, z: 1 }
+    : { x: 0, y: 1, z: 0 };
+  if (_absDot(axis, up) >= 0.75) return 'RST';
+  if (!pipeAxis) return 'UNK';
+  return _absDot(axis, pipeAxis) >= 0.75 ? 'STP' : 'GDE';
+}
+
 function _supportName(blockCode, kind, rawText) {
   if (blockCode) return blockCode;
   if (kind && kind !== 'UNK') return kind;
@@ -265,23 +284,24 @@ export function buildXmlSupportComponents(parsed, options = {}) {
 
     const rawType = String(r?.rawType || r?.type || r?.name || 'XML restraint').trim();
     const supportBlock = String(r?.supportBlock || '').toUpperCase().trim();
+    const axis = _axisFromCosines(r?.axisCosines);
+    const pipeAxis = _pipeAxisFromNode(nodeId, parsed);
 
     const kindFromBlock = _supportKindFromBlock(supportBlock);
     const kindFromText = _supportKindFromText(rawType);
     const kindFromDofs = _supportKindFromDofs(r?.dofs, verticalAxis);
+    const kindFromAxis = _supportKindFromAxisAndPipe(axis, pipeAxis, verticalAxis);
 
     let supportKind = 'UNK';
     if (kindFromBlock !== 'UNK') supportKind = kindFromBlock;
     else if (kindFromText !== 'UNK') supportKind = kindFromText;
     else if (kindFromDofs !== 'UNK') supportKind = kindFromDofs;
+    else if (kindFromAxis !== 'UNK') supportKind = kindFromAxis;
 
-    const axis = _axisFromCosines(r?.axisCosines);
     const supportDirection = _semanticDirection(axis, supportKind, {
       verticalAxis,
       worldNorth,
     });
-
-    const pipeAxis = _pipeAxisFromNode(nodeId, parsed);
 
     if (supportKind === 'UNK' && !axis) {
       debugSupport({

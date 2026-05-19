@@ -46,27 +46,34 @@ function run() {
   // ── resolveKindFromDirection ─────────────────────────────────────────────────
   assert.equal(resolveKindFromDirection('UP'),        'REST',  'UP → REST');
   assert.equal(resolveKindFromDirection('DOWN'),      'REST',  'DOWN → REST');
-  assert.equal(resolveKindFromDirection('NORTH'),     'GUIDE', 'NORTH → GUIDE');
-  assert.equal(resolveKindFromDirection('SOUTH'),     'GUIDE', 'SOUTH → GUIDE');
-  assert.equal(resolveKindFromDirection('EAST'),      'GUIDE', 'EAST → GUIDE');
-  assert.equal(resolveKindFromDirection('WEST'),      'GUIDE', 'WEST → GUIDE');
-  assert.equal(resolveKindFromDirection('NE'),        'GUIDE', 'NE → GUIDE');
-  assert.equal(resolveKindFromDirection('NW'),        'GUIDE', 'NW → GUIDE');
-  assert.equal(resolveKindFromDirection('SE'),        'GUIDE', 'SE → GUIDE');
-  assert.equal(resolveKindFromDirection('SW'),        'GUIDE', 'SW → GUIDE');
+  assert.equal(resolveKindFromDirection('NORTH'),     '',      'NORTH without pipe axis is unresolved');
+  assert.equal(resolveKindFromDirection('EAST', { pipeAxis: { x: 1, y: 0, z: 0 } }), 'LINESTOP', 'EAST parallel to pipe axis -> LINESTOP');
+  assert.equal(resolveKindFromDirection('NORTH', { pipeAxis: { x: 1, y: 0, z: 0 } }), 'GUIDE', 'NORTH perpendicular to pipe axis -> GUIDE');
+  assert.equal(resolveKindFromDirection('WEST', { pipeAxis: '1,0,0' }), 'LINESTOP', 'WEST antiparallel to pipe axis -> LINESTOP');
+  assert.equal(resolveKindFromDirection('NE', { pipeAxis: { x: 0, y: 0, z: -1 } }), '', 'diagonal direction at 45 degrees remains unresolved');
   assert.equal(resolveKindFromDirection(''),          '',      'empty → empty');
   assert.equal(resolveKindFromDirection('DIAGONAL'),  '',      'unknown direction → empty');
 
-  // resolveKindPure tier 5: direction before generic text
+  // resolveKindPure tier 6: cardinal direction requires pipe axis.
   assert.equal(
     resolveKindPure({ 'SUPPORT-DIRECTION': 'UP' }, { userRules: [], kindMap: {}, defaultRules: [] }),
     'REST',
-    'SUPPORT-DIRECTION UP → REST via direction heuristic'
+    'SUPPORT-DIRECTION UP resolves to REST'
   );
   assert.equal(
     resolveKindPure({ 'SUPPORT-DIRECTION': 'NORTH' }, { userRules: [], kindMap: {}, defaultRules: [] }),
+    '',
+    'SUPPORT-DIRECTION NORTH without pipe axis remains unresolved'
+  );
+  assert.equal(
+    resolveKindPure({ 'SUPPORT-DIRECTION': 'EAST', PIPE_AXIS_COSINES: '1,0,0' }, { userRules: [], kindMap: {}, defaultRules: [] }),
+    'LINESTOP',
+    'SUPPORT-DIRECTION EAST parallel to pipe axis resolves to LINESTOP'
+  );
+  assert.equal(
+    resolveKindPure({ 'SUPPORT-DIRECTION': 'NORTH', PIPE_AXIS_COSINES: '1,0,0' }, { userRules: [], kindMap: {}, defaultRules: [] }),
     'GUIDE',
-    'SUPPORT-DIRECTION NORTH → GUIDE via direction heuristic'
+    'SUPPORT-DIRECTION NORTH perpendicular to pipe axis resolves to GUIDE'
   );
 
   // ── CA catalog codes via SKEY rules ─────────────────────────────────────────
@@ -162,6 +169,11 @@ function run() {
     'REST',
     'resolves from nested userData bag'
   );
+  assert.equal(
+    resolveKindPure({ attributes: { SUPPORT_KIND: 'ANCHOR' }, SKEY: 'CA100' }),
+    'ANCHOR',
+    'nested explicit SUPPORT_KIND wins over top-level SKEY'
+  );
 
   // ── SUPPORT_KINDS / MATCH_TYPES exports ───────────────────────────────────────
   assert.ok(SUPPORT_KINDS.includes('REST'),     'SUPPORT_KINDS includes REST');
@@ -241,3 +253,4 @@ function run() {
 
 try { run(); }
 catch (e) { console.error('[FAIL]', e.message, '\n', e.stack); process.exit(1); }
+

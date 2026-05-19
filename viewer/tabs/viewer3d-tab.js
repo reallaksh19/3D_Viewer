@@ -23,6 +23,7 @@ import { runUxmlSourceIntakeBridge, detectUxmlSourceType } from '../uxml/UxmlSou
 import { buildUxmlUniversalTopoGraph } from '../uxml/UxmlUniversalTopoGraphBuilder.js';
 import { uxmlToViewerComponents } from '../xml-compare/InputXmlUxmlToViewerComponents.js';
 import { createBrowserConverterExecutor } from '../converters/BrowserConverterExecutor.js';
+import { resolveKindPure } from '../support/SupportKindResolver.js';
 
 let _viewer = null;
 let _listenersRegistered = false;
@@ -2177,6 +2178,37 @@ function _buildViewerComponents(parsed) {
   return components;
 }
 
+function _legacySupportKindToken(kind) {
+  const resolved = String(kind || '').toUpperCase().trim();
+  if (resolved === 'ANCHOR') return 'ANC';
+  if (resolved === 'GUIDE') return 'GDE';
+  if (resolved === 'REST') return 'RST';
+  if (resolved === 'LINESTOP' || resolved === 'LIMIT') return 'STP';
+  if (resolved === 'SPRING') return 'SPR';
+  return 'UNK';
+}
+
+function _fallbackPipeAxisFromNode(nodeId, parsed) {
+  const elements = Array.isArray(parsed?.elements) ? parsed.elements : [];
+  for (const element of elements) {
+    if (!element) continue;
+    if (Number(element.from) !== Number(nodeId) && Number(element.to) !== Number(nodeId)) continue;
+    const x = Number(element.dx || 0);
+    const y = Number(element.dy || 0);
+    const z = Number(element.dz || 0);
+    const length = Math.sqrt((x * x) + (y * y) + (z * z));
+    if (length > 0.0001) return `${x / length},${y / length},${z / length}`;
+  }
+  return '';
+}
+
+function _resolveFallbackSupportKind(blockCode, rawType, pipeAxisCosines) {
+  return _legacySupportKindToken(resolveKindPure(
+    { SKEY: blockCode, NAME: rawType, SUPPORT_DIRECTION: rawType, PIPE_AXIS_COSINES: pipeAxisCosines },
+    { userRules: [], kindMap: {}, defaultKind: '' },
+  ));
+}
+
 function _buildSupportFallbackComponents(parsed) {
   const supports = [];
   if (!parsed?.restraints?.length || !parsed?.nodes) return supports;
@@ -2188,19 +2220,8 @@ function _buildSupportFallbackComponents(parsed) {
 
     const rawType = String(r.rawType || r.type || r.name || 'RST').trim();
     const blockCode = String(r.supportBlock || '').toUpperCase() || ((rawType.toUpperCase().match(/\bCA\d+\b/) || [])[0] || '');
-    const supportKind = blockCode === 'CA100'
-      ? 'GDE'
-      : (blockCode === 'CA150' || blockCode === 'CA250')
-        ? 'RST'
-        : /(^|[^A-Z0-9])(RIGID\s+)?ANC(HOR)?([^A-Z0-9]|$)|\bFIXED\b/i.test(rawType)
-          ? 'ANC'
-          : /(\bGDE\b|\bGUI\b|GUIDE|SLIDE|SLID|HANGER)/i.test(rawType)
-            ? 'GDE'
-            : /(\bRST\b|\bREST\b|\+Y)/i.test(rawType)
-              ? 'RST'
-              : /STOP/i.test(rawType)
-                ? 'STP'
-                : 'UNK';
+    const pipeAxisCosines = _fallbackPipeAxisFromNode(nodeId, parsed);
+    const supportKind = _resolveFallbackSupportKind(blockCode, rawType, pipeAxisCosines);
 
     const supportName = blockCode || supportKind;
     if (supportKind === 'UNK' && !r.axisCosines) continue;
@@ -2346,10 +2367,11 @@ function _mapDirectPcfComponent(comp) {
   const branch1Point = _parseDirectPcfPoint(raw['BRANCH1-POINT']);
   const supportPoint = point1 || _parseDirectPcfPoint(raw['CO-ORDS']);
   const id = String(raw['COMPONENT-IDENTIFIER'] || comp?.id || `${type}-pcf`);
-  // Map SUPPORT-DIRECTION keyword ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ SUPPORT_KIND for rendering classification
-  const _DIRECTION_KIND = { DOWN: 'REST', UP: 'REST', NORTH: 'GUIDE', SOUTH: 'GUIDE', EAST: 'GUIDE', WEST: 'GUIDE' };
   const supportDir = String(raw['SUPPORT-DIRECTION'] || '').toUpperCase();
-  const inferredKind = _DIRECTION_KIND[supportDir] || '';
+  const inferredKind = resolveKindPure(
+    { ...raw, SKEY: raw.SKEY || raw['COMPONENT-IDENTIFIER'] || '', SUPPORT_DIRECTION: supportDir },
+    { userRules: [], kindMap: {}, defaultKind: '' },
+  );
 
   const attrs = {
     ...raw,

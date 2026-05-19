@@ -37,15 +37,61 @@ export const DEFAULT_RULES = [
 ];
 
 // ── Direction heuristic ───────────────────────────────────────────────────────
-// Maps PCF SUPPORT-DIRECTION values to support kinds.
+// Maps PCF SUPPORT-DIRECTION values to support kinds when enough context exists.
 // UP/DOWN are vertical → pipe rests on support (REST).
-// Cardinal / intercardinal directions are lateral → guide support (GUIDE).
+// Cardinal / intercardinal directions require pipe-axis context.
 // Kept separate from resolveKindFromText so callers can apply only direction
 // matching without triggering the broader keyword scan.
-export function resolveKindFromDirection(rawText) {
+function _vectorFromObject(value) {
+  if (!value || typeof value !== 'object') return null;
+  const x = Number(value.x ?? value.X);
+  const y = Number(value.y ?? value.Y);
+  const z = Number(value.z ?? value.Z);
+  if (![x, y, z].every(Number.isFinite)) return null;
+  const length = Math.sqrt((x * x) + (y * y) + (z * z));
+  return length > 0.0001 ? { x: x / length, y: y / length, z: z / length } : null;
+}
+
+function _vectorFromText(value) {
+  const parts = String(value || '').split(/[,\s]+/).map(Number).filter(Number.isFinite);
+  return parts.length >= 3 ? _vectorFromObject({ x: parts[0], y: parts[1], z: parts[2] }) : null;
+}
+
+function _directionAxis(rawText) {
   const t = String(rawText || '').toUpperCase();
-  if (/\bUP\b|\bDOWN\b/.test(t))                                                      return 'REST';
-  if (/\bNORTH\b|\bSOUTH\b|\bEAST\b|\bWEST\b|\bNE\b|\bNW\b|\bSE\b|\bSW\b/.test(t))  return 'GUIDE';
+  if (/\bUP\b/.test(t)) return { x: 0, y: 1, z: 0, vertical: true };
+  if (/\bDOWN\b/.test(t)) return { x: 0, y: -1, z: 0, vertical: true };
+  if (/\bNORTHEAST\b|\bNORTH-EAST\b|\bNE\b/.test(t)) return _vectorFromObject({ x: 1, y: 0, z: -1 });
+  if (/\bNORTHWEST\b|\bNORTH-WEST\b|\bNW\b/.test(t)) return _vectorFromObject({ x: -1, y: 0, z: -1 });
+  if (/\bSOUTHEAST\b|\bSOUTH-EAST\b|\bSE\b/.test(t)) return _vectorFromObject({ x: 1, y: 0, z: 1 });
+  if (/\bSOUTHWEST\b|\bSOUTH-WEST\b|\bSW\b/.test(t)) return _vectorFromObject({ x: -1, y: 0, z: 1 });
+  if (/\bNORTH\b/.test(t)) return { x: 0, y: 0, z: -1 };
+  if (/\bSOUTH\b/.test(t)) return { x: 0, y: 0, z: 1 };
+  if (/\bEAST\b/.test(t)) return { x: 1, y: 0, z: 0 };
+  if (/\bWEST\b/.test(t)) return { x: -1, y: 0, z: 0 };
+  return null;
+}
+
+function _pipeAxisFromEntries(entries) {
+  const match = (entries || []).find((entry) => (
+    entry.normalizedKey === 'PIPEAXISCOSINES' ||
+    entry.normalizedKey === 'PIPEAXIS' ||
+    entry.normalizedKey === 'PIPEAXISVECTOR'
+  ));
+  return _vectorFromObject(match?.value) || _vectorFromText(match?.value);
+}
+
+export function resolveKindFromDirection(rawText, options = {}) {
+  const axis = _directionAxis(rawText);
+  if (!axis) return '';
+  if (axis.vertical) return 'REST';
+  const pipeAxis = _vectorFromObject(options.pipeAxis) ||
+    _vectorFromText(options.pipeAxis) ||
+    _pipeAxisFromEntries(options.entries);
+  if (!pipeAxis) return '';
+  const alignment = Math.abs((axis.x * pipeAxis.x) + (axis.y * pipeAxis.y) + (axis.z * pipeAxis.z));
+  if (alignment >= 0.75) return 'LINESTOP';
+  if (alignment <= 0.35) return 'GUIDE';
   return '';
 }
 
@@ -136,6 +182,14 @@ function _normalizeKind(kind) {
   return SUPPORT_KINDS.includes(k) ? k : '';
 }
 
+function _explicitKindFromEntries(entries) {
+  const explicit = (entries || []).find((entry) => (
+    entry.normalizedKey === 'SUPPORTKIND' ||
+    entry.normalizedKey === 'SUPPORTMAPPERKIND'
+  ));
+  return _normalizeKind(explicit?.value || '');
+}
+
 function _runRules(attrs, rules) {
   for (const rule of (rules || [])) {
     const kind = _normalizeKind(rule.kind);
@@ -174,11 +228,10 @@ export function resolveKindPure(attrs, {
   defaultKind  = '',
 } = {}) {
   if (!attrs || typeof attrs !== 'object') return defaultKind;
+  const entries = _collectEntries(attrs);
 
-  // 1. Explicit attribute
-  const explicit = _normalizeKind(
-    attrs['SUPPORT-KIND'] || attrs['SUPPORT_KIND'] || attrs['SUPPORT_MAPPER_KIND'] || ''
-  );
+  // 1. Explicit attribute. This also supports nested attrs/userData bags.
+  const explicit = _explicitKindFromEntries(entries);
   if (explicit) return explicit;
 
   // 2. User rules
@@ -196,12 +249,13 @@ export function resolveKindPure(attrs, {
   const fromDefault = _runRules(attrs, defaultRules);
   if (fromDefault) return fromDefault;
 
-  // 5. Direction heuristic then text heuristic — scans all attribute values
-  const text        = _collectEntries(attrs).map(e => String(e.value)).join(' ');
-  const fromDir     = resolveKindFromDirection(text);
-  if (fromDir) return fromDir;
+  // 5. Text heuristic then direction heuristic.
+  // Support identity text must beat orientation-only direction fields.
+  const text        = entries.map(e => String(e.value)).join(' ');
   const fromText    = resolveKindFromText(text);
   if (fromText) return fromText;
+  const fromDir     = resolveKindFromDirection(text, { entries });
+  if (fromDir) return fromDir;
 
   return defaultKind;
 }

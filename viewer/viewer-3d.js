@@ -163,6 +163,7 @@ function _supportKindFromText(text = '') {
     if (/(^|[^A-Z0-9])(RIGID\s+)?ANC(HOR)?([^A-Z0-9]|$)|\bFIX(ED)?\b/.test(t)) return 'ANCHOR';
     if (/\bGDE\b|\bGUI\b|\bGD\b|GUIDE|SLIDE|SLID/.test(t)) return 'GUIDE';
     if (/\bRST\b|\bREST\b|\+Y\s*SUPPORT|\bY\s*SUPPORT\b|\+Y\b/.test(t)) return 'REST';
+    if (/\bLINE\s*STOP\b|\bLINESTOP\b|\bLIMIT\b/.test(t)) return 'STOP';
     if (/\bSTOP\b/.test(t)) return 'STOP';
     if (/\bSPRING\b|\bHANGER\b/.test(t)) return 'SPRING';
     return 'UNKNOWN';
@@ -175,13 +176,17 @@ function _supportKindFromToken(token = '') {
     if (t === 'GDE' || t === 'GUI' || t === 'GUIDE') return 'GUIDE';
     if (t === 'RST' || t === 'REST') return 'REST';
     if (t === 'SPRING') return 'SPRING';
-    if (t === 'STOP' || t === 'STP') return 'STOP';
+    if (t === 'STOP' || t === 'STP' || t === 'LINESTOP' || t === 'LINE STOP' || t === 'LIMIT') return 'STOP';
     return null;
 }
 
 function _supportTextFromAttributes(attrs) {
     const src = attrs && typeof attrs === 'object' ? attrs : {};
     return [
+        src.SUPPORT_KIND,
+        src['SUPPORT-KIND'],
+        src.SUPPORT_TYPE,
+        src['SUPPORT-TYPE'],
         src.SUPPORT_TAG,
         src['SUPPORT-TAG'],
         src.SUPPORT_DIRECTION,
@@ -1988,6 +1993,10 @@ export class PcfViewer3D {
 
         if (supportAxis && !isFixed) {
             const verticalness = Math.abs(supportAxis.dot(up));
+            if (supportKind === 'UNKNOWN' && pipeAxis && verticalness < 0.75) {
+                const axialness = Math.abs(supportAxis.dot(pipeAxis.clone().normalize()));
+                supportKind = axialness >= 0.75 ? 'STOP' : 'GUIDE';
+            }
             if (supportKind === 'REST' || supportKind === 'SPRING') {
                 // keep explicit rest vertical
             } else if (verticalness > 0.75) {
@@ -2008,7 +2017,22 @@ export class PcfViewer3D {
                 }
                 if (supportKind === 'UNKNOWN') supportKind = 'REST';
             } else if (verticalness < 0.35) {
-                supportKind = 'GUIDE';
+                if (supportKind === 'UNKNOWN' && !pipeAxis) {
+                    debugSupport({
+                        stage: 'viewer-build-support',
+                        componentId: comp.id,
+                        supportName: attrs.SUPPORT_NAME,
+                        supportKind,
+                        supportDirection: attrs.SUPPORT_DIRECTION,
+                        axisCosines: attrs.AXIS_COSINES,
+                        pipeAxisCosines: attrs.PIPE_AXIS_COSINES,
+                        dropped: true,
+                        dropReason: 'missing-pipe-axis-for-cardinal-support',
+                        renderBranch: 'dropped',
+                    });
+                    return [];
+                }
+                if (supportKind === 'UNKNOWN') supportKind = 'GUIDE';
             } else {
                 debugSupport({
                     stage: 'viewer-build-support',
