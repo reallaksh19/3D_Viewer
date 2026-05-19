@@ -1821,7 +1821,7 @@ const STAGED_CSV_ALL_COLUMNS = Object.freeze([
   { key: 'cmpsuprefn',  label: 'CMPSUPREFN' },
   { key: 'desc',        label: 'DESC' },
   { key: 'type',        label: 'TYPE' },
-  { key: 'dtxr',        label: 'Description (DTXR)' },
+  { key: 'dtxr',        label: 'DTXR' },
   { key: 'mtxx',        label: 'Material (MTXX)' },
   { key: 'abore',       label: 'Bore A' },
   { key: 'lbore',       label: 'Bore L' },
