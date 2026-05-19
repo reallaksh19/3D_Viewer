@@ -1894,7 +1894,7 @@ const STAGED_CSV_DEFAULT_SUPPORT_TYPE_RULES = Object.freeze([
   { col: 'dtxr',        contains: 'HAN',      notContains: '',    result: 'H'    },
   { col: 'mdssupptype', contains: 'AT',       notContains: '',    result: 'R'    },
   { col: 'mdssupptype', contains: 'G',        notContains: '',    result: 'G'    },
-  { col: 'mdssupptype', contains: 'ST',       notContains: '',    result: 'LS'   },
+  { col: 'mdssupptype', contains: 'ST5',      notContains: '',    result: 'LS'   },
 ]);
 
 function _parseSupportTypeRules(raw) {
