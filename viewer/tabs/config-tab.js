@@ -87,7 +87,7 @@ export function renderConfig(container) {
         <div><code>RATING</code><br><span style="color:#64748b">Pressure class rating</span></div>
         <div><code>PIPELINE-REFERENCE</code><br><span style="color:#64748b">Line reference / tag</span></div>
       </div>
-      <p class="tab-note" style="margin-top:8px;">Support rendering type (REST / GUIDE / ANCHOR) is inferred from <code>SUPPORT-DIRECTION</code>, SKEY, or the support name text. REST = vertical downward arrow, GUIDE = two lateral arrows, ANCHOR = plate symbol.</p>
+      <p class="tab-note" style="margin-top:8px;">Support rendering type is inferred from SKEY/support-name text first. Cardinal <code>SUPPORT-DIRECTION</code> needs pipe-axis context: parallel = LINESTOP, perpendicular = GUIDE. REST = vertical arrow, GUIDE = lateral arrows, ANCHOR = fixed symbol.</p>
 
       <hr style="margin: 2rem 0;">
       <h3 class="section-heading">Support Kind Map (SKEY → Kind)</h3>
