@@ -2319,6 +2319,11 @@
   scrollbar-color: rgba(129, 177, 230, 0.38) transparent;
 }
 
+.v3d-tree-row[hidden],
+.v3d-tree-children[hidden] {
+  display: none !important;
+}
+
 .v3d-tree-row {
   display: flex;
   align-items: center;
