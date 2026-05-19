@@ -1951,18 +1951,34 @@ function _buildCsvFromStagedJson(stagedJsonText, _inputName, columnConfigRaw) {
 
   // Group by REF: same REF → one row; no-REF components → individual rows.
   // Non-unique column values within a group are concatenated with "|".
-  const MERGE_FIELDS = activeCols.map((c) => c.key).filter((k) => k !== 'ref');
+  // Two-level grouping:
+  //   Level 1: Ref No   (same REF across branches → one group per position)
+  //   Level 2: Position (Pos X / Pos Y / Pos Z)
+  // Rule: same Ref No AND same coordinates → one row, non-unique columns concat'd with "|"
+  //       same Ref No but different coordinates → separate rows
+  //       no Ref No → each component is its own row
+  const MERGE_FIELDS = activeCols.map((c) => c.key).filter((k) => k !== 'ref' && k !== 'posX' && k !== 'posY' && k !== 'posZ');
   const groups = new Map();
   let noRefIdx = 0;
   for (const rec of allRecords) {
-    const key = rec.ref || `\x00noref_${noRefIdx++}`;
+    const posKey = (rec.posX !== '' || rec.posY !== '' || rec.posZ !== '')
+      ? `${rec.posX}\x02${rec.posY}\x02${rec.posZ}`
+      : 'nopos';
+    const key = rec.ref
+      ? `${rec.ref}\x01${posKey}`
+      : `\x00noref_${noRefIdx++}`;
     if (!groups.has(key)) groups.set(key, { firstRec: rec, recs: [] });
     groups.get(key).recs.push(rec);
   }
 
   const outputRows = [];
   for (const { firstRec, recs } of groups.values()) {
-    const merged = { ref: firstRec.ref };
+    const merged = {
+      ref:  firstRec.ref,
+      posX: firstRec.posX,
+      posY: firstRec.posY,
+      posZ: firstRec.posZ,
+    };
     for (const f of MERGE_FIELDS) {
       const unique = [...new Set(recs.map((r) => r[f] ?? '').filter((v) => v !== ''))];
       merged[f] = unique.join('|');
