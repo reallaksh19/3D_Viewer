@@ -6,6 +6,7 @@ import { CanonicalComponent } from '../../canonical/CanonicalComponent.js';
 import { CanonicalSupport } from '../../canonical/CanonicalSupport.js';
 import { CanonicalAnnotation } from '../../canonical/CanonicalAnnotation.js';
 import { FidelityClass } from '../../canonical/FidelityClass.js';
+import { resolveKindPure } from '../../../support/SupportKindResolver.js';
 import { getConversionConfig } from '../../config/conversion-config-store.js';
 import { parsePcfText } from '../../../js/pcf2glb/pcf/parsePcfText.js';
 import { normalizePcfModel } from '../../../js/pcf2glb/pcf/normalizePcfModel.js';
@@ -294,7 +295,11 @@ export function buildPcfCanonicalProject({ sourceRecord, parsed }) {
       const nearest = supportPoint ? nodeRegistry.findNearest(supportPoint) : null;
       const hasHost = !!nearest?.node;
       const supportDirection = pickFirstValue(rawAttributes, ['DIRECTION', 'SUPPORT-DIRECTION', '<DIRECTION>'], 'UNKNOWN');
-      const supportKind = pickFirstValue(rawAttributes, [sKeyKey, 'SUPPORT-TYPE', 'ITEM-CODE'], 'REST');
+      const supportCode = pickFirstValue(rawAttributes, [sKeyKey, 'SUPPORT-TYPE', 'ITEM-CODE'], '');
+      const supportKind = resolveKindPure(
+        { ...rawAttributes, SKEY: supportCode },
+        { userRules: [], kindMap: {}, defaultKind: 'REST' },
+      );
       const support = new CanonicalSupport({
         id: `SUP-${supportCounter++}`,
         assemblyId: assembly.id,
@@ -308,6 +313,7 @@ export function buildPcfCanonicalProject({ sourceRecord, parsed }) {
         normalized: {
           supportCoord: supportPoint ? { x: supportPoint.x, y: supportPoint.y, z: supportPoint.z } : null,
           supportDirection,
+          supportCode,
           supportKind,
           lineNoKey,
           pipelineRef,

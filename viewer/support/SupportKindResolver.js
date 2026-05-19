@@ -56,7 +56,7 @@ export function resolveKindFromDirection(rawText) {
 export function resolveKindFromText(rawText) {
   const t = String(rawText || '').toUpperCase();
   if (/\bANC(HOR)?\b|\bFIX(ED)?\b|\bRIGID\b/.test(t))          return 'ANCHOR';
-  if (/\bGUIDE\b|\bGDE\b|\bGUI\b|\bSLIDE\b|\bSLID\b/.test(t))  return 'GUIDE';
+  if (/\bGUIDE\b|\bGDE\b|\bGUI\b|\bSLIDE\b|\bSLID\b|\bLATERAL\b/.test(t))  return 'GUIDE';
   if (/\bSPRING\b|\bHANGER\b/.test(t))                           return 'SPRING';
   if (/\bLINE\s*STOP\b|\bLINESTOP\b|\bSTOPPER\b/.test(t))       return 'LINESTOP';
   if (/\bLIMIT\s*STOP\b|\bLIMIT\b/.test(t))                      return 'LIMIT';

@@ -5,6 +5,9 @@
  * Stage 2: Universal CSV -> Simplified PCF Data Table Format
  */
 
+import { resolveKindPure } from '../support/SupportKindResolver.js';
+import { getPcfMapping } from '../core/settings.js';
+
 // ── Stage 1: ACCDB to Universal CSV ──────────────────────────────────────────
 
 export function buildUniversalCSV(parsed, options = {}) {
@@ -295,13 +298,11 @@ function _extractSupportBlockCode(text = '') {
 }
 
 function _supportKindFromBlock(blockCode = '', description = '') {
-  const code = String(blockCode).toUpperCase();
-  const desc = String(description).toUpperCase();
-  if (code === 'CA100') return 'GUIDE';
-  if (code === 'CA150' || code === 'CA250') return 'REST';
-  if (/GUIDE|SLIDE|LATERAL/.test(desc)) return 'GUIDE';
-  if (/REST|\+Y|ANCHOR/.test(desc)) return 'REST';
-  return null;
+  return resolveKindPure(
+    { SKEY: String(blockCode || '').trim(), NAME: String(description || '').trim() },
+    { userRules: [], kindMap: {}, defaultKind: null },
+  );
+  // Returns null when nothing matches — all call sites handle null via || chaining
 }
 
 function _supportNameFromDofs(text = '') {
@@ -580,8 +581,6 @@ export function normalizeToPCFWithContinuity(csvRows, options = {}) {
   }
   return segments;
 }
-
-import { getPcfMapping } from '../core/settings.js';
 
 export function buildPcfFromContinuity(segments, options = {}) {
   const decimals = options.decimals === 1 ? 1 : 4;

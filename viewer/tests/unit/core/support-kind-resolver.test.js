@@ -37,6 +37,8 @@ function run() {
   assert.equal(resolveKindFromText('HANGER'),        'SPRING',    'HANGER alias');
   // ANCHOR beats REST when both could match
   assert.equal(resolveKindFromText('ANCHOR REST'),   'ANCHOR',    'ANCHOR wins over REST when both present');
+  assert.equal(resolveKindFromText('LATERAL SUPP'),  'GUIDE',     'LATERAL alias → GUIDE');
+  assert.equal(resolveKindFromText('LATERAL STOP'),  'GUIDE',     'LATERAL beats STOP');
   assert.equal(resolveKindFromText(''),              '',          'empty → empty');
   assert.equal(resolveKindFromText(null),            '',          'null → empty');
 
