@@ -63,3 +63,9 @@
 - Verified existing-converter bridge selection for PDF (`pdf_to_inputxml`) and staged JSON (`stagedjson_to_inputxml`) with converter-injected runs.
 - Verified direct normalization routes remain import-only and do not emit PCF/master side effects.
 - Verified `AUTO` source mode correctly detects staged JSON and triggers `Run existing converter` through `stagedjson_to_inputxml`.
+
+## InputXML to CII 2019 RESTRANT Support Mapper
+- Added the requested `inputxml_to_cii2019_beforesupportmapper.py` backup beside the active converter.
+- Changed `RESTRAINT` conversion so each piping element emits one 24-line `RESTRANT` auxiliary block with six numeric restraint slots followed by six support tag/GUID string pairs.
+- Preserved XML `RESTRAINT/NUM` slot positions and support `TAG`/`GUID` values in the neutral file output.
+- Removed the legacy `TYPE=2 -> TYPE=4` remap and validates emitted restraint type codes as CAESAR integer values from 1 to 62.

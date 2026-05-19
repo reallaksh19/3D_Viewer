@@ -6,8 +6,6 @@ Functionality:
 - Parses `CAESARII > PIPINGMODEL > PIPINGELEMENT` records.
 - Converts element attributes and auxiliary tags (`BEND`, `RIGID`,
   `RESTRAINT`, `SIF`) into CII sections.
-- Maps each element's six possible `RESTRAINT` slots into one 24-line
-  `RESTRANT` auxiliary block, including support tag and GUID strings.
 - Handles CAESAR missing sentinel values with configurable defaults.
 
 Parameters expected:
@@ -66,9 +64,6 @@ RAW_OVERRIDE_MODE_SCHEMA: Final[str] = "schema_validated"
 RAW_OVERRIDE_MODE_COMPATIBILITY: Final[str] = "compatibility"
 RESTRAINT_MAPPING_POLICY_IDENTITY: Final[str] = "identity"
 RESTRAINT_MAPPING_POLICY_EXPLICIT: Final[str] = "explicit_map"
-RESTRAINT_SLOTS_PER_AUX: Final[int] = 6
-RESTRAINT_LINES_PER_SLOT: Final[int] = 4
-RESTRAINT_LINES_PER_AUX_BLOCK: Final[int] = RESTRAINT_SLOTS_PER_AUX * RESTRAINT_LINES_PER_SLOT
 UNIVERSAL_VERSION_PAYLOAD_CACHE: list[str] | None = None
 
 
@@ -104,7 +99,6 @@ class BendAux:
 
 @dataclass(frozen=True)
 class RestraintAux:
-    slot: int
     node: float
     type_code: float
     stiffness: float
@@ -114,8 +108,6 @@ class RestraintAux:
     xcos: float
     ycos: float
     zcos: float
-    tag: str
-    guid: str
 
 
 @dataclass(frozen=True)
@@ -282,22 +274,6 @@ def _value_or_default(value: float, fallback: float) -> float:
     return value
 
 
-def _parse_restraint_slot(value: str | None, fallback_slot: int) -> int:
-    text = _safe_text(value)
-    if not text:
-        return fallback_slot
-    try:
-        raw = float(text)
-    except ValueError as exc:
-        raise ValueError(f"Invalid numeric field 'RESTRAINT/NUM': '{text}'.") from exc
-    slot = int(round(raw))
-    if abs(raw - slot) > 1e-6 or slot < 1 or slot > RESTRAINT_SLOTS_PER_AUX:
-        raise ValueError(
-            f"Invalid RESTRAINT/NUM '{text}'; expected an integer slot from 1 to {RESTRAINT_SLOTS_PER_AUX}."
-        )
-    return slot
-
-
 def _parse_time_text(value: str) -> str:
     text = _safe_text(value)
     if not text:
@@ -345,7 +321,6 @@ def _parse_restraints(element: ET.Element) -> list[RestraintAux]:
             continue
         restraints.append(
             RestraintAux(
-                slot=_parse_restraint_slot(restraint.attrib.get("NUM"), len(restraints) + 1),
                 node=node,
                 type_code=_to_float(restraint.attrib.get("TYPE"), "RESTRAINT/TYPE"),
                 stiffness=_to_float(restraint.attrib.get("STIFFNESS"), "RESTRAINT/STIFFNESS"),
@@ -355,8 +330,6 @@ def _parse_restraints(element: ET.Element) -> list[RestraintAux]:
                 xcos=_to_float(restraint.attrib.get("XCOSINE"), "RESTRAINT/XCOSINE"),
                 ycos=_to_float(restraint.attrib.get("YCOSINE"), "RESTRAINT/YCOSINE"),
                 zcos=_to_float(restraint.attrib.get("ZCOSINE"), "RESTRAINT/ZCOSINE"),
-                tag=_safe_text(restraint.attrib.get("TAG")),
-                guid=_safe_text(restraint.attrib.get("GUID")),
             )
         )
     return restraints
@@ -529,11 +502,6 @@ def _row(values: list[str]) -> str:
     widths = [15] + [13] * (len(values) - 1)
     chunks = [f"{values[index]:>{widths[index]}}" for index in range(len(values))]
     return "".join(chunks)
-
-
-def _length_prefixed_a100(value: str) -> str:
-    text = _safe_text(value)[:100]
-    return f"{'':7}{len(text):5d} {text:<100}"
 
 
 def _format_auto_float(value: float) -> str:
@@ -1312,22 +1280,10 @@ def _restraint_type_from_input(restraint: RestraintAux) -> float:
     if not _is_missing(restraint.type_code):
         if abs(restraint.type_code) < 1e-9:
             return 1.0
+        if abs(restraint.type_code - 2.0) < 1e-9:
+            return 4.0
         return restraint.type_code
     return 1.0
-
-
-def _validate_restraint_type(value: float, edge_index: int, slot: int) -> float:
-    if not math.isfinite(value):
-        raise ValueError(
-            f"Invalid RESTRANT type for element {edge_index + 1}, slot {slot}: non-finite value {value}."
-        )
-    rounded = int(round(value))
-    if abs(value - rounded) > 1e-6 or rounded < 1 or rounded > 62:
-        raise ValueError(
-            f"Invalid RESTRANT type for element {edge_index + 1}, slot {slot}: "
-            f"{value}. Expected integer 1..62."
-        )
-    return float(rounded)
 
 
 def _restraint_line2_cosines(restraint: RestraintAux) -> tuple[float, float, float]:
@@ -1337,53 +1293,6 @@ def _restraint_line2_cosines(restraint: RestraintAux) -> tuple[float, float, flo
     y = 0.0 if _is_missing(restraint.ycos) else restraint.ycos
     z = 0.0 if _is_missing(restraint.zcos) else restraint.zcos
     return x, y, z
-
-
-def _empty_restraint_numeric_lines(
-    line1_template: list[str],
-    line2_template: list[str],
-) -> list[str]:
-    zero = _format_sig6(0.0)
-    return [
-        _render_template_row(
-            line1_template,
-            {
-                "node": zero,
-                "type": zero,
-                "stiffness": zero,
-                "gap": zero,
-                "friction": zero,
-                "connecting_node": zero,
-            },
-        ),
-        _render_template_row(
-            line2_template,
-            {
-                "xcos": zero,
-                "ycos": zero,
-                "zcos": zero,
-            },
-        ),
-    ]
-
-
-def _slot_restraints_for_aux_block(restraints: list[RestraintAux], edge_index: int) -> list[RestraintAux | None]:
-    slots: list[RestraintAux | None] = [None] * RESTRAINT_SLOTS_PER_AUX
-
-    for restraint in restraints:
-        slot_index = restraint.slot - 1
-        if slot_index < 0 or slot_index >= RESTRAINT_SLOTS_PER_AUX:
-            raise ValueError(
-                f"Invalid RESTRAINT/NUM for element {edge_index + 1}: {restraint.slot}. "
-                f"Expected 1..{RESTRAINT_SLOTS_PER_AUX}."
-            )
-        if slots[slot_index] is not None:
-            raise ValueError(
-                f"Duplicate RESTRAINT/NUM for element {edge_index + 1}: slot {restraint.slot}."
-            )
-        slots[slot_index] = restraint
-
-    return slots
 
 
 def _infer_reducer_indices(
@@ -1520,27 +1429,26 @@ def _build_restraint_payload(
     if not isinstance(type_direction_cfg, dict):
         raise ValueError("Invalid 2019 layout config: 'restraint.type_direction_cosines' must be an object.")
     stiffness_default_token = str(restraint_cfg.get("stiffness_default_token", "0.175120E+13"))
+    tail_lines = [str(entry) for entry in list(restraint_cfg.get("tail_lines", []))]
+
     payload: list[str] = []
     edge_to_restraint_index: dict[int, int] = {}
+    block_size = len(tail_lines) + 2
+    if block_size <= 0:
+        raise ValueError("Invalid 2019 layout config: restraint block must contain at least line1 and line2.")
 
     for edge_index, element in enumerate(elements):
         if not element.restraints:
             continue
-        slots = _slot_restraints_for_aux_block(element.restraints, edge_index)
-        edge_to_restraint_index[edge_index] = (len(payload) // RESTRAINT_LINES_PER_AUX_BLOCK) + 1
-
-        for slot_index, restraint in enumerate(slots):
-            if restraint is None:
-                payload.extend(_empty_restraint_numeric_lines(line1_template, line2_template))
-                continue
-
+        edge_to_restraint_index[edge_index] = (len(payload) // block_size) + 1
+        for restraint in element.restraints:
             original_type = _restraint_type_from_input(restraint)
             if abs(original_type - round(original_type)) < 1e-6:
                 original_type_key = str(int(round(original_type)))
             else:
                 original_type_key = _format_sig6(original_type)
             mapped_type_token = _resolve_restraint_type_token(original_type_key, mapping_policy)
-            restraint_type = _validate_restraint_type(float(mapped_type_token), edge_index, slot_index + 1)
+            restraint_type = float(mapped_type_token)
             stiffness_token = (
                 stiffness_default_token
                 if _is_missing(restraint.stiffness)
@@ -1551,7 +1459,7 @@ def _build_restraint_payload(
             connecting_node = _value_or_default(restraint.connecting_node, 0.0)
             xcos, ycos, zcos = _restraint_line2_cosines(restraint)
             if _is_missing(restraint.xcos) and _is_missing(restraint.ycos) and _is_missing(restraint.zcos):
-                fallback_cos = type_direction_cfg.get(mapped_type_token) or type_direction_cfg.get(str(int(restraint_type)))
+                fallback_cos = type_direction_cfg.get(mapped_type_token)
                 if isinstance(fallback_cos, list) and len(fallback_cos) == 3:
                     xcos = float(fallback_cos[0])
                     ycos = float(fallback_cos[1])
@@ -1580,16 +1488,7 @@ def _build_restraint_payload(
                     },
                 )
             )
-
-        for restraint in slots:
-            if restraint is None:
-                payload.append(_length_prefixed_a100(""))
-                payload.append(_length_prefixed_a100(""))
-                continue
-
-            payload.append(_length_prefixed_a100(restraint.tag))
-            payload.append(_length_prefixed_a100(restraint.guid))
-
+            payload.extend(tail_lines)
     return payload, edge_to_restraint_index
 
 
@@ -2011,8 +1910,10 @@ def _build_hanger_lines(model: ParsedModel, miscel_cfg: dict[str, object]) -> li
         ]
         lines.append(_row(hgrdat_1))
         lines.append(_row(hgrdat_2))
-        lines.append(_length_prefixed_a100(hanger.tag))
-        lines.append(_length_prefixed_a100(hanger.guid))
+        _tag_text = (hanger.tag or "")[:100]
+        _guid_text = (hanger.guid or "")[:100]
+        lines.append(f"{'':7}{len(_tag_text):5d} {_tag_text:<100}")
+        lines.append(f"{'':7}{len(_guid_text):5d} {_guid_text:<100}")
         lines.append(
             _row(
                 [
@@ -2456,7 +2357,7 @@ def _build_cii_text(
     restraint_cfg = layout_config.get("restraint", {})
     if not isinstance(restraint_cfg, dict):
         raise ValueError("Invalid 2019 layout config: 'restraint' must be an object.")
-    restraint_block_size = RESTRAINT_LINES_PER_AUX_BLOCK
+    restraint_block_size = len(list(restraint_cfg.get("tail_lines", []))) + 2
 
     if reference_overrides is not None:
         version_payload = reference_overrides.version_payload
