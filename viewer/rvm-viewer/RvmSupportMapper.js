@@ -1,12 +1,24 @@
 // Support mapper: maps ATT/RVM attribute fields to standard support kinds.
 // Inputs are plain attribute bags; output is REST/GUIDE/LINESTOP/LIMIT/ANCHOR or an empty string.
 // Rules are saved in localStorage and are applied during conversion and support symbol rendering.
+// Matching logic lives in SupportKindResolver.js (pure, no browser deps).
+
+import {
+  resolveKindPure,
+  DEFAULT_RULES,
+  SUPPORT_KINDS,
+  MATCH_TYPES,
+  splitRuleTerms,
+  normalizeMapperFieldName,
+  collectMapperFieldValues,
+} from '../support/SupportKindResolver.js';
+
+// Re-export helpers so existing callers (tests, UI) keep working unchanged.
+export { SUPPORT_KINDS, MATCH_TYPES, splitRuleTerms, normalizeMapperFieldName, collectMapperFieldValues };
 
 const STORAGE_KEY = 'pcf-rvm-support-mapper-rules';
 const BUILTIN_OVERRIDES_STORAGE_KEY = 'pcf-rvm-support-mapper-builtin-overrides';
 
-const SUPPORT_KINDS = ['REST', 'GUIDE', 'LINESTOP', 'LIMIT', 'ANCHOR'];
-const MATCH_TYPES = ['startsWith', 'equals', 'contains', 'regex'];
 const FIELD_SUGGESTIONS = [
   'CMPSUPTYPE',
   'MDSSUPPTYPE',
@@ -21,31 +33,10 @@ const FIELD_SUGGESTIONS = [
   '*',
 ];
 
-// Ordered by precedence. GT5 REST rules must run before the generic GT GUIDE rule.
-const BUILTIN_RULES = [
-  { id: 'builtin-gt5-cmp', field: 'CMPSUPTYPE', pattern: 'GT5', match: 'startsWith', kind: 'REST', label: 'CMPSUPTYPE GT5* -> REST' },
-  { id: 'builtin-gt5-mds', field: 'MDSSUPPTYPE', pattern: 'GT5', match: 'startsWith', kind: 'REST', label: 'MDSSUPPTYPE GT5* -> REST' },
-  { id: 'builtin-gt5-text', field: 'SPRE,SKEY,NAME,DESCRIPTION,DESC', pattern: 'GT5', match: 'contains', kind: 'REST', label: 'Text contains GT5 -> REST' },
-  { id: 'builtin-pg', field: 'CMPSUPTYPE', pattern: 'PG-', match: 'startsWith', kind: 'GUIDE', label: 'PG-* -> GUIDE' },
-  { id: 'builtin-ls', field: 'CMPSUPTYPE', pattern: 'LS-', match: 'startsWith', kind: 'LINESTOP', label: 'LS-* -> LINESTOP' },
-  { id: 'builtin-wp', field: 'CMPSUPTYPE', pattern: 'WP-', match: 'startsWith', kind: 'LINESTOP', label: 'WP-* -> LINESTOP' },
-  { id: 'builtin-bp', field: 'CMPSUPTYPE', pattern: 'BP-', match: 'startsWith', kind: 'REST', label: 'BP-* -> REST' },
-  { id: 'builtin-g', field: 'CMPSUPTYPE', pattern: 'G-', match: 'startsWith', kind: 'GUIDE', label: 'G-* -> GUIDE' },
-  { id: 'builtin-rest', field: 'CMPSUPTYPE', pattern: 'REST', match: 'equals', kind: 'REST', label: 'REST -> REST' },
-  { id: 'builtin-gt', field: 'MDSSUPPTYPE', pattern: 'GT', match: 'startsWith', kind: 'GUIDE', label: 'GT* -> GUIDE' },
-  { id: 'builtin-bt', field: 'MDSSUPPTYPE', pattern: 'BT', match: 'startsWith', kind: 'REST', label: 'BT* -> REST' },
-  { id: 'builtin-an', field: 'MDSSUPPTYPE', pattern: 'AN', match: 'startsWith', kind: 'ANCHOR', label: 'AN* -> ANCHOR' },
-  { id: 'builtin-pipe-rest', field: 'MDSSUPPTYPE', pattern: 'PIPE-REST', match: 'equals', kind: 'REST', label: 'PIPE-REST -> REST' },
-];
-
-const NESTED_ATTRIBUTE_KEYS = new Set([
-  'ATTRIBUTES',
-  'RAWATTRIBUTES',
-  'SOURCEATTRIBUTES',
-  'USERDATA',
-  'PROPERTIES',
-  'PROPS',
-]);
+// BUILTIN_RULES derived from DEFAULT_RULES in SupportKindResolver.js — no duplication.
+// The override system (updateBuiltinRule / resetBuiltinRule) applies per-id patches
+// loaded from localStorage on top of these base definitions.
+const BUILTIN_RULES = DEFAULT_RULES;
 
 let _userRules = null;
 let _builtinRuleOverrides = null;
@@ -159,59 +150,20 @@ export function resetBuiltinRules() {
   saveBuiltinRuleOverrides({});
 }
 
-export function splitRuleTerms(value) {
-  return String(value || '')
-    .split(/[,;\n]+/)
-    .map(term => term.trim())
-    .filter(Boolean);
-}
-
-export function normalizeMapperFieldName(fieldName) {
-  const trimmed = String(fieldName || '').trim();
-  if (trimmed === '*') return '*';
-  return trimmed
-    .replace(/^<+|>+$/g, '')
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, '');
-}
-
-export function collectMapperFieldValues(attrs, rule) {
-  const entries = _collectAttributeEntries(attrs);
-  const fields = splitRuleTerms(rule?.field);
-  const scansAllFields = !fields.length || fields.some(field => {
-    const normalizedField = normalizeMapperFieldName(field);
-    return normalizedField === '*' || normalizedField === 'ANY';
-  });
-
-  if (scansAllFields) {
-    return entries.map(entry => entry.value).filter(value => String(value).trim());
-  }
-
-  const requestedFields = new Set(fields.map(normalizeMapperFieldName));
-  return entries
-    .filter(entry => requestedFields.has(entry.normalizedKey))
-    .map(entry => entry.value)
-    .filter(value => String(value).trim());
-}
-
 /**
  * Resolve a mapped support kind from an ATT/RVM attribute bag.
- * User rules run first and can target comma-separated fields and keywords.
- * Built-in rules then cover common CMPSUPTYPE/MDSSUPPTYPE/SPRE conventions.
+ * Delegates to the pure resolver in SupportKindResolver.js.
+ * User rules run first, then built-in rules (with any localStorage overrides applied).
+ * kindMap is intentionally empty here — CA codes are covered by BUILTIN_RULES,
+ * and passing DEFAULT_KIND_MAP would shadow user overrides of those built-ins.
  */
 export function resolveKindFromAttrs(attrs) {
-  const rules = [...loadUserRules(), ...getBuiltinRules()];
-  for (const rule of rules) {
-    const kind = _normalizeSupportKind(rule.kind);
-    if (!kind) continue;
-
-    const values = collectMapperFieldValues(attrs, rule);
-    if (values.some(value => _matchRuleAgainstValue(rule, value))) return kind;
-  }
-  return '';
+  return resolveKindPure(attrs, {
+    userRules:    loadUserRules(),
+    defaultRules: getBuiltinRules(),
+    kindMap:      {},
+  });
 }
-
-export { SUPPORT_KINDS, MATCH_TYPES };
 
 // -- Support Mapper UI -------------------------------------------------------
 
@@ -302,52 +254,6 @@ function _normalizeRuleForUse(rule) {
 function _normalizeSupportKind(kind) {
   const normalizedKind = String(kind || '').trim().toUpperCase().replace(/\s+/g, '');
   return SUPPORT_KINDS.includes(normalizedKind) ? normalizedKind : '';
-}
-
-function _collectAttributeEntries(input, seen = new Set(), depth = 0) {
-  if (!input || typeof input !== 'object' || seen.has(input) || depth > 4) return [];
-  seen.add(input);
-
-  const entries = [];
-  for (const [key, value] of Object.entries(input)) {
-    if (value === undefined || value === null) continue;
-
-    const normalizedKey = normalizeMapperFieldName(key);
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      if (NESTED_ATTRIBUTE_KEYS.has(normalizedKey)) {
-        entries.push(..._collectAttributeEntries(value, seen, depth + 1));
-      }
-      continue;
-    }
-
-    entries.push({ key, normalizedKey, value });
-  }
-  return entries;
-}
-
-function _matchRuleAgainstValue(rule, value) {
-  const match = MATCH_TYPES.includes(rule?.match) ? rule.match : 'contains';
-  const rawValue = String(value ?? '');
-  const normalizedValue = rawValue.toUpperCase();
-  const patterns = match === 'regex' ? [String(rule?.pattern || '').trim()] : splitRuleTerms(rule?.pattern);
-
-  return patterns.some(pattern => {
-    if (!pattern) return false;
-    const normalizedPattern = pattern.toUpperCase();
-    switch (match) {
-      case 'startsWith': return normalizedValue.startsWith(normalizedPattern);
-      case 'equals': return normalizedValue === normalizedPattern;
-      case 'contains': return normalizedValue.includes(normalizedPattern);
-      case 'regex':
-        try {
-          return new RegExp(pattern, 'i').test(rawValue);
-        } catch {
-          return false;
-        }
-      default:
-        return false;
-    }
-  });
 }
 
 function _kindBadge(kind) {
