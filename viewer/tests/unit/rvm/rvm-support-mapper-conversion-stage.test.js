@@ -18,7 +18,8 @@ function run() {
   const sharedTokens = read('viewer/styles/shared-viewer-tokens.css');
   const appJs = read('viewer/core/app.js');
   const indexHtml = read('viewer/index.html');
-  const mapperJs = read('viewer/rvm-viewer/RvmSupportMapper.js');
+  const mapperJs   = read('viewer/rvm-viewer/RvmSupportMapper.js');
+  const resolverJs = read('viewer/support/SupportKindResolver.js');
 
   assert.ok(
     converterJs.includes("RvmSupportMapper.js?v=20260518-support-mapper-11") &&
@@ -40,9 +41,24 @@ function run() {
     mapperJs.includes('updateBuiltinRule') &&
     mapperJs.includes('data-rule-field') &&
     mapperJs.includes('data-rule-match') &&
-    mapperJs.includes('data-rule-pattern') &&
-    mapperJs.indexOf("id: 'builtin-gt5-mds'") < mapperJs.indexOf("id: 'builtin-gt'"),
-    'support mapper must support editable field/match/keyword columns and GT5 REST precedence'
+    mapperJs.includes('data-rule-pattern'),
+    'support mapper must support editable field/match/keyword columns'
+  );
+
+  // Rule ordering and CA built-ins now live in SupportKindResolver.js (no duplication in mapper).
+  assert.ok(
+    mapperJs.includes('BUILTIN_RULES = DEFAULT_RULES'),
+    'mapper BUILTIN_RULES must be derived from pure resolver DEFAULT_RULES (no duplication)'
+  );
+  assert.ok(
+    resolverJs.indexOf("id: 'builtin-gt5-mds'") < resolverJs.indexOf("id: 'builtin-gt'"),
+    'GT5 REST rules must precede generic GT GUIDE rule in SupportKindResolver DEFAULT_RULES'
+  );
+  assert.ok(
+    resolverJs.includes("id: 'builtin-ca150'") &&
+    resolverJs.includes("id: 'builtin-ca250'") &&
+    resolverJs.includes("id: 'builtin-ca100'"),
+    'SupportKindResolver DEFAULT_RULES must include CA150, CA250, CA100 built-in rules'
   );
 
   assert.ok(
