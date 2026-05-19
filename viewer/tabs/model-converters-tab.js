@@ -1813,64 +1813,112 @@ function _buildCsvFromStagedJson(stagedJsonText, _inputName) {
     throw new Error('Staged JSON root must be an array of branch objects.');
   }
 
-  const COLUMNS = [
-    'Site', 'Pipe', 'Branch', 'Branch Bore',
-    'Component Name', 'Component Type', 'Ref No',
-    'Description (DTXR)', 'Material (MTXX)',
-    'Bore A', 'Bore L',
-    'Spec (SPRE)', 'Catalogue (LSTU)',
-    'Pos X (mm)', 'Pos Y (mm)', 'Pos Z (mm)',
-  ];
-
-  const rows = [COLUMNS];
-
-  // Sort branches: site → pipe → branch
-  const sorted = [...branches].sort((a, b) => {
+  // Collect flat records preserving original branch order (branches already sorted below)
+  const allRecords = [];
+  const sortedBranches = [...branches].sort((a, b) => {
     const pa = _stagedJsonExtractSiteAndPipe(a.name || '');
     const pb = _stagedJsonExtractSiteAndPipe(b.name || '');
-    const siteComp = pa.site.localeCompare(pb.site);
-    if (siteComp !== 0) return siteComp;
-    const pipeComp = pa.pipe.localeCompare(pb.pipe);
-    if (pipeComp !== 0) return pipeComp;
-    return pa.branch.localeCompare(pb.branch);
+    return pa.site.localeCompare(pb.site)
+      || pa.pipe.localeCompare(pb.pipe)
+      || pa.branch.localeCompare(pb.branch);
   });
 
-  let rowCount = 0;
-  for (const branch of sorted) {
+  for (const branch of sortedBranches) {
     const { site, pipe, branch: branchSeg } = _stagedJsonExtractSiteAndPipe(branch.name || '');
     const branchBore = _toText(branch.bore || '');
-
     for (const comp of (branch.children || [])) {
       const attrs = comp.attributes || {};
       const pos = attrs.POS || attrs.APOS || attrs.CPOS || null;
       const posX = pos && typeof pos === 'object' ? _toText(pos.x ?? '') : '';
       const posY = pos && typeof pos === 'object' ? _toText(pos.y ?? '') : '';
       const posZ = pos && typeof pos === 'object' ? _toText(pos.z ?? '') : '';
-
-      rows.push([
+      allRecords.push({
         site,
         pipe,
         branchSeg,
         branchBore,
-        _toText(comp.name || ''),
-        _toText(comp.type || attrs.TYPE || ''),
-        _toText(attrs.REF || ''),
-        _toText(attrs.DTXR || ''),
-        _toText(attrs.MTXX || ''),
-        _toText(attrs.ABORE || ''),
-        _toText(attrs.LBORE || ''),
-        _toText(attrs.SPRE || ''),
-        _toText(attrs.LSTU || ''),
-        posX,
-        posY,
-        posZ,
-      ]);
-      rowCount++;
+        compName: _toText(comp.name || ''),
+        compType: _toText(comp.type || ''),
+        ref:      _toText(attrs.REF || ''),
+        desc:     _toText(attrs.DESC || ''),
+        type:     _toText(attrs.TYPE || comp.type || ''),
+        dtxr:     _toText(attrs.DTXR || ''),
+        mtxx:     _toText(attrs.MTXX || ''),
+        abore:    _toText(attrs.ABORE || ''),
+        lbore:    _toText(attrs.LBORE || ''),
+        spre:     _toText(attrs.SPRE || ''),
+        stex:     _toText(attrs.STEX || ''),
+        mdssupptype: _toText(attrs.MDSSUPPTYPE || ''),
+        cmpsupgap:   _toText(attrs.CMPSUPGAP || ''),
+        lstu:     _toText(attrs.LSTU || ''),
+        posX, posY, posZ,
+      });
     }
   }
 
-  const csvText = rows.map((r) => r.map(_stagedJsonCsvCell).join(',')).join('\n');
-  return { csvText, rowCount, branchCount: sorted.length };
+  // Group by REF: same REF → one row; no-REF components → individual rows.
+  // For columns with multiple distinct values within a group, concat with "|".
+  const MERGE_FIELDS = [
+    'site','pipe','branchSeg','branchBore',
+    'compName','compType',
+    'desc','type','dtxr','mtxx',
+    'abore','lbore','spre','stex','mdssupptype','cmpsupgap','lstu',
+    'posX','posY','posZ',
+  ];
+  const groups = new Map(); // key → { firstRec, recs[] }
+  let noRefIdx = 0;
+  for (const rec of allRecords) {
+    const key = rec.ref || `\x00noref_${noRefIdx++}`;
+    if (!groups.has(key)) groups.set(key, { firstRec: rec, recs: [] });
+    groups.get(key).recs.push(rec);
+  }
+
+  const outputRows = [];
+  for (const { firstRec, recs } of groups.values()) {
+    const row = [firstRec];  // borrow firstRec for sort key; overwritten below
+    const merged = { ref: firstRec.ref };
+    for (const f of MERGE_FIELDS) {
+      const unique = [...new Set(recs.map((r) => r[f]).filter((v) => v !== ''))];
+      merged[f] = unique.join('|');
+    }
+    outputRows.push({ _sort: firstRec, merged });
+  }
+
+  // Already in branch-sorted order, but stable-sort ensures site>pipe>branch grouping
+  // even when REFs span multiple branches (edge case).
+  outputRows.sort((a, b) =>
+    a._sort.site.localeCompare(b._sort.site)
+    || a._sort.pipe.localeCompare(b._sort.pipe)
+    || a._sort.branchSeg.localeCompare(b._sort.branchSeg)
+  );
+
+  const COLUMNS = [
+    'Site', 'Pipe', 'Branch', 'Branch Bore',
+    'Component Name', 'Component Type', 'Ref No',
+    'DESC', 'TYPE',
+    'Description (DTXR)', 'Material (MTXX)',
+    'Bore A', 'Bore L',
+    'Spec (SPRE)', 'STEX', 'MDSSUPPTYPE', 'CMPSUPGAP',
+    'Catalogue (LSTU)',
+    'Pos X (mm)', 'Pos Y (mm)', 'Pos Z (mm)',
+  ];
+
+  const csvRows = [COLUMNS];
+  for (const { merged: m } of outputRows) {
+    csvRows.push([
+      m.site, m.pipe, m.branchSeg, m.branchBore,
+      m.compName, m.compType, m.ref,
+      m.desc, m.type,
+      m.dtxr, m.mtxx,
+      m.abore, m.lbore,
+      m.spre, m.stex, m.mdssupptype, m.cmpsupgap,
+      m.lstu,
+      m.posX, m.posY, m.posZ,
+    ]);
+  }
+
+  const csvText = csvRows.map((r) => r.map(_stagedJsonCsvCell).join(',')).join('\n');
+  return { csvText, rowCount: outputRows.length, branchCount: sortedBranches.length };
 }
 
 function _normalizePreviewPoint(value) {
