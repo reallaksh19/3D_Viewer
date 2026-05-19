@@ -301,9 +301,11 @@ const CONVERTER_DEFS = Object.freeze({
     description: 'Export staged JSON hierarchy to a CSV table grouped by Site > Pipe/Branch > Reference No.',
     defaults: {
       csvColumns: '',
+      supportTypeRules: '',
     },
     fields: [
       { key: 'csvColumns', label: 'Report Columns', type: 'column-picker' },
+      { key: 'supportTypeRules', label: 'Support Type Rules', type: 'support-type-rules' },
     ],
   },
   stagedjson_to_xml: {
@@ -1288,6 +1290,46 @@ function _buildAdvancedFieldsHtml(def, values) {
         </div>
       `;
     }
+    if (field.type === 'support-type-rules') {
+      const rules = _parseSupportTypeRules(value);
+      const colOptions = STAGED_CSV_ALL_COLUMNS.map(
+        (c) => `<option value="${_esc(c.key)}">${_esc(c.label)}</option>`,
+      ).join('');
+      const rowStyle = 'display:grid;grid-template-columns:140px 1fr 1fr 1fr 26px;gap:4px;padding:2px 0;align-items:center;';
+      const inputStyle = 'font-size:11px;background:#2a2d38;border:1px solid #555;border-radius:3px;color:#eee;padding:2px 4px;width:100%;box-sizing:border-box;';
+      const selectStyle = `${inputStyle}padding:1px 2px;`;
+      const rulesHtml = rules.map((rule) => `
+        <div class="csv-rule-row" style="${rowStyle}">
+          <select class="csv-rule-col" style="${selectStyle}">
+            ${STAGED_CSV_ALL_COLUMNS.map(
+              (c) => `<option value="${_esc(c.key)}"${c.key === (rule.col || 'dtxr') ? ' selected' : ''}>${_esc(c.label)}</option>`,
+            ).join('')}
+          </select>
+          <input type="text" class="csv-rule-contains" value="${_esc(rule.contains || '')}" placeholder="Contains…" style="${inputStyle}">
+          <input type="text" class="csv-rule-notcontains" value="${_esc(rule.notContains || '')}" placeholder="Not Contains (opt.)" style="${inputStyle}">
+          <input type="text" class="csv-rule-result" value="${_esc(rule.result || '')}" placeholder="Result e.g. G+LS" style="${inputStyle}">
+          <button type="button" class="csv-rule-del model-converters-download-btn"
+                  style="padding:0;min-width:22px;font-size:13px;color:#e88;line-height:1;" title="Delete rule">×</button>
+        </div>
+      `).join('');
+      return `
+        <div class="model-converters-label" style="flex-direction:column;align-items:flex-start;gap:4px;">
+          <span style="font-weight:600;">${_esc(field.label)}</span>
+          <div style="${rowStyle}font-weight:600;font-size:10px;color:#888;padding-bottom:0;">
+            <span>Source Column</span><span>Contains</span><span>Not Contains</span><span>Result</span><span></span>
+          </div>
+          <div class="csv-support-rules" data-option-key="${_esc(key)}"
+               style="width:100%;box-sizing:border-box;">
+            ${rulesHtml}
+          </div>
+          <button type="button" class="csv-rule-add model-converters-download-btn" data-rules-key="${_esc(key)}"
+                  style="font-size:11px;padding:2px 10px;align-self:flex-start;">+ Add Rule</button>
+          <small class="model-converters-muted">
+            Rules evaluated top-to-bottom · Result tokens combined with "+" · duplicates removed (e.g. R+R+G → R+G)
+          </small>
+        </div>
+      `;
+    }
     const inputType = field.type === 'number' ? 'number' : 'text';
     const stepAttr = field.step ? `step="${_esc(field.step)}"` : '';
     return `
@@ -1833,7 +1875,57 @@ const STAGED_CSV_ALL_COLUMNS = Object.freeze([
   { key: 'posX',        label: 'Pos X (mm)' },
   { key: 'posY',        label: 'Pos Y (mm)' },
   { key: 'posZ',        label: 'Pos Z (mm)' },
+  { key: 'supportType', label: 'Support Type' },
 ]);
+
+// Default rules for computing the Support Type column from DTXR (or any source column).
+// Each rule: { col, contains, notContains, result }
+//   col        — key from STAGED_CSV_ALL_COLUMNS to read (default 'dtxr')
+//   contains   — substring the cell value must include (case-insensitive)
+//   notContains — optional substring the cell value must NOT include
+//   result     — code(s) to emit, "+" separates multiple tokens (e.g. "G+LS")
+const STAGED_CSV_DEFAULT_SUPPORT_TYPE_RULES = Object.freeze([
+  { col: 'dtxr', contains: 'GUI',      notContains: '',    result: 'G'    },
+  { col: 'dtxr', contains: 'STOP',     notContains: '',    result: 'LS'   },
+  { col: 'dtxr', contains: 'NON GRIP', notContains: '',    result: 'G'    },
+  { col: 'dtxr', contains: 'GRIP',     notContains: 'NON', result: 'G+LS' },
+  { col: 'dtxr', contains: 'REST',     notContains: '',    result: 'R'    },
+  { col: 'dtxr', contains: 'SHOE',     notContains: '',    result: 'R'    },
+  { col: 'dtxr', contains: 'HAN',      notContains: '',    result: 'H'    },
+]);
+
+function _parseSupportTypeRules(raw) {
+  if (!raw) return STAGED_CSV_DEFAULT_SUPPORT_TYPE_RULES.map((r) => ({ ...r }));
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+  } catch { /* fall through */ }
+  return STAGED_CSV_DEFAULT_SUPPORT_TYPE_RULES.map((r) => ({ ...r }));
+}
+
+// Evaluate support-type rules against a fully merged row.
+// mergedRow[rule.col] may be a "|"-concatenated string of multiple values.
+// Emits unique result tokens joined with "+", e.g. "R+G".
+function _computeSupportType(mergedRow, rules) {
+  const resultSet = new Set();
+  for (const rule of rules) {
+    const colKey = rule.col || 'dtxr';
+    const cellVal = String(mergedRow[colKey] || '').toUpperCase();
+    const parts = cellVal.split('|').map((s) => s.trim()).filter(Boolean);
+    const contains    = String(rule.contains    || '').toUpperCase().trim();
+    const notContains = String(rule.notContains || '').toUpperCase().trim();
+    const result      = String(rule.result      || '').trim();
+    if (!contains || !result) continue;
+    for (const part of parts) {
+      if (!part.includes(contains)) continue;
+      if (notContains && part.includes(notContains)) continue;
+      for (const token of result.split('+').map((t) => t.trim()).filter(Boolean)) {
+        resultSet.add(token);
+      }
+    }
+  }
+  return [...resultSet].join('+');
+}
 
 function _parseCsvColumnConfig(raw) {
   // Returns [{key, label, visible}] — merges stored user config with the master list.
@@ -1877,7 +1969,7 @@ function _stagedJsonCsvCell(v) {
   return s;
 }
 
-function _buildCsvFromStagedJson(stagedJsonText, _inputName, columnConfigRaw) {
+function _buildCsvFromStagedJson(stagedJsonText, _inputName, columnConfigRaw, supportTypeRulesRaw) {
   let branches;
   try {
     branches = JSON.parse(_toText(stagedJsonText));
@@ -1957,7 +2049,12 @@ function _buildCsvFromStagedJson(stagedJsonText, _inputName, columnConfigRaw) {
   // Rule: same Ref No AND same coordinates → one row, non-unique columns concat'd with "|"
   //       same Ref No but different coordinates → separate rows
   //       no Ref No → each component is its own row
-  const MERGE_FIELDS = activeCols.map((c) => c.key).filter((k) => k !== 'ref' && k !== 'posX' && k !== 'posY' && k !== 'posZ');
+  // supportType is computed post-merge, so exclude it from field-merge pass.
+  const _COMPUTED_COL_KEYS = new Set(['supportType']);
+  const supportTypeRules = _parseSupportTypeRules(supportTypeRulesRaw || '');
+  const MERGE_FIELDS = activeCols.map((c) => c.key).filter(
+    (k) => k !== 'ref' && k !== 'posX' && k !== 'posY' && k !== 'posZ' && !_COMPUTED_COL_KEYS.has(k),
+  );
   const groups = new Map();
   let noRefIdx = 0;
   for (const rec of allRecords) {
@@ -1983,6 +2080,7 @@ function _buildCsvFromStagedJson(stagedJsonText, _inputName, columnConfigRaw) {
       const unique = [...new Set(recs.map((r) => r[f] ?? '').filter((v) => v !== ''))];
       merged[f] = unique.join('|');
     }
+    merged.supportType = _computeSupportType(merged, supportTypeRules);
     outputRows.push({ _sort: firstRec, merged });
   }
 
@@ -2812,6 +2910,53 @@ export function renderModelConvertersTab(container) {
         });
         continue;
       }
+      if (field.type === 'support-type-rules') {
+        const rulesEl = advancedFieldsEl.querySelector(`.csv-support-rules[data-option-key="${field.key}"]`);
+        const addBtn  = advancedFieldsEl.querySelector(`.csv-rule-add[data-rules-key="${field.key}"]`);
+        if (!rulesEl) continue;
+        const rowStyle = 'display:grid;grid-template-columns:140px 1fr 1fr 1fr 26px;gap:4px;padding:2px 0;align-items:center;';
+        const inputStyle = 'font-size:11px;background:#2a2d38;border:1px solid #555;border-radius:3px;color:#eee;padding:2px 4px;width:100%;box-sizing:border-box;';
+        const saveRules = () => {
+          const rows = [...rulesEl.querySelectorAll('.csv-rule-row')];
+          const rules = rows.map((row) => ({
+            col:        row.querySelector('.csv-rule-col')?.value || 'dtxr',
+            contains:   row.querySelector('.csv-rule-contains')?.value || '',
+            notContains: row.querySelector('.csv-rule-notcontains')?.value || '',
+            result:     row.querySelector('.csv-rule-result')?.value || '',
+          }));
+          values[field.key] = JSON.stringify(rules);
+          persist();
+        };
+        rulesEl.addEventListener('input', saveRules);
+        rulesEl.addEventListener('change', saveRules);
+        rulesEl.addEventListener('click', (e) => {
+          if (e.target.closest('.csv-rule-del')) {
+            e.target.closest('.csv-rule-row').remove();
+            saveRules();
+          }
+        });
+        if (addBtn) {
+          addBtn.addEventListener('click', () => {
+            const newRow = document.createElement('div');
+            newRow.className = 'csv-rule-row';
+            newRow.style.cssText = rowStyle;
+            const colOptions = STAGED_CSV_ALL_COLUMNS.map(
+              (c) => `<option value="${_esc(c.key)}">${_esc(c.label)}</option>`,
+            ).join('');
+            newRow.innerHTML = `
+              <select class="csv-rule-col" style="${inputStyle}padding:1px 2px;">${colOptions}</select>
+              <input type="text" class="csv-rule-contains" placeholder="Contains…" style="${inputStyle}">
+              <input type="text" class="csv-rule-notcontains" placeholder="Not Contains (opt.)" style="${inputStyle}">
+              <input type="text" class="csv-rule-result" placeholder="Result e.g. G+LS" style="${inputStyle}">
+              <button type="button" class="csv-rule-del model-converters-download-btn"
+                      style="padding:0;min-width:22px;font-size:13px;color:#e88;line-height:1;" title="Delete rule">×</button>
+            `;
+            rulesEl.appendChild(newRow);
+            saveRules();
+          });
+        }
+        continue;
+      }
       const input = advancedFieldsEl.querySelector(`[data-option-key="${field.key}"]`);
       if (!input) continue;
       const updateValue = () => {
@@ -3103,7 +3248,7 @@ export function renderModelConvertersTab(container) {
           throw new Error('Primary staged JSON input is required for StagedJSON -> CSV export.');
         }
         const stagedJsonText = _decodeTextUtf8(primaryBytes);
-        const csvResult = _buildCsvFromStagedJson(stagedJsonText, primaryFile.name, runValues.csvColumns);
+        const csvResult = _buildCsvFromStagedJson(stagedJsonText, primaryFile.name, runValues.csvColumns, runValues.supportTypeRules);
         response = {
           outputs: [
             {
