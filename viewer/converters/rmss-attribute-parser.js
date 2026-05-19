@@ -827,6 +827,26 @@ function routeBranchPipes(branchName, children, branchBore, rawRouteOptions, end
 function parseRmssAttributes(content, rawRouteOptions) {
   const routeOptions = resolveRouteOptions(rawRouteOptions);
   const allObjects = parseTextBlocks(content);
+
+  // Build name→owner and name→type maps for hierarchy traversal (SITE/ZONE/PIPE chain).
+  const _ownerOf = new Map();
+  const _typeOf = new Map();
+  for (const obj of allObjects) {
+    const name = String(obj?.attributes?.NAME || obj?.id || '').trim();
+    const owner = String(obj?.attributes?.OWNER || '').trim();
+    const type = String(obj?.attributes?.TYPE || '').toUpperCase().trim();
+    if (name) { _ownerOf.set(name, owner); _typeOf.set(name, type); }
+  }
+  function _findSiteAncestor(startName, maxDepth = 8) {
+    let cur = startName;
+    for (let d = 0; d < maxDepth; d++) {
+      const owner = _ownerOf.get(cur);
+      if (!owner) return '';
+      if (_typeOf.get(owner) === 'SITE') return owner;
+      cur = owner;
+    }
+    return '';
+  }
   const branches = allObjects.filter((obj) => String(obj?.attributes?.TYPE || '').toUpperCase() === 'BRAN');
   const sourceComponents = allObjects.filter((obj) => {
     const rawType = normalizeToken(obj?.attributes?.TYPE);
@@ -842,6 +862,7 @@ function parseRmssAttributes(content, rawRouteOptions) {
     if (!branchName) continue;
 
     const boreSrc = extractBore(branch.attributes);
+    const branchOwner = String(branch?.attributes?.OWNER || '').trim();
     branchMap.set(branchName, {
       name: branchName,
       type: 'BRANCH',
@@ -858,6 +879,8 @@ function parseRmssAttributes(content, rawRouteOptions) {
         TREF: branch.attributes.TREF,
         CREF: branch.attributes.CREF,
         NAME: branch.attributes.NAME,
+        OWNER: branchOwner,
+        OWNER_SITE: _findSiteAncestor(branchName),
       },
       children: []
     });
