@@ -299,8 +299,12 @@ const CONVERTER_DEFS = Object.freeze({
     secondaryLabel: '',
     secondaryAccept: '',
     description: 'Export staged JSON hierarchy to a CSV table grouped by Site > Pipe/Branch > Reference No.',
-    defaults: {},
-    fields: [],
+    defaults: {
+      csvColumns: '',
+    },
+    fields: [
+      { key: 'csvColumns', label: 'Report Columns', type: 'column-picker' },
+    ],
   },
   stagedjson_to_xml: {
     id: 'stagedjson_to_xml',
@@ -1260,6 +1264,30 @@ function _buildAdvancedFieldsHtml(def, values) {
         </label>
       `;
     }
+    if (field.type === 'column-picker') {
+      const cols = _parseCsvColumnConfig(value);
+      return `
+        <div class="model-converters-label" style="flex-direction:column;align-items:flex-start;gap:4px;">
+          <span style="font-weight:600;">${_esc(field.label)}</span>
+          <div class="csv-column-picker" data-option-key="${_esc(key)}"
+               style="max-height:260px;overflow-y:auto;border:1px solid #444;border-radius:4px;padding:4px 6px;width:100%;box-sizing:border-box;background:#1e2027;">
+            ${cols.map((col) => `
+              <div class="csv-col-row" data-col-key="${_esc(col.key)}"
+                   style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:default;">
+                <input type="checkbox" class="csv-col-visible" ${col.visible !== false ? 'checked' : ''}
+                       style="margin:0;cursor:pointer;" title="Show/hide column">
+                <span style="flex:1;font-size:12px;">${_esc(col.label)}</span>
+                <button type="button" class="csv-col-up model-converters-download-btn"
+                        style="padding:0 5px;min-width:22px;font-size:11px;" title="Move up">↑</button>
+                <button type="button" class="csv-col-down model-converters-download-btn"
+                        style="padding:0 5px;min-width:22px;font-size:11px;" title="Move down">↓</button>
+              </div>
+            `).join('')}
+          </div>
+          <small class="model-converters-muted">Check/uncheck to include columns · ↑↓ to reorder</small>
+        </div>
+      `;
+    }
     const inputType = field.type === 'number' ? 'number' : 'text';
     const stepAttr = field.step ? `step="${_esc(field.step)}"` : '';
     return `
@@ -1781,6 +1809,53 @@ function _buildXmlFromStagedJsonText(stagedJsonText, inputName, options) {
   };
 }
 
+const STAGED_CSV_ALL_COLUMNS = Object.freeze([
+  { key: 'site',        label: 'Site' },
+  { key: 'pipe',        label: 'Pipe' },
+  { key: 'branchSeg',   label: 'Branch' },
+  { key: 'branchBore',  label: 'Branch Bore' },
+  { key: 'compName',    label: 'Component Name' },
+  { key: 'compType',    label: 'Component Type' },
+  { key: 'ref',         label: 'Ref No' },
+  { key: 'name',        label: 'NAME' },
+  { key: 'cmpsuprefn',  label: 'CMPSUPREFN' },
+  { key: 'desc',        label: 'DESC' },
+  { key: 'type',        label: 'TYPE' },
+  { key: 'dtxr',        label: 'Description (DTXR)' },
+  { key: 'mtxx',        label: 'Material (MTXX)' },
+  { key: 'abore',       label: 'Bore A' },
+  { key: 'lbore',       label: 'Bore L' },
+  { key: 'spre',        label: 'Spec (SPRE)' },
+  { key: 'stex',        label: 'STEX' },
+  { key: 'mdssupptype', label: 'MDSSUPPTYPE' },
+  { key: 'cmpsupgap',   label: 'CMPSUPGAP' },
+  { key: 'lstu',        label: 'Catalogue (LSTU)' },
+  { key: 'posX',        label: 'Pos X (mm)' },
+  { key: 'posY',        label: 'Pos Y (mm)' },
+  { key: 'posZ',        label: 'Pos Z (mm)' },
+]);
+
+function _parseCsvColumnConfig(raw) {
+  // Returns [{key, label, visible}] — merges stored user config with the master list.
+  const master = STAGED_CSV_ALL_COLUMNS.map((c) => ({ ...c, visible: true }));
+  if (!raw) return master;
+  let stored;
+  try { stored = JSON.parse(raw); } catch { return master; }
+  if (!Array.isArray(stored)) return master;
+  // Re-apply stored order + visibility, appending any new columns not yet in the stored config.
+  const storedKeys = stored.map((s) => s.key);
+  const result = stored
+    .map((s) => {
+      const def = master.find((m) => m.key === s.key);
+      return def ? { ...def, visible: s.visible !== false } : null;
+    })
+    .filter(Boolean);
+  for (const col of master) {
+    if (!storedKeys.includes(col.key)) result.push({ ...col, visible: true });
+  }
+  return result;
+}
+
 function _stagedJsonExtractSiteAndPipe(branchName) {
   // Branch name is like "/ASIM-1844-3"-S8810794-91261M7-01/B1"
   // Pipe name is the first path segment; SITE is everything before the pipe size (digit+")
@@ -1802,7 +1877,7 @@ function _stagedJsonCsvCell(v) {
   return s;
 }
 
-function _buildCsvFromStagedJson(stagedJsonText, _inputName) {
+function _buildCsvFromStagedJson(stagedJsonText, _inputName, columnConfigRaw) {
   let branches;
   try {
     branches = JSON.parse(_toText(stagedJsonText));
@@ -1813,19 +1888,38 @@ function _buildCsvFromStagedJson(stagedJsonText, _inputName) {
     throw new Error('Staged JSON root must be an array of branch objects.');
   }
 
-  // Collect flat records preserving original branch order (branches already sorted below)
-  const allRecords = [];
+  // Resolve active columns from user config (respects visibility and order).
+  const colConfig = _parseCsvColumnConfig(columnConfigRaw || '');
+  const activeCols = colConfig.filter((c) => c.visible !== false);
+
+  // Sort branches: OWNER_SITE → OWNER (pipe) → branch segment.
+  const _branchSortKey = (b) => {
+    const attrs = b.attributes || {};
+    const site = _toText(attrs.OWNER_SITE || '').replace(/^\//, '');
+    const pipe = _toText(attrs.OWNER || '').replace(/^\//, '');
+    const seg  = _toText(b.name || '').replace(/^\//, '').split('/').pop() || '';
+    return [site || _stagedJsonExtractSiteAndPipe(b.name || '').site,
+            pipe || _stagedJsonExtractSiteAndPipe(b.name || '').pipe,
+            seg];
+  };
   const sortedBranches = [...branches].sort((a, b) => {
-    const pa = _stagedJsonExtractSiteAndPipe(a.name || '');
-    const pb = _stagedJsonExtractSiteAndPipe(b.name || '');
-    return pa.site.localeCompare(pb.site)
-      || pa.pipe.localeCompare(pb.pipe)
-      || pa.branch.localeCompare(pb.branch);
+    const [as_, ap, ab] = _branchSortKey(a);
+    const [bs, bp, bb]  = _branchSortKey(b);
+    return as_.localeCompare(bs) || ap.localeCompare(bp) || ab.localeCompare(bb);
   });
 
+  const allRecords = [];
   for (const branch of sortedBranches) {
-    const { site, pipe, branch: branchSeg } = _stagedJsonExtractSiteAndPipe(branch.name || '');
+    const bAttrs = branch.attributes || {};
+    // Prefer OWNER / OWNER_SITE set by rmss-attribute-parser; fall back to name-based extraction.
+    const ownerPipe = _toText(bAttrs.OWNER || '').replace(/^\//, '');
+    const ownerSite = _toText(bAttrs.OWNER_SITE || '').replace(/^\//, '');
+    const fallback = _stagedJsonExtractSiteAndPipe(branch.name || '');
+    const site      = ownerSite || fallback.site;
+    const pipe      = ownerPipe || fallback.pipe;
+    const branchSeg = _toText(branch.name || '').replace(/^\//, '').split('/').pop() || fallback.branch;
     const branchBore = _toText(branch.bore || '');
+
     for (const comp of (branch.children || [])) {
       const attrs = comp.attributes || {};
       const pos = attrs.POS || attrs.APOS || attrs.CPOS || null;
@@ -1833,39 +1927,32 @@ function _buildCsvFromStagedJson(stagedJsonText, _inputName) {
       const posY = pos && typeof pos === 'object' ? _toText(pos.y ?? '') : '';
       const posZ = pos && typeof pos === 'object' ? _toText(pos.z ?? '') : '';
       allRecords.push({
-        site,
-        pipe,
-        branchSeg,
-        branchBore,
-        compName: _toText(comp.name || ''),
-        compType: _toText(comp.type || ''),
-        ref:      _toText(attrs.REF || ''),
-        desc:     _toText(attrs.DESC || ''),
-        type:     _toText(attrs.TYPE || comp.type || ''),
-        dtxr:     _toText(attrs.DTXR || ''),
-        mtxx:     _toText(attrs.MTXX || ''),
-        abore:    _toText(attrs.ABORE || ''),
-        lbore:    _toText(attrs.LBORE || ''),
-        spre:     _toText(attrs.SPRE || ''),
-        stex:     _toText(attrs.STEX || ''),
+        site, pipe, branchSeg, branchBore,
+        compName:    _toText(comp.name || ''),
+        compType:    _toText(comp.type || ''),
+        ref:         _toText(attrs.REF || ''),
+        name:        _toText(attrs.NAME || ''),
+        cmpsuprefn:  _toText(attrs.CMPSUPREFN || ''),
+        desc:        _toText(attrs.DESC || ''),
+        type:        _toText(attrs.TYPE || comp.type || ''),
+        dtxr:        _toText(attrs.DTXR || ''),
+        mtxx:        _toText(attrs.MTXX || ''),
+        abore:       _toText(attrs.ABORE || ''),
+        lbore:       _toText(attrs.LBORE || ''),
+        spre:        _toText(attrs.SPRE || ''),
+        stex:        _toText(attrs.STEX || ''),
         mdssupptype: _toText(attrs.MDSSUPPTYPE || ''),
         cmpsupgap:   _toText(attrs.CMPSUPGAP || ''),
-        lstu:     _toText(attrs.LSTU || ''),
+        lstu:        _toText(attrs.LSTU || ''),
         posX, posY, posZ,
       });
     }
   }
 
   // Group by REF: same REF → one row; no-REF components → individual rows.
-  // For columns with multiple distinct values within a group, concat with "|".
-  const MERGE_FIELDS = [
-    'site','pipe','branchSeg','branchBore',
-    'compName','compType',
-    'desc','type','dtxr','mtxx',
-    'abore','lbore','spre','stex','mdssupptype','cmpsupgap','lstu',
-    'posX','posY','posZ',
-  ];
-  const groups = new Map(); // key → { firstRec, recs[] }
+  // Non-unique column values within a group are concatenated with "|".
+  const MERGE_FIELDS = activeCols.map((c) => c.key).filter((k) => k !== 'ref');
+  const groups = new Map();
   let noRefIdx = 0;
   for (const rec of allRecords) {
     const key = rec.ref || `\x00noref_${noRefIdx++}`;
@@ -1875,46 +1962,24 @@ function _buildCsvFromStagedJson(stagedJsonText, _inputName) {
 
   const outputRows = [];
   for (const { firstRec, recs } of groups.values()) {
-    const row = [firstRec];  // borrow firstRec for sort key; overwritten below
     const merged = { ref: firstRec.ref };
     for (const f of MERGE_FIELDS) {
-      const unique = [...new Set(recs.map((r) => r[f]).filter((v) => v !== ''))];
+      const unique = [...new Set(recs.map((r) => r[f] ?? '').filter((v) => v !== ''))];
       merged[f] = unique.join('|');
     }
     outputRows.push({ _sort: firstRec, merged });
   }
 
-  // Already in branch-sorted order, but stable-sort ensures site>pipe>branch grouping
-  // even when REFs span multiple branches (edge case).
   outputRows.sort((a, b) =>
     a._sort.site.localeCompare(b._sort.site)
     || a._sort.pipe.localeCompare(b._sort.pipe)
     || a._sort.branchSeg.localeCompare(b._sort.branchSeg)
   );
 
-  const COLUMNS = [
-    'Site', 'Pipe', 'Branch', 'Branch Bore',
-    'Component Name', 'Component Type', 'Ref No',
-    'DESC', 'TYPE',
-    'Description (DTXR)', 'Material (MTXX)',
-    'Bore A', 'Bore L',
-    'Spec (SPRE)', 'STEX', 'MDSSUPPTYPE', 'CMPSUPGAP',
-    'Catalogue (LSTU)',
-    'Pos X (mm)', 'Pos Y (mm)', 'Pos Z (mm)',
-  ];
-
-  const csvRows = [COLUMNS];
+  const headerRow = activeCols.map((c) => c.label);
+  const csvRows = [headerRow];
   for (const { merged: m } of outputRows) {
-    csvRows.push([
-      m.site, m.pipe, m.branchSeg, m.branchBore,
-      m.compName, m.compType, m.ref,
-      m.desc, m.type,
-      m.dtxr, m.mtxx,
-      m.abore, m.lbore,
-      m.spre, m.stex, m.mdssupptype, m.cmpsupgap,
-      m.lstu,
-      m.posX, m.posY, m.posZ,
-    ]);
+    csvRows.push(activeCols.map((c) => m[c.key] ?? ''));
   }
 
   const csvText = csvRows.map((r) => r.map(_stagedJsonCsvCell).join(',')).join('\n');
@@ -2704,6 +2769,33 @@ export function renderModelConvertersTab(container) {
     const values = activeValues();
     advancedFieldsEl.innerHTML = _buildAdvancedFieldsHtml(def, values);
     for (const field of def.fields) {
+      if (field.type === 'column-picker') {
+        const pickerEl = advancedFieldsEl.querySelector(`.csv-column-picker[data-option-key="${field.key}"]`);
+        if (!pickerEl) continue;
+        const saveColConfig = () => {
+          const rows = [...pickerEl.querySelectorAll('[data-col-key]')];
+          const config = rows.map((row) => ({
+            key: row.dataset.colKey,
+            visible: row.querySelector('.csv-col-visible')?.checked !== false,
+          }));
+          values[field.key] = JSON.stringify(config);
+          persist();
+        };
+        pickerEl.addEventListener('change', saveColConfig);
+        pickerEl.addEventListener('click', (e) => {
+          const btn = e.target.closest('.csv-col-up, .csv-col-down');
+          if (!btn) return;
+          const row = btn.closest('[data-col-key]');
+          if (!row) return;
+          if (btn.classList.contains('csv-col-up') && row.previousElementSibling) {
+            pickerEl.insertBefore(row, row.previousElementSibling);
+          } else if (btn.classList.contains('csv-col-down') && row.nextElementSibling) {
+            pickerEl.insertBefore(row.nextElementSibling, row);
+          }
+          saveColConfig();
+        });
+        continue;
+      }
       const input = advancedFieldsEl.querySelector(`[data-option-key="${field.key}"]`);
       if (!input) continue;
       const updateValue = () => {
@@ -2995,7 +3087,7 @@ export function renderModelConvertersTab(container) {
           throw new Error('Primary staged JSON input is required for StagedJSON -> CSV export.');
         }
         const stagedJsonText = _decodeTextUtf8(primaryBytes);
-        const csvResult = _buildCsvFromStagedJson(stagedJsonText, primaryFile.name);
+        const csvResult = _buildCsvFromStagedJson(stagedJsonText, primaryFile.name, runValues.csvColumns);
         response = {
           outputs: [
             {
