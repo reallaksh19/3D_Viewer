@@ -64,10 +64,20 @@ assert.ok(
   'tab must include #rvm-hierarchy-tree element'
 );
 
+assert.ok(
+  tabJs.includes('rvm-tree-filter'),
+  'tab must include #rvm-tree-filter hierarchy filter'
+);
+
 // ✅ #rvm-attributes-content element present
 assert.ok(
   tabJs.includes('rvm-attributes-content'),
   'tab must include #rvm-attributes-content element'
+);
+
+assert.ok(
+  tabJs.includes('rvm-context-menu') && tabJs.includes('rvm-selection-hud'),
+  'tab must include RVM context menu and selection HUD'
 );
 
 // ✅ _disposeRvmViewer cleans up event listener (_shortcutHandler = null)

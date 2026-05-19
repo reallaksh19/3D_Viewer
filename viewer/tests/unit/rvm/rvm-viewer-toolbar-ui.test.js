@@ -60,7 +60,25 @@ function run() {
   );
 
   assert.ok(
-    js.includes("value: 'NavisDark'") && js.includes("value: 'HighContrast'") && js.includes("value: 'DrawLight'"),
+    js.includes('id="rvm-tree-filter"') &&
+    js.includes('function _bindRvmHierarchyFilter(container)'),
+    'RVM viewer must render and bind the hierarchy filter'
+  );
+
+  assert.ok(
+    js.includes('rvm-panel-control-btn') &&
+    css.includes('.rvm-panel-control-btn'),
+    'RVM hierarchy controls must use class-based styling'
+  );
+
+  assert.ok(
+    js.includes('rvm-context-menu') &&
+    js.includes('function _bindRvmContextMenu(container)'),
+    'RVM viewer must render and bind the context menu'
+  );
+
+  assert.ok(
+    js.includes("value: 'NavisDark'") && js.includes("value: 'HighContrast'") && js.includes("value: 'DrawLight'") && js.includes("value: 'SteelNeutral'"),
     'viewer3d-rvm-tab.js must offer the shared theme options'
   );
 
@@ -164,7 +182,7 @@ function run() {
   );
 
   assert.ok(
-    sharedTokens.includes('.geo-theme-highcontrast') && sharedTokens.includes('.geo-theme-drawlight'),
+    sharedTokens.includes('.geo-theme-highcontrast') && sharedTokens.includes('.geo-theme-drawlight') && sharedTokens.includes('.geo-theme-steelneutral'),
     'shared tokens must define all selectable theme classes'
   );
 

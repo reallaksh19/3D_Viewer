@@ -1,4 +1,4 @@
-@import url("../styles/shared-viewer-tokens.css?v=20260518-conversion-support-map-7");
+@import url("../styles/shared-viewer-tokens.css?v=20260518-statusbar-theme-12");
 
 /* RVM Viewer tab - overrides on top of viewer3d.css structural classes */
 
@@ -277,6 +277,7 @@
   display: flex;
   flex: 1;
   overflow: hidden;
+  position: relative;
 }
 
 /* ── Left panel (hierarchy + search) ──────────────────────────────────── */
@@ -302,6 +303,77 @@
   color: var(--geo-text-muted, #888);
   border-bottom: 1px solid var(--geo-border, #333);
   flex-shrink: 0;
+}
+
+.rvm-panel-control-btn {
+  padding: 2px 6px;
+  background: var(--vc-button-bg, #2a3547);
+  border: 1px solid var(--vc-border, #3d4a61);
+  border-radius: 3px;
+  color: var(--vc-text-dim, #b0c8f0);
+  cursor: pointer;
+  font: 10px var(--vc-font-body);
+}
+
+.rvm-panel-control-btn:hover {
+  background: var(--vc-button-hover-bg, #33445f);
+  color: var(--vc-text, #e8f3ff);
+}
+
+.rvm-panel-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px;
+  border-top: 1px solid var(--vc-border-soft);
+  border-bottom: 1px solid var(--vc-border-soft);
+  background: rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
+}
+
+.rvm-panel-filter-row svg {
+  width: 12px;
+  height: 12px;
+  color: var(--vc-text-muted);
+  flex-shrink: 0;
+}
+
+.rvm-panel-filter,
+.rvm-tag-severity-filter {
+  flex: 1;
+  min-width: 0;
+  background: var(--vc-input-bg, #0f1726);
+  border: 1px solid var(--vc-border);
+  border-radius: 3px;
+  color: var(--vc-text);
+  font: 10.5px var(--vc-font-body);
+  padding: 3px 6px;
+  outline: none;
+}
+
+.rvm-panel-filter:focus,
+.rvm-tag-severity-filter:focus {
+  border-color: var(--vc-accent);
+}
+
+.rvm-tag-filter-row,
+.rvm-tag-file-row {
+  display: flex;
+  gap: 5px;
+  padding: 5px;
+  background: rgba(0, 0, 0, 0.1);
+  border-bottom: 1px solid var(--vc-border-soft);
+}
+
+.rvm-tag-file-btn {
+  flex: 1;
+  justify-content: center;
+  text-align: center;
+}
+
+.rvm-selection-hud {
+  right: 270px;
+  bottom: 42px;
 }
 
 /* ── Tree ──────────────────────────────────────────────────────────────── */
@@ -1363,20 +1435,36 @@
   gap: 8px;
 }
 
-.rvm-tab-root .rvm-status-strip,
-.rvm-tab-root #rvm-statusbar {
+.rvm-tab-root .rvm-status-strip {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  background: var(--vc-status-bg);
-  border-top: 1px solid var(--vc-border);
+  background: var(--vc-banner-bg);
+  border-bottom: 1px solid var(--vc-border);
   color: #9fb0c8;
   font-size: 11px;
   line-height: 1.2;
   overflow-x: auto;
   white-space: nowrap;
   scrollbar-width: thin;
+}
+
+.rvm-tab-root #rvm-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-height: 28px;
+  padding: 0;
+  background: var(--vc-status-bg);
+  border-top: 1px solid var(--vc-border);
+  color: var(--vc-text-dim);
+  font-size: 10.5px;
+  line-height: 1.2;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: thin;
+  flex-shrink: 0;
 }
 
 .rvm-tab-root .rvm-status-chip,
@@ -1407,21 +1495,71 @@
   background: rgba(226, 153, 74, 0.16);
 }
 
-.rvm-tab-root #rvm-statusbar .sb,
-.rvm-tab-root .rvm-status-strip .sb {
+.rvm-tab-root #rvm-statusbar .sb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
   border-right: 1px solid var(--vc-border-soft);
+  flex-shrink: 0;
 }
 
-.rvm-tab-root #rvm-statusbar .sb:last-child,
-.rvm-tab-root .rvm-status-strip .sb:last-child {
+.rvm-tab-root #rvm-statusbar .sb:last-child {
   border-right: none;
+}
+
+.rvm-tab-root #rvm-statusbar .rvm-status-product-label {
+  color: var(--vc-accent);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.rvm-tab-root #rvm-statusbar .sc-coords {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--vc-text-dim);
+  font-family: var(--vc-font-mono);
+  font-size: 10px;
+}
+
+.rvm-tab-root #rvm-statusbar .sc-ax {
+  color: var(--vc-accent);
+  font-weight: 700;
+}
+
+.rvm-tab-root #rvm-statusbar .sc-v {
+  min-width: 34px;
+  color: var(--vc-text-dim);
+}
+
+.rvm-tab-root #rvm-statusbar .rvm-status-count {
+  color: var(--vc-accent);
+  font-weight: 700;
+}
+
+.rvm-tab-root #rvm-statusbar .rvm-status-count-label {
+  color: var(--vc-text-dim);
 }
 
 .rvm-tab-root #rvm-statusbar #rvm-sb-msg {
   color: var(--vc-text-dim);
 }
 
+.rvm-tab-root #rvm-statusbar .rvm-sb-msg {
+  flex: 1;
+  overflow: hidden;
+}
+
+.rvm-tab-root #rvm-statusbar .rvm-sb-perf {
+  margin-left: auto;
+  border-left: 1px solid var(--vc-border-soft);
+}
+
 .rvm-tab-root #rvm-statusbar #rvm-fps {
+  font-family: var(--vc-font-mono);
+  font-size: 10px;
   color: var(--vc-text-muted);
 }
 

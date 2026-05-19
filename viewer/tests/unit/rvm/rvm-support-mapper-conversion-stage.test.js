@@ -18,10 +18,31 @@ function run() {
   const sharedTokens = read('viewer/styles/shared-viewer-tokens.css');
   const appJs = read('viewer/core/app.js');
   const indexHtml = read('viewer/index.html');
+  const mapperJs = read('viewer/rvm-viewer/RvmSupportMapper.js');
 
   assert.ok(
-    converterJs.includes("RvmSupportMapper.js?v=20260518-conversion-support-map-7"),
+    converterJs.includes("RvmSupportMapper.js?v=20260518-support-mapper-11") &&
+    converterJs.includes('renderSupportMapperPanel') &&
+    converterJs.includes('model-converters-support-mapper'),
     'model converter must import the cache-busted support mapper used by conversion'
+  );
+
+  assert.ok(
+    !rvmTabJs.includes('renderSupportMapperPanel') &&
+    !rvmTabJs.includes('Support Type Mapper</summary>'),
+    '3D RVM viewer must not render the support mapper editor; mapper editing belongs to Model Converters'
+  );
+
+  assert.ok(
+    mapperJs.includes('CMPSUPTYPE, MDSSUPPTYPE, SPRE') &&
+    mapperJs.includes('splitRuleTerms') &&
+    mapperJs.includes('collectMapperFieldValues') &&
+    mapperJs.includes('updateBuiltinRule') &&
+    mapperJs.includes('data-rule-field') &&
+    mapperJs.includes('data-rule-match') &&
+    mapperJs.includes('data-rule-pattern') &&
+    mapperJs.indexOf("id: 'builtin-gt5-mds'") < mapperJs.indexOf("id: 'builtin-gt'"),
+    'support mapper must support editable field/match/keyword columns and GT5 REST precedence'
   );
 
   assert.ok(
@@ -73,8 +94,9 @@ function run() {
   );
 
   assert.ok(
-    appJs.includes('model-converters-tab.js?v=20260518-conversion-support-map-7') &&
-    indexHtml.includes('core/app.js?v=20260518-conversion-support-map-7'),
+    appJs.includes('model-converters-tab.js?v=20260518-support-mapper-11') &&
+    appJs.includes('viewer3d-rvm-tab.js?v=20260518-statusbar-theme-12') &&
+    indexHtml.includes('core/app.js?v=20260518-statusbar-theme-12'),
     'cache-busting must reload touched conversion and viewer modules'
   );
 

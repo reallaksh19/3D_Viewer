@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { emit } from '../core/event-bus.js';
 import { RuntimeEvents } from '../contracts/runtime-events.js';
-import { THEME_SCENE_STYLES } from '../viewer-3d-defaults.js?v=20260518-conversion-support-map-7';
+import { THEME_SCENE_STYLES } from '../viewer-3d-defaults.js?v=20260518-statusbar-theme-12';
 
 import { RvmSectioning } from './RvmSectioning.js';
 import { RvmVisibilityController } from './RvmVisibilityController.js';

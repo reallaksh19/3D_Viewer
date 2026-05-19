@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { RvmViewer3D } from './RvmViewer3D.js?v=20260518-conversion-support-map-7';
-import { getRvmSupportSymbolSettings } from './RvmSupportSymbols.js?v=20260518-conversion-support-map-7';
-import { resolveKindFromAttrs } from './RvmSupportMapper.js?v=20260518-conversion-support-map-7';
+import { RvmViewer3D } from './RvmViewer3D.js?v=20260518-statusbar-theme-12';
+import { getRvmSupportSymbolSettings } from './RvmSupportSymbols.js?v=20260518-support-mapper-11';
+import { resolveKindFromAttrs } from './RvmSupportMapper.js?v=20260518-support-mapper-11';
 
 const ROOT_NAME = '__RVM_SUPPORT_SYMBOLS__';
 const PATCHED = Symbol.for('pcf-glb-rvm-support-bore-anchor-patched');

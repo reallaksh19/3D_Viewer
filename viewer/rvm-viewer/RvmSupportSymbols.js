@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { RvmViewer3D } from './RvmViewer3D.js?v=20260518-conversion-support-map-7';
-import { resolveKindFromAttrs } from './RvmSupportMapper.js?v=20260518-conversion-support-map-7';
+import { RvmViewer3D } from './RvmViewer3D.js?v=20260518-statusbar-theme-12';
+import { resolveKindFromAttrs } from './RvmSupportMapper.js?v=20260518-support-mapper-11';
 
 const PATCH_FLAG = Symbol.for('pcf-glb-rvm-support-symbols-patched');
 const SUPPORT_SYMBOL_GROUP_NAME = '__RVM_SUPPORT_SYMBOLS__';

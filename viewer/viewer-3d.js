@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { state } from './core/state.js';
-import { THEME_PALETTES, THEME_SCENE_STYLES } from './viewer-3d-defaults.js?v=20260518-conversion-support-map-7';
+import { THEME_PALETTES, THEME_SCENE_STYLES } from './viewer-3d-defaults.js?v=20260518-statusbar-theme-12';
 import { debugSupport } from './debug/support-debug.js';
 
 let CURRENT_VERTICAL_AXIS = 'Z';
@@ -2359,6 +2359,20 @@ export class PcfViewer3D {
         }
         this._selectedOriginalMaterials = [];
         this._selectedComponentId = null;
+    }
+
+    clearSelection() {
+        this._clearSelection();
+        if (this._onSelectionChange) this._onSelectionChange(null);
+        this._emitTrace('selection-clear', {});
+    }
+
+    selectComponent(componentOrId) {
+        const componentId = typeof componentOrId === 'string'
+            ? componentOrId
+            : componentOrId?.id;
+        if (!componentId) return;
+        this._selectComponent(componentId);
     }
 
     _selectComponent(componentId) {

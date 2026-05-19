@@ -10,7 +10,7 @@ import {
 } from '../converters/worker-contract.js';
 import { parseRmssAttributes, parseRmssStructuralMembers } from '../converters/rmss-attribute-parser.js';
 import { parseStpSupportMembers } from '../parser/stp-support-parser.js';
-import { resolveKindFromAttrs } from '../rvm-viewer/RvmSupportMapper.js?v=20260518-conversion-support-map-7';
+import { resolveKindFromAttrs, renderSupportMapperPanel } from '../rvm-viewer/RvmSupportMapper.js?v=20260518-support-mapper-11';
 
 const STORAGE_KEY = 'model-converters.defaults.v1';
 const INPUTXML_HEADER_DEFAULTS = Object.freeze({
@@ -2393,6 +2393,11 @@ export function renderModelConvertersTab(container) {
           <div id="model-converters-advanced-fields" class="model-converters-advanced-fields"></div>
         </details>
 
+        <details id="model-converters-support-mapper" class="model-converters-advanced">
+          <summary>Support type mapper</summary>
+          <div id="model-converters-support-mapper-panel" class="model-converters-advanced-fields"></div>
+        </details>
+
         <button id="model-converters-run" class="model-converters-run-btn">Run Conversion</button>
       </aside>
 
@@ -2427,6 +2432,8 @@ export function renderModelConvertersTab(container) {
   const secondaryInputEl = container.querySelector('#model-converters-secondary-input');
   const secondaryNameEl = container.querySelector('#model-converters-secondary-name');
   const advancedFieldsEl = container.querySelector('#model-converters-advanced-fields');
+  const supportMapperWrapEl = container.querySelector('#model-converters-support-mapper');
+  const supportMapperPanelEl = container.querySelector('#model-converters-support-mapper-panel');
   const runBtnEl = container.querySelector('#model-converters-run');
   const statusEl = container.querySelector('#model-converters-status');
   const outputEl = container.querySelector('#model-converters-output');
@@ -2586,6 +2593,15 @@ export function renderModelConvertersTab(container) {
     }
   }
 
+  function renderSupportMapperConfig() {
+    if (!supportMapperWrapEl || !supportMapperPanelEl) return;
+    const isSupportConversion = activeDef().id === 'rvmattr_to_xml';
+    supportMapperWrapEl.hidden = !isSupportConversion;
+    if (!isSupportConversion || supportMapperPanelEl.dataset.rendered === 'true') return;
+    renderSupportMapperPanel(supportMapperPanelEl);
+    supportMapperPanelEl.dataset.rendered = 'true';
+  }
+
   function renderFileControls() {
     const def = activeDef();
     primaryLabelEl.textContent = `${def.primaryLabel} (${def.primaryAccept})`;
@@ -2614,6 +2630,7 @@ export function renderModelConvertersTab(container) {
   function renderAll() {
     renderFileControls();
     renderAdvanced();
+    renderSupportMapperConfig();
     renderDescription();
   }
 

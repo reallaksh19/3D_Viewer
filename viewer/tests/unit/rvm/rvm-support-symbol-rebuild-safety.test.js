@@ -69,10 +69,10 @@ function run() {
   );
 
   assert.ok(
-    rvmTabJs.includes('RvmViewer3D.js?v=20260518-conversion-support-map-7') &&
-    js.includes('RvmViewer3D.js?v=20260518-conversion-support-map-7') &&
-    borePatchJs.includes('RvmViewer3D.js?v=20260518-conversion-support-map-7') &&
-    sourcePatchJs.includes('RvmViewer3D.js?v=20260518-conversion-support-map-7'),
+    rvmTabJs.includes('RvmViewer3D.js?v=20260518-statusbar-theme-12') &&
+    js.includes('RvmViewer3D.js?v=20260518-statusbar-theme-12') &&
+    borePatchJs.includes('RvmViewer3D.js?v=20260518-statusbar-theme-12') &&
+    sourcePatchJs.includes('RvmViewer3D.js?v=20260518-statusbar-theme-12'),
     'RVM tab and support patches must import the same RvmViewer3D module URL'
   );
 

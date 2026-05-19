@@ -1,13 +1,13 @@
 import { loadStickyState, state, setActiveTab } from './state.js';
 import { RuntimeEvents } from '../contracts/runtime-events.js';
-import { renderViewer3D } from '../tabs/viewer3d-tab.js?v=20260518-conversion-support-map-7';
-import { renderViewer3DRvm } from '../tabs/viewer3d-rvm-tab.js?v=20260518-conversion-support-map-7';
+import { renderViewer3D } from '../tabs/viewer3d-tab.js?v=20260518-statusbar-theme-12';
+import { renderViewer3DRvm } from '../tabs/viewer3d-rvm-tab.js?v=20260518-statusbar-theme-12';
 import { renderBasicGlbPcfPanel } from '../js/pcf2glb/ui/BasicGlbPcfPanel.js';
 import { renderPcfxConverterTab } from '../tabs/pcfx-converter-tab.js';
 import { renderModelExchangeTab } from '../tabs/model-exchange-tab.js';
 import { renderInterchangeConfigTab } from '../tabs/interchange-config-tab.js';
 import { renderSupportMappingConfigTab } from '../tabs/support-mapping-config-tab.js';
-import { renderModelConvertersTab } from '../tabs/model-converters-tab.js?v=20260518-conversion-support-map-7';
+import { renderModelConvertersTab } from '../tabs/model-converters-tab.js?v=20260518-support-mapper-11';
 import { renderAdapterMappingTab } from '../tabs/adapter-mapping-tab.js';
 import { mount as mountRvmJsonPcfExtractTab } from '../tabs/rvm-json-pcf-extract-tab.js';
 import { renderUniversalXmlConverterTab } from '../tabs/universal-xml-converter-tab.js';

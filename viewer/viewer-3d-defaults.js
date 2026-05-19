@@ -326,6 +326,18 @@ export const THEME_PALETTES = {
     ANCI:     '#60c864',
     UNKNOWN:  '#5f6f7f',
   },
+  SteelNeutral: {
+    PIPE:     '#72c4de',
+    FLANGE:   '#c8904a',
+    VALVE:    '#54b472',
+    TEE:      '#c0aa40',
+    ELBOW:    '#9880d8',
+    BEND:     '#9880d8',
+    REDUCER:  '#c074a0',
+    SUPPORT:  '#60c864',
+    ANCI:     '#60c864',
+    UNKNOWN:  '#8090a0',
+  },
 };
 
 export const THEME_SCENE_STYLES = {
@@ -355,5 +367,14 @@ export const THEME_SCENE_STYLES = {
     labelBg: '#ffffffdd',
     panelBg: '#ffffffee',
     panelText: '#1f2937',
+  },
+  SteelNeutral: {
+    background: '#0c0f14',
+    gridMajor: '#222832',
+    gridMinor: '#181c24',
+    labelText: '#c8d8e8',
+    labelBg: '#101418dd',
+    panelBg: '#101418ee',
+    panelText: '#c8d8e8',
   },
 };

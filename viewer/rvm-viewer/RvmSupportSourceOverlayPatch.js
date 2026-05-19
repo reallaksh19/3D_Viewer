@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { RuntimeEvents } from '../contracts/runtime-events.js';
 import { on } from '../core/event-bus.js';
-import { RvmViewer3D } from './RvmViewer3D.js?v=20260518-conversion-support-map-7';
-import { getRvmSupportSymbolSettings } from './RvmSupportSymbols.js?v=20260518-conversion-support-map-7';
-import { resolveKindFromAttrs } from './RvmSupportMapper.js?v=20260518-conversion-support-map-7';
+import { RvmViewer3D } from './RvmViewer3D.js?v=20260518-statusbar-theme-12';
+import { getRvmSupportSymbolSettings } from './RvmSupportSymbols.js?v=20260518-support-mapper-11';
+import { resolveKindFromAttrs } from './RvmSupportMapper.js?v=20260518-support-mapper-11';
 
 const PATCHED = Symbol.for('pcf-glb-rvm-support-source-overlay-patched');
 const ROOT = '__RVM_SUPPORT_SYMBOLS__';
