@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { buildPipeMesh } from './buildPipeMesh.js';
 import { getSupportKindMap } from '../../../core/settings.js';
+import { resolveKindPure, DEFAULT_RULES } from '../../../support/SupportKindResolver.js';
 
 export function buildReducerMesh(comp) {
   // Simplified reducer proxy
@@ -135,19 +136,11 @@ function buildOletProxy(comp, color = 0x55aa55) {
 
 // ─── Support Kind System ──────────────────────────────────────────────────────
 //
-// Tier 1: Explicit SUPPORT-KIND attribute  → 'REST' | 'GUIDE' | 'ANCHOR' | 'SPRING'
-// Tier 2: SUPPORT-DIRECTION keyword        → direction text → _DIR_TO_KIND
-// Tier 3: Heuristic on name/tag text       → keyword scan
-// Default: 'REST'
+// Kind resolution delegates to resolveKindPure (SupportKindResolver.js).
+// Precedence: explicit attr → kindMap (Config Tab) → DEFAULT_RULES → direction → text → 'REST'
+// LINESTOP and LIMIT intentionally absent from _VALID_KINDS: no axis-aware renderer yet (Phase 7).
 //
 // Colours:  REST=green  GUIDE=blue  ANCHOR=red  SPRING=orange
-
-// Direction-to-kind map: DOWN/UP → REST (vertical), lateral directions → GUIDE
-const _DIR_TO_KIND = {
-  DOWN: 'REST', UP: 'REST',
-  NORTH: 'GUIDE', SOUTH: 'GUIDE', EAST: 'GUIDE', WEST: 'GUIDE',
-  NORTHEAST: 'GUIDE', NORTHWEST: 'GUIDE', SOUTHEAST: 'GUIDE', SOUTHWEST: 'GUIDE',
-};
 
 // Per-kind hex colours
 const _KIND_COLOR = {
@@ -218,51 +211,8 @@ function _orientObjectFromY(object, direction) {
   object.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
 }
 
-/**
- * Resolve support kind via 3-tier fallback.
- * Tier 1: explicit SUPPORT-KIND / SUPPORT_KIND attribute
- * Tier 2: SUPPORT-DIRECTION mapped via _DIR_TO_KIND
- * Tier 3: keyword heuristic on name/tag text
- * Default: 'REST'
- *
- * @param {object} attrs - merged comp.raw + comp.attributes
- * @returns {'REST'|'GUIDE'|'ANCHOR'|'SPRING'}
- */
+// LINESTOP/LIMIT excluded: no pipe-axis-aware renderer yet (Phase 7).
 const _VALID_KINDS = new Set(['REST', 'GUIDE', 'ANCHOR', 'SPRING']);
-
-function _resolveSupportKind(attrs) {
-  // ── Tier 1: explicit SUPPORT-KIND / SUPPORT_KIND attribute ─────────
-  const explicitKind = (attrs['SUPPORT-KIND'] || attrs['SUPPORT_KIND'] || '').toUpperCase().trim();
-  if (_VALID_KINDS.has(explicitKind)) return explicitKind;
-
-  // ── Tier 1.5: SKEY lookup in user-configured kind map ──────────────
-  // Settings → Config Tab → "Support Kind Map"
-  // e.g. { CA150: 'REST', CA100: 'GUIDE', VA200: 'ANCHOR' }
-  const skey = (attrs['SKEY'] || attrs['SUPPORT-SKEY'] || '').toUpperCase().trim();
-  if (skey) {
-    const kindMap = getSupportKindMap();
-    const mapped  = kindMap[skey]?.toUpperCase();
-    if (mapped && _VALID_KINDS.has(mapped)) return mapped;
-  }
-
-  // ── Tier 2: SUPPORT-DIRECTION keyword ─────────────────────────────
-  const supportText = _supportTextFromAttributes(attrs);
-  const direction   = _supportDirectionFromText(supportText);
-  const dirKind     = _DIR_TO_KIND[direction] || null;
-  if (dirKind) return dirKind;
-
-  // ── Tier 3: heuristic on name / tag text ──────────────────────────
-  const sName = (
-    attrs['<SUPPORT_NAME>'] || attrs['SUPPORT_NAME'] || attrs['SUPPORT-NAME'] || supportText
-  ).toUpperCase();
-
-  if (sName.includes('ANCHOR') || sName.includes('ANC') || sName.includes('FIX')) return 'ANCHOR';
-  if (sName.includes('SPRING') || sName.includes('SPR'))                           return 'SPRING';
-  if (sName.includes('GUIDE')  || sName.includes('GUID') || /\bGD\b/.test(sName)) return 'GUIDE';
-
-  // ── Default ────────────────────────────────────────────────────────
-  return 'REST';
-}
 
 /** Make one arrow cone mesh pointing along +Y (caller rotates it) */
 function _makeArrow(radius, color) {
@@ -292,11 +242,17 @@ export function buildSupportProxy(comp) {
   // Merge raw + normalized attributes (raw first so normalized wins on conflict)
   const attrs = { ...(comp.raw || {}), ...(comp.attributes || {}) };
 
-  // ── Resolve kind via unified 3-tier logic ─────────────────────────
-  const kind  = _resolveSupportKind(attrs);
+  // ── Resolve kind via pure resolver (Config Tab kindMap + DEFAULT_RULES) ──
+  const rawKind = resolveKindPure(attrs, {
+    userRules:    [],
+    kindMap:      getSupportKindMap(),
+    defaultRules: DEFAULT_RULES,
+    defaultKind:  'REST',
+  });
+  const kind  = _VALID_KINDS.has(rawKind) ? rawKind : 'REST';
   const color = _KIND_COLOR[kind] ?? _KIND_COLOR.REST;
 
-  // ── Axis for arrow orientation ────────────────────────────────────
+  // ── Axis for arrow orientation (direction string needed for geometry) ─
   const supportText = _supportTextFromAttributes(attrs);
   const direction   = _supportDirectionFromText(supportText);
   const supportAxis =
