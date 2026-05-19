@@ -827,6 +827,26 @@ function routeBranchPipes(branchName, children, branchBore, rawRouteOptions, end
 function parseRmssAttributes(content, rawRouteOptions) {
   const routeOptions = resolveRouteOptions(rawRouteOptions);
   const allObjects = parseTextBlocks(content);
+
+  // Build name→owner and name→type maps for hierarchy traversal (SITE/ZONE/PIPE chain).
+  const _ownerOf = new Map();
+  const _typeOf = new Map();
+  for (const obj of allObjects) {
+    const name = String(obj?.attributes?.NAME || obj?.id || '').trim();
+    const owner = String(obj?.attributes?.OWNER || '').trim();
+    const type = String(obj?.attributes?.TYPE || '').toUpperCase().trim();
+    if (name) { _ownerOf.set(name, owner); _typeOf.set(name, type); }
+  }
+  function _findSiteAncestor(startName, maxDepth = 8) {
+    let cur = startName;
+    for (let d = 0; d < maxDepth; d++) {
+      const owner = _ownerOf.get(cur);
+      if (!owner) return '';
+      if (_typeOf.get(owner) === 'SITE') return owner;
+      cur = owner;
+    }
+    return '';
+  }
   const branches = allObjects.filter((obj) => String(obj?.attributes?.TYPE || '').toUpperCase() === 'BRAN');
   const sourceComponents = allObjects.filter((obj) => {
     const rawType = normalizeToken(obj?.attributes?.TYPE);
@@ -842,6 +862,7 @@ function parseRmssAttributes(content, rawRouteOptions) {
     if (!branchName) continue;
 
     const boreSrc = extractBore(branch.attributes);
+    const branchOwner = String(branch?.attributes?.OWNER || '').trim();
     branchMap.set(branchName, {
       name: branchName,
       type: 'BRANCH',
@@ -858,12 +879,20 @@ function parseRmssAttributes(content, rawRouteOptions) {
         TREF: branch.attributes.TREF,
         CREF: branch.attributes.CREF,
         NAME: branch.attributes.NAME,
+        OWNER: branchOwner,
+        OWNER_SITE: _findSiteAncestor(branchName),
       },
       children: []
     });
   }
 
   const refToBranchName = new Map();
+  // Also build a compact position → branchName index for POS-based fallback matching.
+  const posToBranch = new Map();
+  const POS_BUCKET = 10; // mm bucket size for spatial index
+  function _posKey(x, y, z) {
+    return `${Math.round(x / POS_BUCKET)}|${Math.round(y / POS_BUCKET)}|${Math.round(z / POS_BUCKET)}`;
+  }
   for (const comp of sourceComponents) {
     const owner = String(comp?.attributes?.OWNER || '').trim();
     if (!owner || !branchMap.has(owner)) continue;
@@ -873,25 +902,79 @@ function parseRmssAttributes(content, rawRouteOptions) {
     for (const token of collectComponentReferenceTokens(node.attributes)) {
       if (!refToBranchName.has(token)) refToBranchName.set(token, owner);
     }
+    // Index all component positions for POS-based spatial fallback.
+    for (const pKey of ['APOS', 'LPOS', 'POS', 'HPOS', 'TPOS']) {
+      const p = node.attributes?.[pKey];
+      if (p && typeof p === 'object' && 'x' in p) {
+        const k = _posKey(p.x, p.y, p.z);
+        if (!posToBranch.has(k)) posToBranch.set(k, owner);
+      }
+    }
   }
 
-  const supportKeys = new Set();
+  // Find the nearest branch for a support position when COMPRE fails to resolve.
+  // Searches in expanding concentric shells up to MAX_SEARCH_R buckets from the query point.
+  function _findBranchByPosition(pos, maxDistMm = 500) {
+    if (!pos || typeof pos !== 'object') return null;
+    const maxBuckets = Math.ceil(maxDistMm / POS_BUCKET);
+    for (let r = 0; r <= maxBuckets; r++) {
+      const bx = Math.round(pos.x / POS_BUCKET);
+      const by = Math.round(pos.y / POS_BUCKET);
+      const bz = Math.round(pos.z / POS_BUCKET);
+      for (let dx = -r; dx <= r; dx++) {
+        for (let dy = -r; dy <= r; dy++) {
+          for (let dz = -r; dz <= r; dz++) {
+            if (Math.abs(dx) !== r && Math.abs(dy) !== r && Math.abs(dz) !== r) continue; // shell only
+            const k = `${bx + dx}|${by + dy}|${bz + dz}`;
+            const branch = posToBranch.get(k);
+            if (branch) return branch;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  // Track added support components by their unique identity (NAME or block id) so that
+  // distinct components at the same position (same COMPRE+POS) are NOT collapsed.
+  // Previously the dedup key was branchName|ref|x|y|z which dropped ~58% of ANCI entries
+  // when multiple support ancillaries shared the same attachment point.
+  const addedSupportIds = new Set();
   for (const comp of allObjects) {
     const rawType = normalizeToken(comp?.attributes?.TYPE);
     if (canonicalComponentType(rawType) !== 'SUPPORT') continue;
     const owner = String(comp?.attributes?.OWNER || '').trim();
     if (branchMap.has(owner)) continue;
+
+    // Use component identity as primary dedup key; fall back to position for anonymous blocks.
+    const compIdentity = String(comp?.attributes?.NAME || comp?.id || '').trim();
+    const dedupKey = compIdentity || null;
+    if (dedupKey && addedSupportIds.has(dedupKey)) continue;
+
+    // Resolve branch via COMPRE/COMPREF attachment reference first, then POS-based fallback.
     const attachedRef = supportAttachmentReference(comp?.attributes || {});
-    if (!attachedRef || !refToBranchName.has(attachedRef)) continue;
+    let branchName = (attachedRef && refToBranchName.get(attachedRef)) || null;
     const node = toNode(comp);
-    if (!node || !node.attributes?.POS) continue;
-    const branchName = refToBranchName.get(attachedRef);
-    const p = node.attributes.POS;
-    const key = `${branchName}|${attachedRef}|${p.x.toFixed(3)}|${p.y.toFixed(3)}|${p.z.toFixed(3)}`;
-    if (supportKeys.has(key)) continue;
-    supportKeys.add(key);
+    if (!node) continue;
+    if (!branchName && node.attributes?.POS) {
+      branchName = _findBranchByPosition(node.attributes.POS);
+    }
+    if (!branchName) continue;
+
+    if (dedupKey) {
+      addedSupportIds.add(dedupKey);
+    } else {
+      // For anonymous blocks, fall back to position-based dedup to avoid true duplicates.
+      const p = node.attributes.POS;
+      if (p) {
+        const posDedup = `${branchName}|${attachedRef || ''}|${p.x.toFixed(3)}|${p.y.toFixed(3)}|${p.z.toFixed(3)}`;
+        if (addedSupportIds.has(posDedup)) continue;
+        addedSupportIds.add(posDedup);
+      }
+    }
+
     node.attributes.ROUTE_SPLIT_POINT = 'true';
-    node.attributes.ATTACHED_COMPONENT_REF = attachedRef;
+    node.attributes.ATTACHED_COMPONENT_REF = attachedRef || '';
     branchMap.get(branchName).children.push(node);
   }
 

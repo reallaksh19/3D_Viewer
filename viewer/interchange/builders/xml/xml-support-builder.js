@@ -1,5 +1,6 @@
 import { CanonicalSupport } from '../../canonical/CanonicalSupport.js';
 import { FidelityClass } from '../../canonical/FidelityClass.js';
+import { resolveKindPure } from '../../../support/SupportKindResolver.js';
 
 function num(v, fallback = 0) {
   const n = Number(v);
@@ -15,15 +16,13 @@ export function supportDirectionFromAxis(axisCosines) {
   return x >= 0 ? 'EAST' : 'WEST';
 }
 
-export function supportKindFromRestraint(rawText = '') {
-  const t = String(rawText || '').toUpperCase();
-  if (/ANC(HOR)?|FIX(ED)?|RIGID/.test(t)) return 'ANCHOR';
-  if (/GUIDE|GDE|SLIDE/.test(t)) return 'GUIDE';
-  if (/SPRING|HANGER/.test(t)) return 'SPRING';
-  if (/REST|RST|STOP/.test(t)) return 'REST';
-  if (/CA100/.test(t)) return 'GUIDE';
-  if (/CA150|CA250/.test(t)) return 'REST';
-  return 'REST';
+// STOPPER -> LINESTOP (previously -> REST via /STOP/ catch-all; intentional improvement).
+export function supportKindFromRestraint(rawName = '') {
+  const name = String(rawName || '').trim();
+  return resolveKindPure(
+    { SKEY: name, NAME: name },
+    { userRules: [], kindMap: {}, defaultKind: 'REST' },
+  );
 }
 
 export function buildXmlSupports({ assemblyId, xmlRestraints = [], nodeIndex = new Map() }) {

@@ -291,6 +291,23 @@ const CONVERTER_DEFS = Object.freeze({
       { key: 'materialName', label: 'Material Name', type: 'text' },
     ],
   },
+  stagedjson_to_csv: {
+    id: 'stagedjson_to_csv',
+    label: 'StagedJSON -> CSV',
+    primaryAccept: '.json,.JSON',
+    primaryLabel: 'Staged JSON Input',
+    secondaryLabel: '',
+    secondaryAccept: '',
+    description: 'Export staged JSON hierarchy to a CSV table grouped by Site > Pipe/Branch > Reference No.',
+    defaults: {
+      csvColumns: '',
+      supportTypeRules: '',
+    },
+    fields: [
+      { key: 'csvColumns', label: 'Report Columns', type: 'column-picker' },
+      { key: 'supportTypeRules', label: 'Support Type Rules', type: 'support-type-rules' },
+    ],
+  },
   stagedjson_to_xml: {
     id: 'stagedjson_to_xml',
     label: 'StagedJSON -> XML',
@@ -554,6 +571,7 @@ const CONVERTER_ORDER = Object.freeze([
   'json_to_xml',
   'stagedjson_to_xml',
   'stagedjson_to_inputxml',
+  'stagedjson_to_csv',
   'pdf_to_inputxml',
   'pdf_to_inputxml_cii14',
   'xml_to_cii',
@@ -1248,6 +1266,70 @@ function _buildAdvancedFieldsHtml(def, values) {
         </label>
       `;
     }
+    if (field.type === 'column-picker') {
+      const cols = _parseCsvColumnConfig(value);
+      return `
+        <div class="model-converters-label" style="flex-direction:column;align-items:flex-start;gap:4px;">
+          <span style="font-weight:600;">${_esc(field.label)}</span>
+          <div class="csv-column-picker" data-option-key="${_esc(key)}"
+               style="max-height:260px;overflow-y:auto;border:1px solid #444;border-radius:4px;padding:4px 6px;width:100%;box-sizing:border-box;background:#1e2027;">
+            ${cols.map((col) => `
+              <div class="csv-col-row" data-col-key="${_esc(col.key)}"
+                   style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:default;">
+                <input type="checkbox" class="csv-col-visible" ${col.visible !== false ? 'checked' : ''}
+                       style="margin:0;cursor:pointer;" title="Show/hide column">
+                <span style="flex:1;font-size:12px;">${_esc(col.label)}</span>
+                <button type="button" class="csv-col-up model-converters-download-btn"
+                        style="padding:0 5px;min-width:22px;font-size:11px;" title="Move up">↑</button>
+                <button type="button" class="csv-col-down model-converters-download-btn"
+                        style="padding:0 5px;min-width:22px;font-size:11px;" title="Move down">↓</button>
+              </div>
+            `).join('')}
+          </div>
+          <small class="model-converters-muted">Check/uncheck to include columns · ↑↓ to reorder</small>
+        </div>
+      `;
+    }
+    if (field.type === 'support-type-rules') {
+      const rules = _parseSupportTypeRules(value);
+      const colOptions = STAGED_CSV_ALL_COLUMNS.map(
+        (c) => `<option value="${_esc(c.key)}">${_esc(c.label)}</option>`,
+      ).join('');
+      const rowStyle = 'display:grid;grid-template-columns:140px 1fr 1fr 1fr 26px;gap:4px;padding:2px 0;align-items:center;';
+      const inputStyle = 'font-size:11px;background:#2a2d38;border:1px solid #555;border-radius:3px;color:#eee;padding:2px 4px;width:100%;box-sizing:border-box;';
+      const selectStyle = `${inputStyle}padding:1px 2px;`;
+      const rulesHtml = rules.map((rule) => `
+        <div class="csv-rule-row" style="${rowStyle}">
+          <select class="csv-rule-col" style="${selectStyle}">
+            ${STAGED_CSV_ALL_COLUMNS.map(
+              (c) => `<option value="${_esc(c.key)}"${c.key === (rule.col || 'dtxr') ? ' selected' : ''}>${_esc(c.label)}</option>`,
+            ).join('')}
+          </select>
+          <input type="text" class="csv-rule-contains" value="${_esc(rule.contains || '')}" placeholder="Contains…" style="${inputStyle}">
+          <input type="text" class="csv-rule-notcontains" value="${_esc(rule.notContains || '')}" placeholder="Not Contains (opt.)" style="${inputStyle}">
+          <input type="text" class="csv-rule-result" value="${_esc(rule.result || '')}" placeholder="Result e.g. G+LS" style="${inputStyle}">
+          <button type="button" class="csv-rule-del model-converters-download-btn"
+                  style="padding:0;min-width:22px;font-size:13px;color:#e88;line-height:1;" title="Delete rule">×</button>
+        </div>
+      `).join('');
+      return `
+        <div class="model-converters-label" style="flex-direction:column;align-items:flex-start;gap:4px;">
+          <span style="font-weight:600;">${_esc(field.label)}</span>
+          <div style="${rowStyle}font-weight:600;font-size:10px;color:#888;padding-bottom:0;">
+            <span>Source Column</span><span>Contains</span><span>Not Contains</span><span>Result</span><span></span>
+          </div>
+          <div class="csv-support-rules" data-option-key="${_esc(key)}"
+               style="width:100%;box-sizing:border-box;">
+            ${rulesHtml}
+          </div>
+          <button type="button" class="csv-rule-add model-converters-download-btn" data-rules-key="${_esc(key)}"
+                  style="font-size:11px;padding:2px 10px;align-self:flex-start;">+ Add Rule</button>
+          <small class="model-converters-muted">
+            Rules evaluated top-to-bottom · Result tokens combined with "+" · duplicates removed (e.g. R+R+G → R+G)
+          </small>
+        </div>
+      `;
+    }
     const inputType = field.type === 'number' ? 'number' : 'text';
     const stepAttr = field.step ? `step="${_esc(field.step)}"` : '';
     return `
@@ -1767,6 +1849,258 @@ function _buildXmlFromStagedJsonText(stagedJsonText, inputName, options) {
     skippedComponents: xmlBuild.skippedComponents,
     supportMapperStats: xmlBuild.supportMapperStats,
   };
+}
+
+const STAGED_CSV_ALL_COLUMNS = Object.freeze([
+  { key: 'site',        label: 'Site' },
+  { key: 'pipe',        label: 'Pipe' },
+  { key: 'branchSeg',   label: 'Branch' },
+  { key: 'branchBore',  label: 'Branch Bore' },
+  { key: 'compName',    label: 'Component Name' },
+  { key: 'compType',    label: 'Component Type' },
+  { key: 'ref',         label: 'Ref No' },
+  { key: 'name',        label: 'NAME' },
+  { key: 'cmpsuprefn',  label: 'CMPSUPREFN' },
+  { key: 'desc',        label: 'DESC' },
+  { key: 'type',        label: 'TYPE' },
+  { key: 'dtxr',        label: 'DTXR' },
+  { key: 'mtxx',        label: 'Material (MTXX)' },
+  { key: 'abore',       label: 'Bore A' },
+  { key: 'lbore',       label: 'Bore L' },
+  { key: 'spre',        label: 'Spec (SPRE)' },
+  { key: 'stex',        label: 'STEX' },
+  { key: 'mdssupptype', label: 'MDSSUPPTYPE' },
+  { key: 'cmpsupgap',   label: 'CMPSUPGAP' },
+  { key: 'lstu',        label: 'Catalogue (LSTU)' },
+  { key: 'posX',        label: 'Pos X (mm)' },
+  { key: 'posY',        label: 'Pos Y (mm)' },
+  { key: 'posZ',        label: 'Pos Z (mm)' },
+  { key: 'supportType', label: 'Support Type' },
+]);
+
+// Default rules for computing the Support Type column from DTXR (or any source column).
+// Each rule: { col, contains, notContains, result }
+//   col        — key from STAGED_CSV_ALL_COLUMNS to read (default 'dtxr')
+//   contains   — substring the cell value must include (case-insensitive)
+//   notContains — optional substring the cell value must NOT include
+//   result     — code(s) to emit, "+" separates multiple tokens (e.g. "G+LS")
+const STAGED_CSV_DEFAULT_SUPPORT_TYPE_RULES = Object.freeze([
+  { col: 'dtxr',        contains: 'GUI',      notContains: '',    result: 'G'    },
+  { col: 'dtxr',        contains: 'STOP',     notContains: '',    result: 'LS'   },
+  { col: 'dtxr',        contains: 'NON GRIP', notContains: '',    result: 'G'    },
+  { col: 'dtxr',        contains: 'GRIP',     notContains: 'NON', result: 'G+LS' },
+  { col: 'dtxr',        contains: 'REST',     notContains: '',    result: 'R'    },
+  { col: 'dtxr',        contains: 'SHOE',     notContains: '',    result: 'R'    },
+  { col: 'dtxr',        contains: 'HAN',      notContains: '',    result: 'H'    },
+  { col: 'mdssupptype', contains: 'AT',       notContains: '',    result: 'R'    },
+  { col: 'mdssupptype', contains: 'G',        notContains: '',    result: 'G'    },
+  { col: 'mdssupptype', contains: 'ST5',      notContains: '',    result: 'LS'   },
+]);
+
+function _parseSupportTypeRules(raw) {
+  if (!raw) return STAGED_CSV_DEFAULT_SUPPORT_TYPE_RULES.map((r) => ({ ...r }));
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+  } catch { /* fall through */ }
+  return STAGED_CSV_DEFAULT_SUPPORT_TYPE_RULES.map((r) => ({ ...r }));
+}
+
+// Evaluate support-type rules against a fully merged row.
+// mergedRow[rule.col] may be a "|"-concatenated string of multiple values.
+// Emits unique result tokens joined with "+", e.g. "R+G".
+function _computeSupportType(mergedRow, rules) {
+  const resultSet = new Set();
+  for (const rule of rules) {
+    const colKey = rule.col || 'dtxr';
+    const cellVal = String(mergedRow[colKey] || '').toUpperCase();
+    const parts = cellVal.split('|').map((s) => s.trim()).filter(Boolean);
+    const contains    = String(rule.contains    || '').toUpperCase().trim();
+    const notContains = String(rule.notContains || '').toUpperCase().trim();
+    const result      = String(rule.result      || '').trim();
+    if (!contains || !result) continue;
+    for (const part of parts) {
+      if (!part.includes(contains)) continue;
+      if (notContains && part.includes(notContains)) continue;
+      for (const token of result.split('+').map((t) => t.trim()).filter(Boolean)) {
+        resultSet.add(token);
+      }
+    }
+  }
+  return [...resultSet].join('+');
+}
+
+function _parseCsvColumnConfig(raw) {
+  // Returns [{key, label, visible}] — merges stored user config with the master list.
+  const master = STAGED_CSV_ALL_COLUMNS.map((c) => ({ ...c, visible: true }));
+  if (!raw) return master;
+  let stored;
+  try { stored = JSON.parse(raw); } catch { return master; }
+  if (!Array.isArray(stored)) return master;
+  // Re-apply stored order + visibility, appending any new columns not yet in the stored config.
+  const storedKeys = stored.map((s) => s.key);
+  const result = stored
+    .map((s) => {
+      const def = master.find((m) => m.key === s.key);
+      return def ? { ...def, visible: s.visible !== false } : null;
+    })
+    .filter(Boolean);
+  for (const col of master) {
+    if (!storedKeys.includes(col.key)) result.push({ ...col, visible: true });
+  }
+  return result;
+}
+
+function _stagedJsonExtractSiteAndPipe(branchName) {
+  // Branch name is like "/ASIM-1844-3"-S8810794-91261M7-01/B1"
+  // Pipe name is the first path segment; SITE is everything before the pipe size (digit+")
+  const pathParts = _toText(branchName).replace(/^\//, '').split('/');
+  const pipeFull = pathParts[0] || '';
+  const branchSeg = pathParts[1] || '';
+  const m = pipeFull.match(/^(.*?)(\d+".*)/);
+  const site = m ? (m[1].replace(/-$/, '') || '(no site)') : '(no site)';
+  const pipe = m ? m[2] : pipeFull;
+  return { site, pipe, branch: branchSeg, pipeFull };
+}
+
+function _stagedJsonCsvCell(v) {
+  if (v == null) return '';
+  const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+function _buildCsvFromStagedJson(stagedJsonText, _inputName, columnConfigRaw, supportTypeRulesRaw) {
+  let branches;
+  try {
+    branches = JSON.parse(_toText(stagedJsonText));
+  } catch (e) {
+    throw new Error(`Staged JSON parse failed: ${_toText(e?.message || e)}`);
+  }
+  if (!Array.isArray(branches)) {
+    throw new Error('Staged JSON root must be an array of branch objects.');
+  }
+
+  // Resolve active columns from user config (respects visibility and order).
+  const colConfig = _parseCsvColumnConfig(columnConfigRaw || '');
+  const activeCols = colConfig.filter((c) => c.visible !== false);
+
+  // Sort branches: OWNER_SITE → OWNER (pipe) → branch segment.
+  const _branchSortKey = (b) => {
+    const attrs = b.attributes || {};
+    const site = _toText(attrs.OWNER_SITE || '').replace(/^\//, '');
+    const pipe = _toText(attrs.OWNER || '').replace(/^\//, '');
+    const seg  = _toText(b.name || '').replace(/^\//, '').split('/').pop() || '';
+    return [site || _stagedJsonExtractSiteAndPipe(b.name || '').site,
+            pipe || _stagedJsonExtractSiteAndPipe(b.name || '').pipe,
+            seg];
+  };
+  const sortedBranches = [...branches].sort((a, b) => {
+    const [as_, ap, ab] = _branchSortKey(a);
+    const [bs, bp, bb]  = _branchSortKey(b);
+    return as_.localeCompare(bs) || ap.localeCompare(bp) || ab.localeCompare(bb);
+  });
+
+  const allRecords = [];
+  for (const branch of sortedBranches) {
+    const bAttrs = branch.attributes || {};
+    // Prefer OWNER / OWNER_SITE set by rmss-attribute-parser; fall back to name-based extraction.
+    const ownerPipe = _toText(bAttrs.OWNER || '').replace(/^\//, '');
+    const ownerSite = _toText(bAttrs.OWNER_SITE || '').replace(/^\//, '');
+    const fallback = _stagedJsonExtractSiteAndPipe(branch.name || '');
+    const site      = ownerSite || fallback.site;
+    const pipe      = ownerPipe || fallback.pipe;
+    const branchSeg = _toText(branch.name || '').replace(/^\//, '').split('/').pop() || fallback.branch;
+    const branchBore = _toText(branch.bore || '');
+
+    for (const comp of (branch.children || [])) {
+      const attrs = comp.attributes || {};
+      const pos = attrs.POS || attrs.APOS || attrs.CPOS || null;
+      const posX = pos && typeof pos === 'object' ? _toText(pos.x ?? '') : '';
+      const posY = pos && typeof pos === 'object' ? _toText(pos.y ?? '') : '';
+      const posZ = pos && typeof pos === 'object' ? _toText(pos.z ?? '') : '';
+      allRecords.push({
+        site, pipe, branchSeg, branchBore,
+        compName:    _toText(comp.name || ''),
+        compType:    _toText(comp.type || ''),
+        ref:         _toText(attrs.REF || ''),
+        name:        _toText(attrs.NAME || ''),
+        cmpsuprefn:  _toText(attrs.CMPSUPREFN || ''),
+        desc:        _toText(attrs.DESC || ''),
+        type:        _toText(attrs.TYPE || comp.type || ''),
+        dtxr:        _toText(attrs.DTXR || ''),
+        mtxx:        _toText(attrs.MTXX || ''),
+        abore:       _toText(attrs.ABORE || ''),
+        lbore:       _toText(attrs.LBORE || ''),
+        spre:        _toText(attrs.SPRE || ''),
+        stex:        _toText(attrs.STEX || ''),
+        mdssupptype: _toText(attrs.MDSSUPPTYPE || ''),
+        cmpsupgap:   _toText(attrs.CMPSUPGAP || ''),
+        lstu:        _toText(attrs.LSTU || ''),
+        posX, posY, posZ,
+      });
+    }
+  }
+
+  // Group by REF: same REF → one row; no-REF components → individual rows.
+  // Non-unique column values within a group are concatenated with "|".
+  // Two-level grouping:
+  //   Level 1: Ref No   (same REF across branches → one group per position)
+  //   Level 2: Position (Pos X / Pos Y / Pos Z)
+  // Rule: same Ref No AND same coordinates → one row, non-unique columns concat'd with "|"
+  //       same Ref No but different coordinates → separate rows
+  //       no Ref No → each component is its own row
+  // supportType is computed post-merge, so exclude it from field-merge pass.
+  const _COMPUTED_COL_KEYS = new Set(['supportType']);
+  const supportTypeRules = _parseSupportTypeRules(supportTypeRulesRaw || '');
+  const MERGE_FIELDS = activeCols.map((c) => c.key).filter(
+    (k) => k !== 'ref' && k !== 'posX' && k !== 'posY' && k !== 'posZ' && !_COMPUTED_COL_KEYS.has(k),
+  );
+  const groups = new Map();
+  let noRefIdx = 0;
+  for (const rec of allRecords) {
+    const posKey = (rec.posX !== '' || rec.posY !== '' || rec.posZ !== '')
+      ? `${rec.posX}\x02${rec.posY}\x02${rec.posZ}`
+      : 'nopos';
+    const key = rec.ref
+      ? `${rec.ref}\x01${posKey}`
+      : (posKey !== 'nopos' ? `\x00pos_${posKey}` : `\x00noref_${noRefIdx++}`);
+    if (!groups.has(key)) groups.set(key, { firstRec: rec, recs: [] });
+    groups.get(key).recs.push(rec);
+  }
+
+  const outputRows = [];
+  for (const { firstRec, recs } of groups.values()) {
+    const merged = {
+      ref:  firstRec.ref,
+      posX: firstRec.posX,
+      posY: firstRec.posY,
+      posZ: firstRec.posZ,
+    };
+    for (const f of MERGE_FIELDS) {
+      const unique = [...new Set(recs.map((r) => r[f] ?? '').filter((v) => v !== ''))];
+      merged[f] = unique.join('|');
+    }
+    merged.supportType = _computeSupportType(merged, supportTypeRules);
+    outputRows.push({ _sort: firstRec, merged });
+  }
+
+  outputRows.sort((a, b) =>
+    a._sort.site.localeCompare(b._sort.site)
+    || a._sort.pipe.localeCompare(b._sort.pipe)
+    || a._sort.branchSeg.localeCompare(b._sort.branchSeg)
+  );
+
+  const headerRow = activeCols.map((c) => c.label);
+  const csvRows = [headerRow];
+  for (const { merged: m } of outputRows) {
+    csvRows.push(activeCols.map((c) => m[c.key] ?? ''));
+  }
+
+  const csvText = csvRows.map((r) => r.map(_stagedJsonCsvCell).join(',')).join('\n');
+  return { csvText, rowCount: outputRows.length, branchCount: sortedBranches.length };
 }
 
 function _normalizePreviewPoint(value) {
@@ -2552,6 +2886,80 @@ export function renderModelConvertersTab(container) {
     const values = activeValues();
     advancedFieldsEl.innerHTML = _buildAdvancedFieldsHtml(def, values);
     for (const field of def.fields) {
+      if (field.type === 'column-picker') {
+        const pickerEl = advancedFieldsEl.querySelector(`.csv-column-picker[data-option-key="${field.key}"]`);
+        if (!pickerEl) continue;
+        const saveColConfig = () => {
+          const rows = [...pickerEl.querySelectorAll('[data-col-key]')];
+          const config = rows.map((row) => ({
+            key: row.dataset.colKey,
+            visible: row.querySelector('.csv-col-visible')?.checked !== false,
+          }));
+          values[field.key] = JSON.stringify(config);
+          persist();
+        };
+        pickerEl.addEventListener('change', saveColConfig);
+        pickerEl.addEventListener('click', (e) => {
+          const btn = e.target.closest('.csv-col-up, .csv-col-down');
+          if (!btn) return;
+          const row = btn.closest('[data-col-key]');
+          if (!row) return;
+          if (btn.classList.contains('csv-col-up') && row.previousElementSibling) {
+            pickerEl.insertBefore(row, row.previousElementSibling);
+          } else if (btn.classList.contains('csv-col-down') && row.nextElementSibling) {
+            pickerEl.insertBefore(row.nextElementSibling, row);
+          }
+          saveColConfig();
+        });
+        continue;
+      }
+      if (field.type === 'support-type-rules') {
+        const rulesEl = advancedFieldsEl.querySelector(`.csv-support-rules[data-option-key="${field.key}"]`);
+        const addBtn  = advancedFieldsEl.querySelector(`.csv-rule-add[data-rules-key="${field.key}"]`);
+        if (!rulesEl) continue;
+        const rowStyle = 'display:grid;grid-template-columns:140px 1fr 1fr 1fr 26px;gap:4px;padding:2px 0;align-items:center;';
+        const inputStyle = 'font-size:11px;background:#2a2d38;border:1px solid #555;border-radius:3px;color:#eee;padding:2px 4px;width:100%;box-sizing:border-box;';
+        const saveRules = () => {
+          const rows = [...rulesEl.querySelectorAll('.csv-rule-row')];
+          const rules = rows.map((row) => ({
+            col:        row.querySelector('.csv-rule-col')?.value || 'dtxr',
+            contains:   row.querySelector('.csv-rule-contains')?.value || '',
+            notContains: row.querySelector('.csv-rule-notcontains')?.value || '',
+            result:     row.querySelector('.csv-rule-result')?.value || '',
+          }));
+          values[field.key] = JSON.stringify(rules);
+          persist();
+        };
+        rulesEl.addEventListener('input', saveRules);
+        rulesEl.addEventListener('change', saveRules);
+        rulesEl.addEventListener('click', (e) => {
+          if (e.target.closest('.csv-rule-del')) {
+            e.target.closest('.csv-rule-row').remove();
+            saveRules();
+          }
+        });
+        if (addBtn) {
+          addBtn.addEventListener('click', () => {
+            const newRow = document.createElement('div');
+            newRow.className = 'csv-rule-row';
+            newRow.style.cssText = rowStyle;
+            const colOptions = STAGED_CSV_ALL_COLUMNS.map(
+              (c) => `<option value="${_esc(c.key)}">${_esc(c.label)}</option>`,
+            ).join('');
+            newRow.innerHTML = `
+              <select class="csv-rule-col" style="${inputStyle}padding:1px 2px;">${colOptions}</select>
+              <input type="text" class="csv-rule-contains" placeholder="Contains…" style="${inputStyle}">
+              <input type="text" class="csv-rule-notcontains" placeholder="Not Contains (opt.)" style="${inputStyle}">
+              <input type="text" class="csv-rule-result" placeholder="Result e.g. G+LS" style="${inputStyle}">
+              <button type="button" class="csv-rule-del model-converters-download-btn"
+                      style="padding:0;min-width:22px;font-size:13px;color:#e88;line-height:1;" title="Delete rule">×</button>
+            `;
+            rulesEl.appendChild(newRow);
+            saveRules();
+          });
+        }
+        continue;
+      }
       const input = advancedFieldsEl.querySelector(`[data-option-key="${field.key}"]`);
       if (!input) continue;
       const updateValue = () => {
@@ -2838,6 +3246,28 @@ export function renderModelConvertersTab(container) {
         } else {
           throw new Error('Select RVM primary input, or provide ATT/TXT sidecar for ATT-only XML synthesis.');
         }
+      } else if (selectedConverter === 'stagedjson_to_csv') {
+        if (!primaryFile || !primaryBytes) {
+          throw new Error('Primary staged JSON input is required for StagedJSON -> CSV export.');
+        }
+        const stagedJsonText = _decodeTextUtf8(primaryBytes);
+        const csvResult = _buildCsvFromStagedJson(stagedJsonText, primaryFile.name, runValues.csvColumns, runValues.supportTypeRules);
+        response = {
+          outputs: [
+            {
+              name: `${_baseNameWithoutExtension(primaryFile.name)}_staged_export.csv`,
+              text: csvResult.csvText,
+              mime: 'text/plain;charset=utf-8',
+            },
+          ],
+          logs: {
+            stdout: [
+              `Staged JSON parsed: ${csvResult.branchCount} branch(es).`,
+              `Exported ${csvResult.rowCount} component row(s) to CSV (grouped by Site > Pipe > Branch).`,
+            ],
+            stderr: [],
+          },
+        };
       } else if (selectedConverter === 'stagedjson_to_xml') {
         if (!primaryFile || !primaryBytes) {
           throw new Error('Primary staged JSON input is required for StagedJSON -> XML conversion.');
