@@ -2,6 +2,7 @@ import assert from 'assert/strict';
 import {
   resolveKindPure,
   resolveKindFromText,
+  resolveKindFromDirection,
   DEFAULT_RULES,
   DEFAULT_KIND_MAP,
   splitRuleTerms,
@@ -38,6 +39,32 @@ function run() {
   assert.equal(resolveKindFromText('ANCHOR REST'),   'ANCHOR',    'ANCHOR wins over REST when both present');
   assert.equal(resolveKindFromText(''),              '',          'empty → empty');
   assert.equal(resolveKindFromText(null),            '',          'null → empty');
+
+  // ── resolveKindFromDirection ─────────────────────────────────────────────────
+  assert.equal(resolveKindFromDirection('UP'),        'REST',  'UP → REST');
+  assert.equal(resolveKindFromDirection('DOWN'),      'REST',  'DOWN → REST');
+  assert.equal(resolveKindFromDirection('NORTH'),     'GUIDE', 'NORTH → GUIDE');
+  assert.equal(resolveKindFromDirection('SOUTH'),     'GUIDE', 'SOUTH → GUIDE');
+  assert.equal(resolveKindFromDirection('EAST'),      'GUIDE', 'EAST → GUIDE');
+  assert.equal(resolveKindFromDirection('WEST'),      'GUIDE', 'WEST → GUIDE');
+  assert.equal(resolveKindFromDirection('NE'),        'GUIDE', 'NE → GUIDE');
+  assert.equal(resolveKindFromDirection('NW'),        'GUIDE', 'NW → GUIDE');
+  assert.equal(resolveKindFromDirection('SE'),        'GUIDE', 'SE → GUIDE');
+  assert.equal(resolveKindFromDirection('SW'),        'GUIDE', 'SW → GUIDE');
+  assert.equal(resolveKindFromDirection(''),          '',      'empty → empty');
+  assert.equal(resolveKindFromDirection('DIAGONAL'),  '',      'unknown direction → empty');
+
+  // resolveKindPure tier 5: direction before generic text
+  assert.equal(
+    resolveKindPure({ 'SUPPORT-DIRECTION': 'UP' }, { userRules: [], kindMap: {}, defaultRules: [] }),
+    'REST',
+    'SUPPORT-DIRECTION UP → REST via direction heuristic'
+  );
+  assert.equal(
+    resolveKindPure({ 'SUPPORT-DIRECTION': 'NORTH' }, { userRules: [], kindMap: {}, defaultRules: [] }),
+    'GUIDE',
+    'SUPPORT-DIRECTION NORTH → GUIDE via direction heuristic'
+  );
 
   // ── CA catalog codes via SKEY rules ─────────────────────────────────────────
   assert.equal(resolveKindPure({ SKEY: 'CA150' }),  'REST',   'CA150 → REST via default rule');

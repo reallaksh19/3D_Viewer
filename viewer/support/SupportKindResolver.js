@@ -36,6 +36,19 @@ export const DEFAULT_RULES = [
   { id: 'builtin-pipe-rest', field: 'MDSSUPPTYPE',                     pattern: 'PIPE-REST', match: 'equals',     kind: 'REST',     label: 'PIPE-REST -> REST' },
 ];
 
+// ── Direction heuristic ───────────────────────────────────────────────────────
+// Maps PCF SUPPORT-DIRECTION values to support kinds.
+// UP/DOWN are vertical → pipe rests on support (REST).
+// Cardinal / intercardinal directions are lateral → guide support (GUIDE).
+// Kept separate from resolveKindFromText so callers can apply only direction
+// matching without triggering the broader keyword scan.
+export function resolveKindFromDirection(rawText) {
+  const t = String(rawText || '').toUpperCase();
+  if (/\bUP\b|\bDOWN\b/.test(t))                                                      return 'REST';
+  if (/\bNORTH\b|\bSOUTH\b|\bEAST\b|\bWEST\b|\bNE\b|\bNW\b|\bSE\b|\bSW\b/.test(t))  return 'GUIDE';
+  return '';
+}
+
 // ── Text heuristic ────────────────────────────────────────────────────────────
 // Merges keyword patterns from supportKindFromRestraint (xml-support-builder.js)
 // and normalizeSupportKind (RvmSupportSymbols.js). Order matters: specific
@@ -183,9 +196,11 @@ export function resolveKindPure(attrs, {
   const fromDefault = _runRules(attrs, defaultRules);
   if (fromDefault) return fromDefault;
 
-  // 5. Text heuristic — scans all attribute values as a single string
-  const text     = _collectEntries(attrs).map(e => String(e.value)).join(' ');
-  const fromText = resolveKindFromText(text);
+  // 5. Direction heuristic then text heuristic — scans all attribute values
+  const text        = _collectEntries(attrs).map(e => String(e.value)).join(' ');
+  const fromDir     = resolveKindFromDirection(text);
+  if (fromDir) return fromDir;
+  const fromText    = resolveKindFromText(text);
   if (fromText) return fromText;
 
   return defaultKind;
