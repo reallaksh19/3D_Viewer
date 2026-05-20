@@ -92,6 +92,15 @@ function run() {
   assert.equal(resolveKindPure({ MDSSUPPTYPE: 'AN-01' }), 'ANCHOR',  'AN* → ANCHOR');
   assert.equal(resolveKindPure({ MDSSUPPTYPE: 'BT-10' }), 'REST',    'BT* → REST');
   assert.equal(resolveKindPure({ MDSSUPPTYPE: 'PIPE-REST' }), 'REST', 'PIPE-REST → REST');
+  assert.equal(
+    resolveKindPure({
+      CMPSUPTYPE: 'PG-B1-4',
+      MDSSUPPTYPE: 'GT574',
+      DTXR: 'PIPE GUIDE FOR BARE PIPE CS',
+    }),
+    'GUIDE',
+    'CMPSUPTYPE PG-* guide intent wins over MDSSUPPTYPE GT5* subtype'
+  );
 
   // ── Tier 1: explicit attribute wins over everything ───────────────────────────
   assert.equal(
@@ -199,9 +208,11 @@ function run() {
   );
   assert.ok(vals.includes('GT5-A'), 'collectMapperFieldValues returns matching field value');
 
-  // ── DEFAULT_RULES ordering: GT5 before GT ─────────────────────────────────────
+  // DEFAULT_RULES ordering: support intent before subtype, GT5 before GT
+  const pgIdx     = DEFAULT_RULES.findIndex(r => r.id === 'builtin-pg');
   const gt5MdsIdx = DEFAULT_RULES.findIndex(r => r.id === 'builtin-gt5-mds');
   const gtIdx     = DEFAULT_RULES.findIndex(r => r.id === 'builtin-gt');
+  assert.ok(pgIdx < gt5MdsIdx, 'builtin-pg must precede builtin-gt5-mds so guide intent wins');
   assert.ok(gt5MdsIdx < gtIdx, 'builtin-gt5-mds must precede builtin-gt in DEFAULT_RULES');
 
   // ── DEFAULT_RULES contains CA built-ins ───────────────────────────────────────
