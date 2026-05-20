@@ -8,9 +8,8 @@ import { RuntimeEvents } from '../contracts/runtime-events.js';
 import { DEFAULT_VIEWER3D_CONFIG } from '../viewer-3d-defaults.js';
 
 const DEFAULT_SUPPORT_BLOCKS = [
-  { supportKind: 'RST', friction: 0.3, gap: 'empty', name: 'CA150', description: 'Rest / Anchor' },
+  { supportKind: 'RST', friction: 0.3, gap: 'empty', name: 'CA150', description: 'Rest' },
   { supportKind: 'GDE', friction: 0.15, gap: 'any', name: 'CA100', description: 'Guide' },
-  { supportKind: 'RST', friction: 0.3, gap: '>0', name: 'CA250', description: 'Rest with Gap' },
 ];
 
 const DEFAULT_PCFX_DEFAULTS = {
@@ -57,6 +56,13 @@ function _normalizeSupportBlocks(rows) {
     description: String(row?.description || ''),
   }));
   return normalized.filter((row) => row.name);
+}
+
+function _isLegacyDefaultSupportBlocks(rows) {
+  if (!Array.isArray(rows) || rows.length !== 3) return false;
+  const names = rows.map((row) => String(row?.name || '').toUpperCase()).join('|');
+  const descriptions = rows.map((row) => String(row?.description || '').toUpperCase()).join('|');
+  return names === 'CA150|CA100|CA250' && descriptions.includes('REST / ANCHOR');
 }
 
 function _normalizePcfxDefaults(raw) {
@@ -274,9 +280,8 @@ export const state = {
         guidPrefix: 'UCI:',
         fallbackName: 'CA150',
         blocks: [
-          { id: 1, frictionMatch: ['', '0.3'], gapCondition: 'empty', name: 'CA150', desc: 'Rest / Anchor' },
+          { id: 1, frictionMatch: ['', '0.3'], gapCondition: 'empty', name: 'CA150', desc: 'Rest' },
           { id: 2, frictionMatch: ['0.15'], gapCondition: 'any', name: 'CA100', desc: 'Guide' },
-          { id: 3, frictionMatch: ['0.3'], gapCondition: '>0', name: 'CA150', desc: 'Rest with Gap' }
         ]
       },
       branchGeometry: {
@@ -329,7 +334,9 @@ export function loadStickyState() {
       const parsed = JSON.parse(savedSticky);
       Object.assign(state.sticky, parsed || {});
     }
-    const mappedBlocks = _normalizeSupportBlocks(state.sticky.supportMappings);
+    const mappedBlocks = _isLegacyDefaultSupportBlocks(state.sticky.supportMappings)
+      ? _clone(DEFAULT_SUPPORT_BLOCKS)
+      : _normalizeSupportBlocks(state.sticky.supportMappings);
     state.sticky.supportMappings = mappedBlocks.length ? mappedBlocks : _clone(DEFAULT_SUPPORT_BLOCKS);
     state.sticky.pcfxDefaults = _normalizePcfxDefaults(state.sticky.pcfxDefaults);
 

@@ -14,6 +14,8 @@
  *   is carried only by DTXR/description/name, e.g. DTXR=REST/GUIDE/LINE STOP/LIMIT.
  */
 
+import { DEFAULT_KIND_MAP, DEFAULT_RULES, resolveKindPure } from '../support/SupportKindResolver.js';
+
 const TYPE_ALIASES = Object.freeze({
   FBLI: 'FLAN',
   FBLIND: 'FLAN',
@@ -999,9 +1001,10 @@ const STRUCT_PATH_RE = /\b(STRUCTURE|FRMWORK|FRAMEWORK|FRMW|STRU|PIPESUPP)\b/i;
 
 /**
  * Extract structural steel member positions from a raw RMSS ATTRIBUTE text.
- * Looks for STRUCTURE / FRMWORK / SUBE blocks (and anything with a PS-... ref)
- * that carry APOS and LPOS coordinates.
- * Returns [{label, start:{x,y,z}, end:{x,y,z}}].
+ * Looks for STRUCTURE / FRMWORK / SUBE blocks and PS-* support references.
+ * Input blocks may expose APOS/LPOS, HPOS/BPOS, HPOS/TPOS, BPOS/TPOS, or only
+ * POS. Output members are visible line segments; single-point supports get a
+ * short stub later in the STEP writer.
  */
 export function parseRmssStructuralMembers(content) {
   const blocks = parseTextBlocks(content);
@@ -1020,16 +1023,51 @@ export function parseRmssStructuralMembers(content) {
 
     if (!isStructType && !hasStructPath && !hasPsRef) continue;
 
-    const start = parseCoord(block?.attributes?.APOS);
-    const end   = parseCoord(block?.attributes?.LPOS);
-    if (!start || !end) continue;
-
     // Hierarchy-aware label: "<owner tail>/<member name>" mirrors rev_to_stp labelling.
     const ownerTail  = owner.split(/[/\\>]/).filter(Boolean).slice(-1)[0] || '';
     const memberName = name || SUPPORT_TAG_RE.exec(blockId)?.[0] || blockId;
     const label = ownerTail ? `${ownerTail}/${memberName}` : memberName;
 
-    members.push({ label, start, end });
+    const attrs = block?.attributes || {};
+    const kind = resolveKindPure(attrs, {
+      userRules: [],
+      defaultRules: DEFAULT_RULES,
+      kindMap: DEFAULT_KIND_MAP,
+      defaultKind: '',
+    }) || normalizeSupportType(attrs, `${name} ${dtxr} ${ref}`);
+    const points = {
+      APOS: parseCoord(attrs.APOS),
+      LPOS: parseCoord(attrs.LPOS),
+      BPOS: parseCoord(attrs.BPOS),
+      HPOS: parseCoord(attrs.HPOS),
+      TPOS: parseCoord(attrs.TPOS),
+      POS: parseCoord(attrs.POS),
+    };
+    const pairs = [
+      ['APOS', 'LPOS'],
+      ['HPOS', 'BPOS'],
+      ['HPOS', 'TPOS'],
+      ['BPOS', 'TPOS'],
+      ['APOS', 'BPOS'],
+      ['LPOS', 'BPOS'],
+    ];
+    let pushed = false;
+    const seenPairs = new Set();
+
+    for (const [startKey, endKey] of pairs) {
+      const start = points[startKey];
+      const end = points[endKey];
+      if (!start || !end || coordDistance(start, end) < 1) continue;
+      const key = `${start.x.toFixed(3)},${start.y.toFixed(3)},${start.z.toFixed(3)}|${end.x.toFixed(3)},${end.y.toFixed(3)},${end.z.toFixed(3)}`;
+      if (seenPairs.has(key)) continue;
+      seenPairs.add(key);
+      members.push({ label, kind, start, end });
+      pushed = true;
+    }
+
+    if (!pushed && points.POS) {
+      members.push({ label, kind, start: points.POS, end: points.POS });
+    }
   }
   return members;
 }

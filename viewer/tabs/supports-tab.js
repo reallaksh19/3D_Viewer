@@ -8,9 +8,8 @@ import { emit } from '../core/event-bus.js';
 import { renderTableToggles } from '../utils/table-toggle.js';
 
 const DEFAULT_ROWS = [
-  { supportKind: 'RST', friction: 0.3, gap: 'empty', name: 'CA150', description: 'Rest / Anchor' },
+  { supportKind: 'RST', friction: 0.3, gap: 'empty', name: 'CA150', description: 'Rest' },
   { supportKind: 'GDE', friction: 0.15, gap: 'any', name: 'CA100', description: 'Guide' },
-  { supportKind: 'RST', friction: 0.3, gap: '>0', name: 'CA250', description: 'Rest with Gap' },
 ];
 
 function clone(v) {

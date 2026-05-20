@@ -21,6 +21,9 @@
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+  max-height: calc(100vh - 92px);
+  overflow: auto;
+  scrollbar-gutter: stable both-edges;
 }
 
 .model-converters-left h2 {
