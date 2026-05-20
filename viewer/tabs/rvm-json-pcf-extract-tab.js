@@ -1417,12 +1417,12 @@ async function _runGeneratePcf(container) {
   let rows = state.rvmPcfExtract?.rows || [];
   if (!rows.length) {
     const ok = await _runRebuildCsv(container);
-    if (!ok) return;
+    if (!ok) return false;
     rows = state.rvmPcfExtract?.rows || [];
   }
 
   const ok = await _ensureReadinessBeforePcfExport(container);
-  if (!ok) return;
+  if (!ok) return false;
   _setStatus(container, 'Generating PCF…');
   try {
     const { RvmPcfContinuityChecker } = await _importRvmPcfModule('RvmPcfContinuityChecker.js');
@@ -1484,8 +1484,10 @@ async function _runGeneratePcf(container) {
     _setStatus(container, `Generated PCF for ${pipelineCount} pipeline(s).${continuityReport ? ` Continuity: ${continuityReport.fixableCount || 0} fixable, ${continuityReport.fatalCount || 0} fatal.` : ''}`);
     await _runPcfReadinessGate(container);
     _showPanel(container, 'pcf');
+    return true;
   } catch (err) {
     _setStatus(container, `PCF generation failed: ${err.message}`, true);
+    return false;
   }
 }
 

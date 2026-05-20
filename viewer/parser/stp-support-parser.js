@@ -24,6 +24,17 @@ function _decodeStepString(text) {
   return String(text || '').replace(/''/g, '\'');
 }
 
+function _kindFromLabel(label) {
+  const token = String(label || '').split(':')[0].trim().toUpperCase();
+  if (token === 'RST') return 'REST';
+  if (token === 'GDE' || token === 'GUID') return 'GUIDE';
+  if (token === 'STP' || token === 'STOP') return 'LINESTOP';
+  if (token === 'ANC') return 'ANCHOR';
+  if (token === 'SPR') return 'SPRING';
+  if (['REST', 'GUIDE', 'LINESTOP', 'LIMIT', 'ANCHOR', 'SPRING'].includes(token)) return token;
+  return '';
+}
+
 function _parsePointLine(line) {
   const match = String(line || '').match(/^#(\d+)\s*=\s*CARTESIAN_POINT\s*\(\s*'(?:''|[^'])*'\s*,\s*\(([^)]*)\)\s*\)\s*;/i);
   if (!match) return null;
@@ -100,6 +111,7 @@ function _buildMemberFromVectorLine(lineEntity, pointsById, vectorsById, directi
     sourceEntityType: 'LINE',
     sourceEntityId: lineEntity.id,
     label: lineEntity.name || `LINE-${lineEntity.id}`,
+    kind: _kindFromLabel(lineEntity.name),
     start: { x: start.x, y: start.y, z: start.z },
     end: {
       x: start.x + (unit.x * vector.magnitude),
@@ -121,6 +133,7 @@ function _buildMembersFromPolyline(polyline, pointsById) {
       sourceEntityType: 'POLYLINE',
       sourceEntityId: polyline.id,
       label: polyline.name || `POLYLINE-${polyline.id}`,
+      kind: _kindFromLabel(polyline.name),
       segmentIndex: index,
       start: { x: start.x, y: start.y, z: start.z },
       end: { x: end.x, y: end.y, z: end.z },
@@ -212,4 +225,3 @@ export function parseStpSupportMembers(stepText) {
     },
   };
 }
-

@@ -26,6 +26,8 @@ const FIELD_SUGGESTIONS = [
   'SKEY',
   'SUPPORT_TYPE',
   'SUPPORT_KIND',
+  'SUPPORT_DIRECTION',
+  'PIPE_AXIS_COSINES',
   'TYPE',
   'DTXR',
   'NAME',
@@ -95,7 +97,7 @@ export function getBuiltinRules() {
 }
 
 export function getAllRules() {
-  return [...getBuiltinRules(), ...loadUserRules()];
+  return [...loadUserRules(), ...getBuiltinRules()];
 }
 
 export function getUserRules() {

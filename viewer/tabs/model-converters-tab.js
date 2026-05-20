@@ -1772,7 +1772,12 @@ function _buildStpTextFromMembers(rawMembers, outputName) {
       start = { x: start.x, y: start.y, z: start.z - _STP_STUB_HALF_MM };
       end   = { x: end.x,   y: end.y,   z: end.z   + _STP_STUB_HALF_MM };
     }
-    const label = _toText(member.label || '').replace(/'/g, "''");
+    const kind = _toText(member.kind || '').trim().toUpperCase();
+    const rawLabel = _toText(member.label || '');
+    const labelText = kind && !rawLabel.toUpperCase().startsWith(`${kind}:`)
+      ? `${kind}:${rawLabel}`
+      : rawLabel;
+    const label = labelText.replace(/'/g, "''");
     const s = entityId++;
     dataLines.push(`#${s}=CARTESIAN_POINT('',(${_stpFmtCoord(start.x)},${_stpFmtCoord(start.y)},${_stpFmtCoord(start.z)}));`);
     const e = entityId++;
