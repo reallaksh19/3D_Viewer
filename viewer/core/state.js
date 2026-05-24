@@ -7,6 +7,19 @@ import { RuntimeEvents } from '../contracts/runtime-events.js';
 
 import { DEFAULT_VIEWER3D_CONFIG } from '../viewer-3d-defaults.js';
 
+function _isObj(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
+function _deepMerge(base, patch) {
+  if (!_isObj(base)) return JSON.parse(JSON.stringify(patch));
+  const out = JSON.parse(JSON.stringify(base));
+  if (!_isObj(patch)) return out;
+  for (const [k, v] of Object.entries(patch)) {
+    if (Array.isArray(v)) out[k] = v.slice();
+    else if (_isObj(v) && _isObj(out[k])) out[k] = _deepMerge(out[k], v);
+    else out[k] = v;
+  }
+  return out;
+}
+
 const DEFAULT_SUPPORT_BLOCKS = [
   { supportKind: 'RST', friction: 0.3, gap: 'empty', name: 'CA150', description: 'Rest' },
   { supportKind: 'GDE', friction: 0.15, gap: 'any', name: 'CA100', description: 'Guide' },
@@ -353,10 +366,9 @@ export function loadStickyState() {
     const savedViewer3DConfig = localStorage.getItem('viewer3d_config_v2');
     if (savedViewer3DConfig) {
       const parsed = JSON.parse(savedViewer3DConfig);
-      state.viewer3DConfig = {
-        ..._clone(DEFAULT_VIEWER3D_CONFIG),
-        ...(parsed || {}),
-      };
+      // Deep merge so a saved config with only partial nested objects (e.g. camera.fov)
+      // doesn't clobber the rest of the camera defaults on load.
+      state.viewer3DConfig = _deepMerge(_clone(DEFAULT_VIEWER3D_CONFIG), parsed || {});
     } else {
       state.viewer3DConfig = _clone(DEFAULT_VIEWER3D_CONFIG);
       _migrateLegacyViewerSettingsToViewer3DConfig(legacyViewerObj, state.viewer3DConfig);
@@ -413,7 +425,9 @@ export function updateViewer3DConfig(patch, reason = 'update') {
   if (typeof patch === 'function') {
     state.viewer3DConfig = patch(state.viewer3DConfig);
   } else {
-    Object.assign(state.viewer3DConfig, patch);
+    // Deep merge so partial nested patches (e.g. { camera: { fov: 45 } }) don't
+    // clobber sibling keys like camera.near, camera.far, etc.
+    state.viewer3DConfig = _deepMerge(state.viewer3DConfig, patch);
   }
   emit(RuntimeEvents.VIEWER3D_CONFIG_CHANGED, { source: 'state-mutation', reason });
 }

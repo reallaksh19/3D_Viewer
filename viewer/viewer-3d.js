@@ -13,6 +13,7 @@ import { state } from './core/state.js';
 import { THEME_PALETTES, THEME_SCENE_STYLES } from './viewer-3d-defaults.js?v=20260518-statusbar-theme-12';
 import { debugSupport } from './debug/support-debug.js';
 
+// Module-level axis; set from each instance at the start of render() to handle multi-instance use.
 let CURRENT_VERTICAL_AXIS = 'Z';
 
 function _verticalVector() {
@@ -160,8 +161,9 @@ function _supportKindFromText(text = '') {
     const t = String(text).toUpperCase();
     if (/\bCA100\b/.test(t)) return 'GUIDE';
     if (/\bCA150\b|\bCA250\b/.test(t)) return 'REST';
-    if (/(^|[^A-Z0-9])(RIGID\s+)?ANC(HOR)?([^A-Z0-9]|$)|\bFIX(ED)?\b/.test(t)) return 'ANCHOR';
+    // Check GUIDE keywords before the FIXED/ANCHOR pattern so "FIXED GUIDE" resolves to GUIDE.
     if (/\bGDE\b|\bGUI\b|\bGD\b|GUIDE|SLIDE|SLID/.test(t)) return 'GUIDE';
+    if (/(^|[^A-Z0-9])(RIGID\s+)?ANC(HOR)?([^A-Z0-9]|$)|\bFIX(ED)?\b/.test(t)) return 'ANCHOR';
     if (/\bRST\b|\bREST\b|\+Y\s*SUPPORT|\bY\s*SUPPORT\b|\+Y\b/.test(t)) return 'REST';
     if (/\bLINE\s*STOP\b|\bLINESTOP\b|\bLIMIT\b/.test(t)) return 'STOP';
     if (/\bSTOP\b/.test(t)) return 'STOP';
@@ -406,7 +408,8 @@ export class PcfViewer3D {
         this._overlaySmartScaleMultiplier = Number(this.viewerConfig?.overlay?.smartScale?.multiplier || 1);
         this._projectionMode = String(this.viewerConfig?.camera?.projection || 'orthographic').toLowerCase();
         this._palette = this._resolvePalette();
-        CURRENT_VERTICAL_AXIS = String(this.viewerConfig?.coordinateMap?.verticalAxis || 'Z').toUpperCase() === 'Y' ? 'Y' : 'Z';
+        this._verticalAxis = String(this.viewerConfig?.coordinateMap?.verticalAxis || 'Z').toUpperCase() === 'Y' ? 'Y' : 'Z';
+        CURRENT_VERTICAL_AXIS = this._verticalAxis;
         this._init();
     }
 
@@ -431,7 +434,9 @@ export class PcfViewer3D {
         this._orthoCamera = new THREE.OrthographicCamera(
             -frustum * aspect, frustum * aspect,
             frustum, -frustum,
-            Math.max(0.1, Math.abs(Number(this.viewerConfig?.camera?.near || 0.1))),
+            // Orthographic cameras require negative near to see geometry behind the camera plane.
+            // Do NOT apply Math.abs here — a configured near of -50000 must stay negative.
+            this.viewerConfig?.camera?.near != null ? Number(this.viewerConfig.camera.near) : -50000,
             Math.max(1000, Math.abs(Number(this.viewerConfig?.camera?.far || 1000000)))
         );
         const initialPosition = this.viewerConfig?.camera?.initialPosition || [5000, 5000, 5000];
@@ -486,8 +491,11 @@ export class PcfViewer3D {
         this.controls.enablePan = this.viewerConfig?.controls?.enablePan !== false;
         this.controls.enableZoom = this.viewerConfig?.controls?.enableZoom !== false;
         this.controls.enableRotate = this.viewerConfig?.controls?.enableRotate !== false;
-        if (this.viewerConfig?.controls?.invertX) this.controls.rotateSpeed *= -1;
-        if (this.viewerConfig?.controls?.invertY) this.controls.rotateSpeed *= -1;
+        // OrbitControls has a single rotateSpeed for both axes; XOR the flags so
+        // enabling both cancels correctly (same as no inversion).
+        const _invertX = !!this.viewerConfig?.controls?.invertX;
+        const _invertY = !!this.viewerConfig?.controls?.invertY;
+        if (_invertX !== _invertY) this.controls.rotateSpeed *= -1;
         this.setNavMode('select');
         // C3: Refresh clipping planes on every orbit/pan so geometry never disappears
         this.controls.addEventListener('change', () => {
@@ -535,6 +543,7 @@ export class PcfViewer3D {
         this._onResize = () => {
             const nw = this.container.clientWidth;
             const nh = this.container.clientHeight;
+            if (nh === 0) return;
             const nAspect = nw / nh;
             this._orthoCamera.left = -frustum * nAspect;
             this._orthoCamera.right = frustum * nAspect;
@@ -571,6 +580,10 @@ export class PcfViewer3D {
 
     /** @private Ã¢â‚¬â€ Build HTML ViewCube overlay in top-right */
     _buildViewCube() {
+        // AbortController lets dispose() remove all ViewCube listeners in one call.
+        this._viewCubeAC = new AbortController();
+        const { signal } = this._viewCubeAC;
+
         const size = Number(this.viewerConfig?.overlay?.viewCubeSize || 90);
         const posStyles = {
             'top-left': 'top:12px;left:12px;',
@@ -585,8 +598,8 @@ export class PcfViewer3D {
             perspective:220px;cursor:pointer;user-select:none;z-index:10;
             opacity:${this.viewerConfig?.overlay?.viewCubeOpacity ?? 0.85};transition:opacity 0.2s;
         `;
-        cube.addEventListener('mouseenter', () => { cube.style.opacity = '1'; });
-        cube.addEventListener('mouseleave', () => { cube.style.opacity = String(this.viewerConfig?.overlay?.viewCubeOpacity ?? 0.85); });
+        cube.addEventListener('mouseenter', () => { cube.style.opacity = '1'; }, { signal });
+        cube.addEventListener('mouseleave', () => { cube.style.opacity = String(this.viewerConfig?.overlay?.viewCubeOpacity ?? 0.85); }, { signal });
         const inner = document.createElement('div');
         inner.style.cssText = `
             width:100%;height:100%;position:relative;transform-style:preserve-3d;
@@ -614,9 +627,9 @@ export class PcfViewer3D {
                 transform:${f.rot};
                 backface-visibility:visible;
             `;
-            face.addEventListener('mouseenter', () => { face.style.background = `${f.bg}ff`; });
-            face.addEventListener('mouseleave', () => { face.style.background = `${f.bg}cc`; });
-            face.addEventListener('click', () => this._snapCamera(f.cam, f.up));
+            face.addEventListener('mouseenter', () => { face.style.background = `${f.bg}ff`; }, { signal });
+            face.addEventListener('mouseleave', () => { face.style.background = `${f.bg}cc`; }, { signal });
+            face.addEventListener('click', () => this._snapCamera(f.cam, f.up), { signal });
             inner.appendChild(face);
         }
         cube.appendChild(inner);
@@ -642,15 +655,15 @@ export class PcfViewer3D {
             corner.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.snapToPreset(cp.preset);
-            });
+            }, { signal });
             corner.addEventListener('mouseenter', () => {
                 corner.style.background = '#20314ecc';
                 corner.style.borderColor = '#ffffffcc';
-            });
+            }, { signal });
             corner.addEventListener('mouseleave', () => {
                 corner.style.background = '#101522dd';
                 corner.style.borderColor = '#ffffff77';
-            });
+            }, { signal });
             cube.appendChild(corner);
         }
         this._viewCubeInner = inner;
@@ -818,6 +831,9 @@ export class PcfViewer3D {
             this.container.removeEventListener('pointerdown', this._marqueeDown);
             this._marqueeDown = null;
         }
+        // Also clean up any in-progress drag listeners on window.
+        if (this._marqueeMove) { window.removeEventListener('pointermove', this._marqueeMove); this._marqueeMove = null; }
+        if (this._marqueeUp)   { window.removeEventListener('pointerup',   this._marqueeUp);   this._marqueeUp   = null; }
     }
 
     _startMarqueeZoom(e) {
@@ -1056,6 +1072,7 @@ export class PcfViewer3D {
     }
 
     snapToPreset(presetId = 'isoNE') {
+        CURRENT_VERTICAL_AXIS = this._verticalAxis;
         if (String(presetId).toLowerCase() === 'plan') {
             const up = CURRENT_VERTICAL_AXIS === 'Z' ? [0, 1, 0] : [0, 0, -1];
             this._snapCamera([0, 1, 0], up);
@@ -1535,6 +1552,8 @@ export class PcfViewer3D {
      * @param {object[]} components Ã¢â‚¬â€ from stitcher output
      */
     render(components) {
+        // Sync the module-level axis to this instance's config before any coordinate mapping.
+        CURRENT_VERTICAL_AXIS = this._verticalAxis;
         this._emitTrace('render-start', { components: Array.isArray(components) ? components.length : 0 });
 
         // Sync palette and scene styling dynamically
@@ -1546,7 +1565,10 @@ export class PcfViewer3D {
             this.scene.remove(this._componentGroup);
             this._componentGroup.traverse(obj => {
                 if (obj.geometry) obj.geometry.dispose();
-                if (obj.material) obj.material.dispose();
+                if (obj.material) {
+                    if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+                    else obj.material.dispose();
+                }
             });
         }
         if (this._sectionVisual) {
@@ -1563,6 +1585,9 @@ export class PcfViewer3D {
 
         if (this._legendLabelGroup) {
             this.scene.remove(this._legendLabelGroup);
+            this._legendLabelGroup.traverse(obj => {
+                if (obj.isSprite && obj.material?.map) obj.material.map.dispose();
+            });
             this._legendLabelGroup = null;
         }
 
@@ -2650,7 +2675,9 @@ export class PcfViewer3D {
     }
 
     _getThemeKey() {
-        return state.viewerSettings?.themePreset
+        // _runtimeThemeKey takes precedence so setTheme() works even when viewerConfig is frozen.
+        return this._runtimeThemeKey
+            || state.viewerSettings?.themePreset
             || this.viewerConfig?.scene?.themePreset
             || 'NavisDark';
     }
@@ -2718,10 +2745,8 @@ export class PcfViewer3D {
 
     setTheme(themeKey) {
         const next = String(themeKey || 'NavisDark');
-        this.viewerConfig.scene = {
-            ...(this.viewerConfig.scene || {}),
-            themePreset: next,
-        };
+        // Store on a mutable instance property instead of mutating the (possibly frozen) viewerConfig.
+        this._runtimeThemeKey = next;
 
         // Update scene-level styling immediately.
         this._palette = this._resolvePalette();
@@ -2886,7 +2911,7 @@ export class PcfViewer3D {
     }
 
     _applyUpVector() {
-        CURRENT_VERTICAL_AXIS = String(this.viewerConfig?.coordinateMap?.verticalAxis || 'Z').toUpperCase() === 'Y' ? 'Y' : 'Z';
+        CURRENT_VERTICAL_AXIS = this._verticalAxis;
         const upVec = _verticalVector();
         this.scene.up.copy(upVec);
         if (this._orthoCamera) {
@@ -2905,10 +2930,14 @@ export class PcfViewer3D {
     applyHeatmap(options = {}) {
         if (!this._componentGroup) return;
         const metric = String(options.metric || 'T1');
-        let bucketCount = Math.max(2, Number(options.bucketCount || 5));
         const palette = Array.isArray(options.palette) && options.palette.length
             ? options.palette
             : ['#0ea5e9', '#22c55e', '#eab308', '#f97316', '#ef4444'];
+        let bucketCount = Math.max(2, Number(options.bucketCount || 5));
+        if (bucketCount > palette.length) {
+            console.warn(`[PcfViewer3D] heatmap bucketCount (${bucketCount}) exceeds palette length (${palette.length}); clamping.`);
+            bucketCount = palette.length;
+        }
         const nullColor = String(options.nullColor || '#6b7280');
 
         const values = [];
@@ -2964,6 +2993,9 @@ export class PcfViewer3D {
         const cfg = this.viewerConfig || {};
         if (this._legendLabelGroup) {
             this.scene.remove(this._legendLabelGroup);
+            this._legendLabelGroup.traverse(obj => {
+                if (obj.isSprite && obj.material?.map) obj.material.map.dispose();
+            });
             this._legendLabelGroup = null;
         }
         if (cfg.disableAllSettings || cfg.legend?.canvasLabels?.enabled === false) return;
@@ -3022,12 +3054,15 @@ export class PcfViewer3D {
         if (!labels.size || maxLegendLabels <= 0) return;
         const sampledEntries = [];
         for (const [label, positions] of labels.entries()) {
-            const dedup = this._shuffleArray(positions).slice(0, maxPerLabel);
+            // Stable: take the first maxPerLabel positions (insertion order) for deterministic output.
+            const dedup = positions.slice(0, maxPerLabel);
             for (const p of dedup) {
                 sampledEntries.push({ label, pos: p });
             }
         }
-        const finalEntries = this._shuffleArray(sampledEntries).slice(0, maxLegendLabels);
+        // Sort by label for a stable, predictable legend order before capping.
+        sampledEntries.sort((a, b) => a.label < b.label ? -1 : a.label > b.label ? 1 : 0);
+        const finalEntries = sampledEntries.slice(0, maxLegendLabels);
         if (!finalEntries.length) return;
         this._legendLabelGroup = new THREE.Group();
         for (const entry of finalEntries) {
@@ -3270,6 +3305,10 @@ export class PcfViewer3D {
         return a;
     }
 
+    _escapeHtml(str) {
+        return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
     _renderHeatmapPanel() {
         const cfg = this.viewerConfig || {};
         if (cfg.disableAllSettings || cfg.heatmap?.canvasPanel?.enabled === false || !this._heatmapState) {
@@ -3321,7 +3360,7 @@ export class PcfViewer3D {
               <span style="font-variant-numeric:tabular-nums;">${label}</span>
             </div>`);
         });
-        this._heatmapPanelEl.innerHTML = `<div style="font-weight:700;margin-bottom:4px;">Heatmap (${metric})</div>${rows.join('')}`;
+        this._heatmapPanelEl.innerHTML = `<div style="font-weight:700;margin-bottom:4px;">Heatmap (${this._escapeHtml(metric)})</div>${rows.join('')}`;
     }
 
     /**
@@ -3357,6 +3396,10 @@ export class PcfViewer3D {
         this._overlayRaf = 0;
         window.removeEventListener('resize', this._onResize);
         if (this.controls) this.controls.dispose();
+        // Drop all ViewCube event listeners at once (M5).
+        if (this._viewCubeAC) { this._viewCubeAC.abort(); this._viewCubeAC = null; }
+        // Clean up any in-progress marquee window listeners (M6).
+        this._detachMarqueeHandlers();
         this._clearMeasureOverlay();
         if (this.renderer?.domElement && this._onPointerDown) {
             this.renderer.domElement.removeEventListener('pointerdown', this._onPointerDown);
