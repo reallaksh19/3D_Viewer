@@ -194,6 +194,10 @@ export class RvmViewer3D {
         // Store model diagonal for STP sphere sizing (computed before any STP geometry is added).
         const _box = new THREE.Box3().setFromObject(this.modelGroup);
         this._modelDiag = _box.isEmpty() ? 5000 : Math.max(_box.getSize(new THREE.Vector3()).length(), 1);
+        // Pre-compute bounding spheres once so the marquee loop can read cached values.
+        this.modelGroup.traverse(obj => {
+            if (obj.isMesh && obj.geometry) obj.geometry.computeBoundingSphere();
+        });
     }
 
     _onResize() {
@@ -316,7 +320,7 @@ export class RvmViewer3D {
                  return;
             }
         }
-        this.sectioning.setSectionMode(mode);
+        this.sectioning.setSectionMode(mode, this._upAxis || 'Y');
     }
 
 
@@ -429,7 +433,8 @@ export class RvmViewer3D {
                  if (!this._measureStart) {
                      this._measureStart = pt;
                      // Draw point
-                     const geo = new THREE.SphereGeometry(this.controls.target.distanceTo(this.camera.position)*0.01);
+                     // Use a model-relative radius so the sphere stays visible across zoom levels.
+                     const geo = new THREE.SphereGeometry(Math.max(1, (this._modelDiag || 5000) * 0.005));
                      const mat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
                      this._measurePointMesh = new THREE.Mesh(geo, mat);
                      this._measurePointMesh.position.copy(pt);
@@ -452,14 +457,8 @@ export class RvmViewer3D {
                      div.style.padding = '2px 4px';
                      div.style.borderRadius = '4px';
 
-                     let label;
-                     if (typeof CSS2DObject !== 'undefined') {
-                         label = new CSS2DObject(div);
-                     } else if (window.THREE && window.THREE.CSS2DObject) {
-                         label = new window.THREE.CSS2DObject(div);
-                     } else {
-                         label = new THREE.Object3D();
-                     }
+                     // CSS2DObject is always imported at the top of this file; no runtime fallback needed.
+                     const label = new CSS2DObject(div);
                      label.position.copy(mid);
                      this.scene.add(label);
 
@@ -523,7 +522,8 @@ export class RvmViewer3D {
 
             this.modelGroup.traverse(obj => {
                 if (obj.isMesh && obj.visible) {
-                    obj.geometry.computeBoundingSphere();
+                    // Bounding spheres are pre-computed at model load time; no recompute needed.
+                    if (!obj.geometry.boundingSphere) obj.geometry.computeBoundingSphere();
                     const center = obj.geometry.boundingSphere.center.clone();
                     center.applyMatrix4(obj.matrixWorld);
                     center.project(this.camera);
@@ -541,7 +541,7 @@ export class RvmViewer3D {
                     const selectedRenderIds = [];
                     this.modelGroup.traverse(obj => {
                         if (obj.isMesh && obj.visible) {
-                            obj.geometry.computeBoundingSphere();
+                            if (!obj.geometry.boundingSphere) obj.geometry.computeBoundingSphere();
                             const center = obj.geometry.boundingSphere.center.clone();
                             center.applyMatrix4(obj.matrixWorld);
                             center.project(this.camera);

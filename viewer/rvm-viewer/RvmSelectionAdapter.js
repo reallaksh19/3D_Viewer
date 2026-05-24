@@ -219,10 +219,10 @@ export class RvmSelectionAdapter {
 
                     for (let i = 0; i < materials.length; i++) {
                         const m = materials[i];
+                        // Only restore when we have a recorded original; don't clobber with CLEAR
+                        // for materials whose original emissive was never stored.
                         if (m.emissive && ogs[i] !== null) {
                             m.emissive.setHex(ogs[i]);
-                        } else if (m.emissive) {
-                            m.emissive.setHex(COLORS.CLEAR);
                         }
                     }
                 }

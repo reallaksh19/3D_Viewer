@@ -24,14 +24,15 @@ export class RvmSectioning {
         }
     }
 
-    setSectionMode(mode) {
+    setSectionMode(mode, upAxis = 'Y') {
         const normalized = mode?.toUpperCase() || 'OFF';
         this._sectionMode = normalized;
+        this._upAxis = upAxis;
 
         if (normalized === 'BOX') {
             this.buildBoxSection(this.modelGroup);
         } else if (normalized === 'PLANE_UP') {
-            this.buildPlaneUpSection(this.modelGroup);
+            this.buildPlaneUpSection(this.modelGroup, this._upAxis);
         } else {
             this.disableSection();
         }
@@ -73,18 +74,17 @@ export class RvmSectioning {
     }
 
 
-    buildPlaneUpSection(modelGroup) {
+    buildPlaneUpSection(modelGroup, upAxis = 'Y') {
         if (!modelGroup) return;
         const box = new THREE.Box3().setFromObject(modelGroup);
         if (box.isEmpty()) return;
         this._sectionBounds = box.clone();
 
         const centre = box.getCenter(new THREE.Vector3());
-        const cut = centre.y + this._offset;
-
-        // Plane normal facing downwards (so anything ABOVE is clipped)
-        // Adjust based on upAxis if needed, assuming Y-up for cut plane normal:
-        const normal = new THREE.Vector3(0, -1, 0);
+        // Use the correct axis component based on the model's up axis.
+        const isZUp = String(upAxis).toUpperCase() === 'Z';
+        const cut = (isZUp ? centre.z : centre.y) + this._offset;
+        const normal = isZUp ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(0, -1, 0);
         this._clipPlanes = [new THREE.Plane(normal, cut)];
 
         this._applyCurrentSectionClipping();
@@ -101,7 +101,7 @@ export class RvmSectioning {
     setSectionPlaneOffset(n) {
         this._offset = n;
         if (this._sectionMode === 'PLANE_UP') {
-            this.buildPlaneUpSection(this.modelGroup);
+            this.buildPlaneUpSection(this.modelGroup, this._upAxis || 'Y');
         }
     }
 

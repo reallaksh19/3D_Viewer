@@ -15,7 +15,7 @@ export class Stitcher {
     /** @private */
     _log(msg, type = 'INFO') {
         this.logs.push({
-            timestamp: new Date().toLocaleTimeString(),
+            timestamp: new Date().toISOString(),
             type,
             message: msg,
         });

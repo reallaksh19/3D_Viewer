@@ -38,6 +38,6 @@ export function dispatchViewerCommand(ctx, cmd) {
     case ViewerCommand.TOGGLE_PROJECTION:
       return ctx.viewer.toggleProjection?.();
     default:
-      throw new Error(`Unsupported viewer command: ${cmd.type}`);
+      console.warn(`[dispatchViewerCommand] Unsupported viewer command: ${cmd.type}`);
   }
 }

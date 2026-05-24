@@ -202,7 +202,7 @@ export const DEFAULT_VIEWER3D_CONFIG = {
     },
   },
   legend: {
-    enabled: true,
+    enabled: false, // Legend is retired from the active UI; normalizer also forces this off.
     position: 'panel',
     mode: 'none', // none|od|material|supportKind|heatmap
     showSupportSymbols: true,
