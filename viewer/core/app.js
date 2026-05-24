@@ -19,6 +19,9 @@ import { RvmStaticBundleLoader } from '../rvm/RvmStaticBundleLoader.js';
 import { RvmHelperBridge } from '../converters/rvm-helper-bridge.js';
 import { RvmGitHubActionsBridge } from '../converters/rvm-github-bridge.js';
 import { convertRevFileToAvevaHierarchy } from '../rvm/RevLocalLoader.js?v=20260508-control-counts';
+import { showToast } from './toast.js';
+import { showLoading, hideLoading } from './loading.js';
+import { requestPat } from './pat-modal.js';
 
 const TAB_CONFIG_URL = './opt/tab-visibility.json';
 
@@ -69,6 +72,13 @@ export async function init() {
 }
 
 function _bindGlobalEvents() {
+  // Show loading overlay whenever a file begins processing, hide after render-complete.
+  on(RuntimeEvents.FILE_LOADED, () => showLoading('Parsing file…'));
+  on('parse-complete',          () => showLoading('Building model…'));
+  on('render-complete',         () => hideLoading());
+  // Also hide on error so the overlay doesn't get stuck.
+  on('render-error',            () => hideLoading());
+
   on(RuntimeEvents.FILE_LOADED, async (payload) => {
     if (payload.source === 'rvm-tab') {
       try {
@@ -117,8 +127,8 @@ function _bindGlobalEvents() {
             activeBridge = ghBridge;
             console.log("Using serverless RvmGitHubActionsBridge");
         } else {
-            // Prompt the user for a PAT to enable serverless mode if everything is dead
-            const pat = prompt("No local conversion server found. Enter a GitHub Personal Access Token (PAT) to enable remote serverless conversion via GitHub Actions:");
+            // Show a proper password-masked modal instead of browser prompt()
+            const pat = await requestPat();
             if (pat) {
                 ghBridge.setPat(pat);
                 activeBridge = ghBridge;
@@ -137,7 +147,7 @@ function _bindGlobalEvents() {
         await loadRvmSource({ kind: 'raw-rvm', file: payload.payload, sidecars: payload.sidecars }, ctx);
       } catch (err) {
         console.error('RVM Load Pipeline failed:', err);
-        alert(err.message);
+        showToast(err.message || 'RVM load failed.', 'error');
       }
     }
   });

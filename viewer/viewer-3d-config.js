@@ -137,5 +137,6 @@ export function getResolvedViewer3DConfig(config) {
 }
 
 export function updateViewer3DConfig(currentConfig, patch) {
-  return deepMerge(currentConfig || DEFAULT_VIEWER3D_CONFIG, patch || {});
+  // Run normalizeCommon so callers always receive a validated, clamped config.
+  return normalizeCommon(deepMerge(currentConfig || DEFAULT_VIEWER3D_CONFIG, patch || {}));
 }

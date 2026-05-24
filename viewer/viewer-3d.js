@@ -627,9 +627,13 @@ export class PcfViewer3D {
                 transform:${f.rot};
                 backface-visibility:visible;
             `;
+            face.setAttribute('role', 'button');
+            face.setAttribute('aria-label', `View from ${f.label}`);
+            face.setAttribute('tabindex', '0');
             face.addEventListener('mouseenter', () => { face.style.background = `${f.bg}ff`; }, { signal });
             face.addEventListener('mouseleave', () => { face.style.background = `${f.bg}cc`; }, { signal });
             face.addEventListener('click', () => this._snapCamera(f.cam, f.up), { signal });
+            face.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') this._snapCamera(f.cam, f.up); }, { signal });
             inner.appendChild(face);
         }
         cube.appendChild(inner);
@@ -644,6 +648,7 @@ export class PcfViewer3D {
             corner.type = 'button';
             corner.id = cp.id;
             corner.title = cp.title;
+            corner.setAttribute('aria-label', cp.title);
             corner.textContent = cp.label;
             corner.style.cssText = `
                 position:absolute;${cp.style}width:28px;height:28px;
@@ -1608,6 +1613,11 @@ export class PcfViewer3D {
         }
 
         this.scene.add(this._componentGroup);
+        // Snap grid to the bottom of the model so it sits at the model's base, not a fixed y=-500.
+        if (this._gridHelper && !this._componentGroup.children.length === false) {
+            const modelBox = new THREE.Box3().setFromObject(this._componentGroup);
+            if (!modelBox.isEmpty()) this._gridHelper.position.y = modelBox.min.y;
+        }
         this._applyCurrentSectionClipping();
         if (this._onSelectionChange) this._onSelectionChange(null);
         // Auto-fit camera before placing overlay labels so screen-space projection is accurate.

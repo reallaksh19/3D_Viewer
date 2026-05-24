@@ -307,6 +307,10 @@ export function renderViewer3D(container) {
                 </div>
               ` : ''}
               <button class="btn-secondary" id="viewer3d-open-config">Config</button>
+              <button class="btn-icon viewer3d-icon-btn viewer3d-mini-icon-btn" id="viewer3d-fullscreen-btn"
+                title="Toggle fullscreen" aria-label="Toggle fullscreen" type="button">
+                <span class="viewer3d-icon-glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg></span>
+              </button>
               <button
                 class="ribbon-toggle-btn ${_ribbonCollapsed ? 'is-collapsed' : ''}"
                 id="viewer3d-ribbon-toggle"
@@ -637,6 +641,8 @@ export function renderViewer3D(container) {
     onTrace: (evt) => {
       addTraceEvent(evt);
       const traceType = String(evt?.type || '');
+      // Propagate render-complete to the global event bus so the loading overlay can hide.
+      if (traceType === 'render-complete') emit('render-complete', evt.payload);
       // When marquee zoom finishes, sync the active button state.
       if (traceType === 'marquee-zoom-done') {
         _syncToolbarToNavMode(container);
@@ -756,6 +762,30 @@ function _wireViewerControls(container, cfg, actions) {
   };
   setRibbonCollapsed(_ribbonCollapsed);
   ribbonToggle?.addEventListener('click', () => setRibbonCollapsed(!_ribbonCollapsed));
+
+  // Fullscreen toggle — uses the viewer canvas wrap as the fullscreen root.
+  const fsBtn = container.querySelector('#viewer3d-fullscreen-btn');
+  const fsTarget = container.querySelector('#viewer3d-canvas-wrap') || container;
+  const _updateFsIcon = () => {
+    const isFs = !!document.fullscreenElement;
+    const svg = isFs
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>';
+    const label = isFs ? 'Exit fullscreen' : 'Toggle fullscreen';
+    if (fsBtn) {
+      fsBtn.querySelector('.viewer3d-icon-glyph').innerHTML = svg;
+      fsBtn.setAttribute('aria-label', label);
+      fsBtn.setAttribute('title', label);
+    }
+  };
+  fsBtn?.addEventListener('click', () => {
+    if (!document.fullscreenElement) {
+      fsTarget.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.();
+    }
+  });
+  document.addEventListener('fullscreenchange', _updateFsIcon);
 
   const setSettingsCollapsed = (collapsed) => {
     _leftSettingsCollapsed = !!collapsed;
