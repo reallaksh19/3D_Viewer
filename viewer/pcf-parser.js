@@ -16,8 +16,11 @@ const COMP_TYPES = new Set([
     'MESSAGE-CIRCLE', // Node number annotation — CO-ORDS + TEXT + UNDIMENSIONED
 ]);
 
-let _idCounter = 0;
-const _uid = () => `comp-${++_idCounter}-${Date.now().toString(36)}`;
+// _parseSession increments each call; _seqInSession resets per call.
+// Combined they guarantee unique IDs across multiple parsePcf() calls for merged models.
+let _parseSession = 0;
+let _seqInSession = 0;
+const _uid = () => `comp-${_parseSession}-${++_seqInSession}-${Date.now().toString(36)}`;
 
 /**
  * Parse raw PCF text into an array of component objects.
@@ -26,7 +29,8 @@ const _uid = () => `comp-${++_idCounter}-${Date.now().toString(36)}`;
  * @returns {object[]}
  */
 export const parsePcf = (rawText) => {
-    _idCounter = 0;
+    _parseSession++;  // Never reset — ensures cross-call ID uniqueness
+    _seqInSession = 0;
     const components = [];
     const lines = rawText.split('\n').map(l => l.trim());
 
